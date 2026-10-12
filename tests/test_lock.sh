@@ -22,4 +22,12 @@ printf 'session=sessZ\nheartbeat=garbage\n' > "$("$DF" run-dir "$id")/lock"
 assert_eq "stale" "$("$DF" lock "$id" check)" "corrupt heartbeat is stale"
 assert_ok "stale corrupt lock can be taken over" "$DF" lock "$id" acquire sessC
 
+# Live run finding: runs ended at stage=done but status=active. finish makes the end state atomic and releases the lock.
+"$DF" lock "$id" acquire sessF
+"$DF" finish "$id" sessF
+assert_eq "done" "$("$DF" conf-get "$("$DF" run-dir "$id")/run.conf" status)" "finish sets status done"
+assert_eq "done" "$("$DF" conf-get "$("$DF" run-dir "$id")/run.conf" stage)" "finish sets stage done"
+assert_eq "none" "$("$DF" lock "$id" check)" "finish releases the lock"
+assert_ok "finished run still validates" "$DF" validate "$id"
+
 finish

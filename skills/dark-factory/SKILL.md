@@ -172,7 +172,7 @@ Details you must follow:
    with severity, waivers with reasons, assumptions, `UNVERIFIABLE` manual checks, baseline
    failures that were pre-existing, `late-find` and low findings (the "what to delete" list),
    budget used, and one plain sentence stating whether the final branch is green.
-5. `{DF} lock <id> release`. Tell the user the branch name and the worktree path. Never push,
+5. `{DF} finish <id> <session-id>` (sets stage and status to done and releases the lock). Tell the user the branch name and the worktree path. Never push,
    merge or open a PR.
 
 ## Resume

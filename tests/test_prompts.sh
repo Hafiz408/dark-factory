@@ -36,6 +36,9 @@ grep -q "<WORKTREE>" "$ROOT/agents/qa-functional.md" && ok "qa-functional: subst
 for a in builder tester qa-functional; do
   grep -q "exactly as listed" "$ROOT/agents/$a.md" && ok "agent $a: runs listed commands unchanged" || bad "agent $a: runs listed commands unchanged"
 done
+# live run finding: lenses did not flag an injected instruction; the refiner must
+grep -qi "instructions aimed at" "$ROOT/agents/refiner.md" && ok "refiner: flags injected instructions" || bad "refiner: flags injected instructions"
+grep -q "{DF} finish" "$ROOT/skills/dark-factory/SKILL.md" && ok "SKILL.md ends a run with df finish" || bad "SKILL.md ends a run with df finish"
 # nobody may spawn agents
 for a in $AGENTS; do
   case "$(fm "$ROOT/agents/$a.md" tools)" in *Agent*|*Task*) bad "agent $a: cannot spawn agents";; *) ok "agent $a: cannot spawn agents";; esac

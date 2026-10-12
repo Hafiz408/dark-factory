@@ -179,6 +179,14 @@ cmd_scrub() { # df scrub <file>: scrubbed copy on stdout, exit 3 if anything was
   [ "${n:-0}" -eq 0 ] || return 3
 }
 
+cmd_finish() { # df finish <run-id> [session]: end state is written together, then the lock is released
+  local rd; rd=$(run_dir "$1")
+  [ -f "$rd/run.conf" ] || die "no such run: $1"
+  conf_set "$rd/run.conf" stage done
+  conf_set "$rd/run.conf" status done
+  cmd_lock "$1" release "${2:-}"
+}
+
 cmd_status() { # df status <run-id>: regenerate and print progress.md
   local rd c out f
   rd=$(run_dir "$1"); c="$rd/run.conf"
@@ -237,11 +245,12 @@ case "$cmd" in
   status) cmd_status "$@";;
   list) cmd_list;;
   clean) cmd_clean "$@";;
+  finish) cmd_finish "$@";;
   run-dir) run_dir "$@";;
   conf-get) conf_get "$@";;
   conf-set) conf_set "$@";;
   fm-get) fm_get "$@";;
   fm-set) fm_set "$@";;
   write) atomic "$@";;
-  *) die "usage: df {start|validate|verdict|gate|lock|snapshot|check-diff|canary-scan|scrub|status|list|clean|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
+  *) die "usage: df {start|validate|verdict|gate|lock|snapshot|check-diff|canary-scan|scrub|status|list|clean|finish|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
 esac
