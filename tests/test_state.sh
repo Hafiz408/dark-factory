@@ -95,4 +95,12 @@ assert_eq "PASS" "$("$DF" fm-get "$T/crlf.md" status)" "fm-get strips CR"
 printf 'track=bugfix\r\n' > "$T/crlf.conf"
 assert_eq "bugfix" "$("$DF" conf-get "$T/crlf.conf" track)" "conf-get strips CR"
 
+# Live run finding: an orchestrator wrote status=running into run.conf. conf-set must refuse bad enums.
+printf 'status=active\nstage=intake\n' > "$T/enum.conf"
+assert_fail "conf-set refuses an invalid status" "$DF" conf-set "$T/enum.conf" status running
+assert_fail "conf-set refuses an invalid stage" "$DF" conf-set "$T/enum.conf" stage nonsense
+assert_ok "conf-set accepts a valid status" "$DF" conf-set "$T/enum.conf" status waiting_permission
+assert_eq "waiting_permission" "$("$DF" conf-get "$T/enum.conf" status)" "valid status stored"
+assert_eq "intake" "$("$DF" conf-get "$T/enum.conf" stage)" "refused write left stage unchanged"
+
 finish

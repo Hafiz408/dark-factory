@@ -33,7 +33,7 @@ assert_ok "git init plus initial commit works" git -C "$E" rev-parse HEAD
 assert_ok "worktree created for empty dir run" test -d "$(cd "$E" && "$DF" conf-get "$("$DF" run-dir "$id2")/run.conf" worktree)"
 
 # validation rejects corruption
-cd "$R" && "$DF" conf-set "$rd/run.conf" stage bogus
+cd "$R" && sed -i.bak 's/^stage=.*/stage=bogus/' "$rd/run.conf" && rm -f "$rd/run.conf.bak"
 assert_fail "validate rejects bad stage" "$DF" validate "$id"
 "$DF" conf-set "$rd/run.conf" stage intake
 printf -- '---\nid: 01\nstatus: weird\nattempts: 0\nbase_sha: null\n---\n' > "$rd/chunks/01.md"

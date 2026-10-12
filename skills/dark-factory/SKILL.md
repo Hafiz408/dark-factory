@@ -39,7 +39,9 @@ evaluate it and will hold the command for approval, which stalls an unattended r
 3. Run `DF_ALLOW_INIT=1 {DF} start <scrubbed-file>` only if the directory is empty and the
    request looks like a new application; otherwise run it without the variable. If it refuses,
    relay the reason in one line and stop.
-4. `{DF} lock <id> acquire`. Refresh the lock after every verdict.
+4. Pick a session id once for this run (for example `s` followed by the current epoch time) and
+   pass it explicitly to every lock command: `{DF} lock <id> acquire <session-id>`. Refresh with
+   the same id after every verdict. Do not rely on the default, it changes per command.
 5. Report the run id, branch and worktree path to the user, and that the working tree has
    uncommitted files that will not be included if `dirty.txt` is non-empty.
 

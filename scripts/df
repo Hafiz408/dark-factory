@@ -14,7 +14,16 @@ atomic() { local t="$1.tmp.$$"; cat > "$t" && mv "$t" "$1"; }
 
 # key=value files (run.conf)
 conf_get() { tr -d '\r' < "$1" | sed -n "s/^$2=//p" | head -1; }
-conf_set() { { grep -v "^$2=" "$1" 2>/dev/null || true; echo "$2=$3"; } | atomic "$1"; }
+conf_set() {
+  case "$2=$3" in
+    status=active|status=waiting_permission|status=paused|status=done|status=aborted) ;;
+    status=*) die "conf-set: invalid status '$3'";;
+    stage=intake|stage=route|stage=refine|stage=plan|stage=preflight|stage=signoff|stage=slice|stage=loop|stage=integrate|stage=done) ;;
+    stage=*) die "conf-set: invalid stage '$3'";;
+    track=unrouted|track=bugfix|track=feature|track=build) ;;
+    track=*) die "conf-set: invalid track '$3'";;
+  esac
+  { grep -v "^$2=" "$1" 2>/dev/null || true; echo "$2=$3"; } | atomic "$1"; }
 
 # YAML-ish frontmatter (chunks/NN.md): first block between two --- lines
 fm_get() { tr -d '\r' < "$1" | awk '/^---$/{n++; next} n==1' | sed -n "s/^$2: *//p" | head -1; }
