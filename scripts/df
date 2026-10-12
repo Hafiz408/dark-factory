@@ -184,6 +184,20 @@ cmd_srchash() { # df srchash <worktree> <base_sha>: hash of every non-test, non-
     done | sha )
 }
 
+cmd_commit() { # df commit <worktree> <message>: stage everything except tool artefacts, then commit
+  ( cd "$1" || exit 1
+    git -c core.quotePath=false add -A
+    git -c core.quotePath=false diff --cached --name-only | grep -E "$ARTEFACT_RE" | while IFS= read -r p; do
+      git rm -q --cached -- "$p"
+    done || true
+    git diff --cached --quiet && { echo "df: nothing to commit" >&2; exit 1; }
+    if [ -z "$(git config user.email)" ]; then
+      git -c user.name=dark-factory -c user.email=df@localhost commit -q -m "$2"
+    else
+      git commit -q -m "$2"
+    fi )
+}
+
 cmd_canary_scan() { # df canary-scan <scenarios-dir> <output-file>: finding on stdout if a canary leaked
   local tok
   grep -rhE '^canary: *DFC-[A-Za-z0-9]+' "$1" 2>/dev/null | sed 's/^canary: *//' | while read -r tok; do
@@ -261,6 +275,7 @@ case "$cmd" in
   check-diff) cmd_check_diff "$@";;
   canary-scan) cmd_canary_scan "$@";;
   srchash) cmd_srchash "$@";;
+  commit) cmd_commit "$@";;
   scrub) cmd_scrub "$@";;
   status) cmd_status "$@";;
   list) cmd_list;;
@@ -272,5 +287,5 @@ case "$cmd" in
   fm-get) fm_get "$@";;
   fm-set) fm_set "$@";;
   write) atomic "$@";;
-  *) die "usage: df {start|validate|verdict|gate|lock|snapshot|check-diff|canary-scan|srchash|scrub|status|list|clean|finish|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
+  *) die "usage: df {start|validate|verdict|gate|lock|snapshot|check-diff|canary-scan|srchash|commit|scrub|status|list|clean|finish|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
 esac

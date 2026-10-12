@@ -37,6 +37,14 @@ Each run was executed once. One pass proves the path exists, not that it is reli
 | Shell variables in commands force an approval | spike S4a | Literal absolute paths in every command |
 | Fixture bugs: `ls` with two globs, stale chunk path | runs 4, 7 | Fixed in the fixtures |
 
+## Regression run after the review fixes
+
+The bugfix fixture was run again on the fixed plugin: 2 chunks PASS on attempt 1, `expect.sh`
+0, run ended `done/done`, `srchash stable` appears in the log, and a missing verdict line was
+retried once as an infra failure. It also showed `__pycache__` being committed into chunk 01
+(the commit step used `git add -A`). `df commit` now stages everything except tool artefacts.
+That last fix is covered by unit tests and was **not** re-run live.
+
 ## Not verified
 
 - Context-window exhaustion over many chunks. The runs had 1 to 2 chunks.

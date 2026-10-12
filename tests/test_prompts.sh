@@ -45,6 +45,7 @@ bare=$(grep -E '\{DF\} lock <id> (acquire|refresh|release)' "$SK" | grep -vc '<s
 assert_eq "0" "$bare" "SKILL.md passes <session-id> to every lock command"
 grep -q "srchash" "$SK" && ok "SKILL.md checks the source hash around the tester" || bad "SKILL.md checks the source hash around the tester"
 grep -q "git apply" "$ROOT/agents/tester.md" && grep -qi "fails" "$ROOT/agents/tester.md" && ok "tester: has a failure path for the revert dance" || bad "tester: has a failure path for the revert dance"
+grep -q "{DF} commit" "$ROOT/skills/dark-factory/SKILL.md" && ok "SKILL.md commits through df commit" || bad "SKILL.md commits through df commit"
 # nobody may spawn agents
 for a in $AGENTS; do
   case "$(fm "$ROOT/agents/$a.md" tools)" in *Agent*|*Task*) bad "agent $a: cannot spawn agents";; *) ok "agent $a: cannot spawn agents";; esac

@@ -126,7 +126,7 @@ for attempt in 1..3:
     in ONE message spawn qa-functional + reviewer(quality) + reviewer(security) + reviewer(impact)
     merge findings, apply the severity gate and precedence
     if blocking: write ONE merged note (symptoms only), reset, continue
-    git -C {WT} add -A && git -C {WT} commit -m "df(chunk NN): title"
+    {DF} commit {WT} "df(chunk NN): title"       # stages everything except tool artefacts
     status = PASS; break
 else BLOCKED
 ```

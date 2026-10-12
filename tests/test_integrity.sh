@@ -128,4 +128,13 @@ git checkout -q src/a.py
 [ "$h1" != "$("$DF" srchash "$R" "$BASE2")" ] && ok "srchash changes when source is reverted" || bad "srchash changes when source is reverted"
 rm -f tests/test_extra.py
 
+# Regression run finding: git add -A committed __pycache__ into a chunk
+git reset -q --hard; git clean -fdq
+mkdir -p src/__pycache__ ; echo b > src/__pycache__/m.cpython-314.pyc; echo "def n(): pass" > src/new.py
+"$DF" commit "$R" "df(chunk 07): add n"
+assert_contains "src/new.py" "$(git ls-files)" "commit stages real changes"
+case "$(git ls-files)" in *__pycache__*|*.pyc*) bad "commit leaves artefacts out";; *) ok "commit leaves artefacts out";; esac
+assert_contains "df(chunk 07)" "$(git log -1 --format=%s)" "commit message used"
+assert_fail "commit with nothing to commit is an error, not an empty commit" "$DF" commit "$R" "df(chunk 08): nothing"
+
 finish
