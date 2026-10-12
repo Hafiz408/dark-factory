@@ -54,8 +54,13 @@ for w in "never push" "Never push" ; do :; done
 grep -qi "never push" "$S" && ok "SKILL.md: no push" || bad "SKILL.md: no push"
 grep -q "last time you ask" "$S" && ok "SKILL.md: single gate" || bad "SKILL.md: single gate"
 grep -q "run.conf" "$S" && ok "SKILL.md: uses run.conf" || bad "SKILL.md: uses run.conf"
+# Spike S4a: shell variables in a Bash command force an approval prompt, so SKILL.md uses
+# {DF} placeholders that the orchestrator substitutes with a literal absolute path.
+grep -q '\$DF\|\$RD\|\$WT\|\$PLUGIN' "$S" && bad "SKILL.md uses no shell variables for paths" || ok "SKILL.md uses no shell variables for paths"
+grep -q 'needs approval' "$S" && grep -q "haven't granted it yet" "$S" && ok "SKILL.md detects permission denials (spike S3)" || bad "SKILL.md detects permission denials (spike S3)"
+grep -q 'Base directory for this skill' "$S" && ok "SKILL.md derives plugin root from skill base directory (spike S4a)" || bad "SKILL.md derives plugin root from skill base directory (spike S4a)"
 # every df subcommand SKILL.md calls must exist in scripts/df
-for sub in $(grep -o '\$DF [a-z-]*' "$S" | awk '{print $2}' | sort -u); do
+for sub in $(grep -o '{DF} [a-z-]*' "$S" | awk '{print $2}' | sort -u); do
   grep -q "^  $sub)" "$ROOT/scripts/df" && ok "df subcommand '$sub' exists" || bad "df subcommand '$sub' exists"
 done
 python3 -c "import json,sys; json.load(open('$ROOT/hooks/hooks.json')); json.load(open('$ROOT/.claude-plugin/plugin.json'))" \
