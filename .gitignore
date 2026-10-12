@@ -1,0 +1,9 @@
+# Claude / AI tooling (local only)
+.planning/
+.superpowers/
+docs/superpowers/
+.claude/
+memory/
+
+# Dark Factory run state
+.dark-factory/
