@@ -48,3 +48,18 @@ Each run was executed once. One pass proves the path exists, not that it is reli
   (the hook blocked `rm -r` once during run 1, which is one observation).
 - Security scanning with a real scanner: runs reported `unscanned`.
 - Windows, and any language other than Python.
+
+## Independent whole-branch review
+
+A fresh reviewer (most capable model, no authorship) read the full 14-commit diff, ran the
+suite and probed the helper. It found 2 Critical and 9 Important issues, all confirmed and fixed
+test-first in one pass (commit `10b8363`). Highlights: a renamed-and-weakened test escaped the
+integrity check; a capitalised `severity: Medium` read as non-blocking; the guard missed
+`git -C <dir> push`; a stale lock armed the guard forever; the lock TTL was shorter than a long
+role run; resume acquired the lock with a session id that changes per command.
+
+Two of my own new tests were initially vacuous (a file too small to be detected as a rename,
+and a variable read before it was set). Both were caught only because each fix test was
+required to fail first.
+
+Eight Minor findings are deferred and listed in the plan ledger. They are not claimed fixed.
