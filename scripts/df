@@ -1,0 +1,232 @@
+#!/usr/bin/env bash
+# df: deterministic helpers for Dark Factory. Judgment lives in prompts; invariants live here.
+# Bash 3.2 compatible (macOS). No dependencies beyond git, awk, sed, grep, shasum or sha1sum.
+set -eu
+
+die() { echo "df: $*" >&2; exit 1; }
+sha() { if command -v shasum >/dev/null 2>&1; then shasum | cut -d' ' -f1; else sha1sum | cut -d' ' -f1; fi; }
+common_dir() { (cd "$(git rev-parse --git-common-dir)" && pwd); }
+run_dir() { echo "$(common_dir)/df/$1"; }
+atomic() { local t="$1.tmp.$$"; cat > "$t" && mv "$t" "$1"; }
+
+# key=value files (run.conf)
+conf_get() { tr -d '\r' < "$1" | sed -n "s/^$2=//p" | head -1; }
+conf_set() { { grep -v "^$2=" "$1" 2>/dev/null || true; echo "$2=$3"; } | atomic "$1"; }
+
+# YAML-ish frontmatter (chunks/NN.md): first block between two --- lines
+fm_get() { tr -d '\r' < "$1" | awk '/^---$/{n++; next} n==1' | sed -n "s/^$2: *//p" | head -1; }
+fm_set() { awk -v k="$2" -v v="$3" '/^---$/{n++} n==1 && index($0, k ":")==1 {print k ": " v; next} {print}' "$1" | atomic "$1"; }
+
+finding() { printf -- '- severity: %s\n  source: %s\n  where: %s\n  what: %s\n' "$1" "$2" "$3" "$4"; }
+TEST_RE='(^|/)(tests?|spec|__tests__)/|(_test|\.test|\.spec)\.[A-Za-z]+$|(^|/)test_[^/]*$'
+SECRET_RE='AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|([Pp]assword|[Pp]asswd|PASSWORD|[Ss]ecret|SECRET|[Tt]oken|TOKEN|[Aa]pi[_-]?[Kk]ey|API[_-]?KEY)[ ]*[=:][ ]*[^ ]+'
+
+cmd_start() { # df start <input-file>   (DF_ALLOW_INIT=1 permits git init, build track only)
+  local input=$1 top id wt rd base
+  if ! git rev-parse --git-dir >/dev/null 2>&1; then
+    [ "${DF_ALLOW_INIT:-}" = 1 ] || die "not a git repo (DF_ALLOW_INIT=1 allows git init for the build track)"
+    git init -q
+  fi
+  git rev-parse HEAD >/dev/null 2>&1 ||
+    git -c user.name=dark-factory -c user.email=df@localhost commit -q --allow-empty -m "df: initial commit"
+  top=$(git rev-parse --show-toplevel)
+  id="r$(date +%y%m%d-%H%M%S)-$$"
+  wt="$(dirname "$top")/$(basename "$top")-df-$id"
+  base=$(git rev-parse HEAD)
+  git worktree add -q -b "df/$id" "$wt"
+  rd=$(run_dir "$id")
+  mkdir -p "$rd/chunks" "$rd/scenarios" "$rd/panel"
+  git status --porcelain > "$rd/dirty.txt"
+  cp "$input" "$rd/input.md"
+  { echo "track=unrouted"; echo "worktree=$wt"; echo "branch=df/$id"; echo "root_base_sha=$base"
+    echo "stage=intake"; echo "status=active"
+    echo "started=$(date +%s)"; echo "budget_seconds=${DF_BUDGET_SECONDS:-14400}"; echo "max_attempts=3"; } | atomic "$rd/run.conf"
+  echo "$id"
+}
+
+cmd_validate() { # df validate <run-id>
+  local rd c f b
+  rd=$(run_dir "$1"); c="$rd/run.conf"
+  [ -f "$c" ] || die "missing $c"
+  for k in track worktree branch root_base_sha stage status; do
+    [ -n "$(conf_get "$c" $k)" ] || die "$c: missing $k"
+  done
+  case "$(conf_get "$c" track)" in unrouted|bugfix|feature|build) ;; *) die "$c: bad track";; esac
+  case "$(conf_get "$c" stage)" in intake|route|refine|plan|preflight|signoff|slice|loop|integrate|done) ;; *) die "$c: bad stage";; esac
+  case "$(conf_get "$c" status)" in active|waiting_permission|paused|done|aborted) ;; *) die "$c: bad status";; esac
+  git cat-file -e "$(conf_get "$c" root_base_sha)^{commit}" 2>/dev/null || die "$c: root_base_sha not found"
+  for f in "$rd"/chunks/*.md; do
+    [ -e "$f" ] || continue
+    case "$(fm_get "$f" status)" in pending|running|PASS|BLOCKED|SKIPPED) ;; *) die "$f: bad status";; esac
+    case "$(fm_get "$f" attempts)" in ''|*[!0-9]*) die "$f: attempts is not an integer";; esac
+    b=$(fm_get "$f" base_sha)
+    if [ -n "$b" ] && [ "$b" != null ]; then
+      git cat-file -e "$b^{commit}" 2>/dev/null || die "$f: base_sha not found"
+    fi
+  done
+}
+
+cmd_verdict() { # df verdict <role-output-file>: prints the verdict word, exit 1 if invalid
+  local last
+  last=$(grep -v '^[[:space:]]*$' "$1" | tail -1)
+  echo "$last" | grep -Eq '^VERDICT: (PASS|FAIL|NEEDS_DECISION|BLOCKED|TOO_BIG|SCENARIO_INVALID)( - .*)?$' || return 1
+  echo "$last" | sed -E 's/^VERDICT: ([A-Z_]+).*/\1/'
+}
+
+cmd_gate() { # df gate <findings-file>: prints "<blocking> <total>", exit 1 if blocking > 0
+  local out
+  out=$(awk '
+    function flush() {
+      if (sev != "") {
+        t++
+        if ((sev=="medium"||sev=="high"||sev=="critical") && tags !~ /pre-existing/ && !(sev=="medium" && tags ~ /late-find/)) b++
+      }
+      sev=""; tags=""
+    }
+    /^- severity:/ { flush(); sev=$3 }
+    /^[ \t]+tags:/ { tags=$0 }
+    END { flush(); printf "%d %d\n", b+0, t+0 }' "$1")
+  echo "$out"
+  [ "${out%% *}" -eq 0 ]
+}
+
+cmd_lock() { # df lock <run-id> acquire|refresh|release|check [session]
+  local rd lf act sess now cur hb ttl
+  rd=$(run_dir "$1"); act=$2; sess=${3:-${DF_SESSION:-$PPID}}; lf="$rd/lock"; now=$(date +%s); ttl=${DF_LOCK_TTL:-900}
+  case "$act" in
+    acquire|refresh)
+      if [ -f "$lf" ]; then
+        cur=$(sed -n 's/^session=//p' "$lf"); hb=$(sed -n 's/^heartbeat=//p' "$lf")
+        case "$hb" in ''|*[!0-9]*) hb=0;; esac
+        if [ "$cur" != "$sess" ] && [ $((now - hb)) -lt "$ttl" ]; then
+          echo "df: run is live (session $cur)" >&2; exit 2
+        fi
+      fi
+      printf 'session=%s\nheartbeat=%s\n' "$sess" "$now" | atomic "$lf" ;;
+    release) rm -f "$lf" ;;
+    check)
+      [ -f "$lf" ] || { echo none; return 0; }
+      hb=$(sed -n 's/^heartbeat=//p' "$lf")
+      case "$hb" in ''|*[!0-9]*) hb=0;; esac
+      if [ $((now - hb)) -lt "$ttl" ]; then echo live; else echo stale; fi ;;
+    *) die "lock: unknown action $act" ;;
+  esac
+}
+
+cmd_snapshot() { # df snapshot <worktree>: hash of everything a read-only role must not change
+  ( cd "$1" && {
+      git status --porcelain
+      git diff HEAD
+      git ls-files -o --exclude-standard | while IFS= read -r p; do printf '%s ' "$p"; sha < "$p"; done
+    } | sha )
+}
+
+cmd_check_diff() { # df check-diff <worktree> <base_sha> <chunk.md>: findings on stdout
+  set -f
+  local wt=$1 base=$2 ch=$3 files scope allow p g hit st rest ok a
+  files=$( cd "$wt" && { git diff --name-only "$base"; git ls-files -o --exclude-standard; } | sort -u )
+  if [ -z "$files" ]; then finding medium integrity "-" "empty diff for chunk"; return 0; fi
+  scope=$(fm_get "$ch" scope | tr -d '[]' | tr ',' ' ')
+  allow=$(fm_get "$ch" touches_tests | tr -d '[]' | tr ',' ' ')
+  if [ -z "$scope" ]; then
+    finding medium integrity "$ch" "chunk declares no scope, so scope cannot be enforced"
+  else
+    while IFS= read -r p; do
+      hit=0
+      for g in $scope; do
+        g=$(echo "$g" | sed 's/\*\*/*/g')
+        case "$p" in $g) hit=1;; esac
+      done
+      [ $hit -eq 1 ] || finding high integrity "$p" "changed outside chunk scope"
+    done <<EOF
+$files
+EOF
+  fi
+  ( cd "$wt" && git -c core.quotePath=false diff --name-status "$base" ) | while IFS="$(printf '\t')" read -r st p rest; do
+    case "$st" in M|D) ;; *) continue;; esac
+    echo "$p" | grep -Eq "$TEST_RE" || continue
+    ok=0
+    for a in $allow; do [ "$a" = "$p" ] && ok=1; done
+    [ $ok -eq 1 ] || finding critical integrity "$p" "pre-existing test file modified or deleted"
+  done
+}
+
+cmd_canary_scan() { # df canary-scan <scenarios-dir> <output-file>: finding on stdout if a canary leaked
+  local tok
+  grep -rhE '^canary: *DFC-[A-Za-z0-9]+' "$1" 2>/dev/null | sed 's/^canary: *//' | while read -r tok; do
+    if grep -qF "$tok" "$2"; then finding critical integrity "$2" "holdout canary $tok leaked"; fi
+  done
+}
+
+cmd_scrub() { # df scrub <file>: scrubbed copy on stdout, exit 3 if anything was redacted
+  local n
+  n=$(grep -Ec "$SECRET_RE" "$1" || true)
+  sed -E "s/($SECRET_RE)/[REDACTED]/g" "$1"
+  [ "${n:-0}" -eq 0 ] || return 3
+}
+
+cmd_status() { # df status <run-id>: regenerate and print progress.md
+  local rd c out f
+  rd=$(run_dir "$1"); c="$rd/run.conf"
+  cmd_validate "$1"
+  out="Run $1   track: $(conf_get "$c" track)   stage: $(conf_get "$c" stage)   status: $(conf_get "$c" status)"
+  if [ "$(conf_get "$c" status)" = waiting_permission ]; then
+    out="$out
+  needs permission: $(conf_get "$c" waiting_on)"
+  fi
+  for f in "$rd"/chunks/*.md; do
+    [ -e "$f" ] || continue
+    out="$out
+$(printf '  chunk %s  %-8s attempts %s  %s' "$(fm_get "$f" id)" "$(fm_get "$f" status)" "$(fm_get "$f" attempts)" "$(fm_get "$f" title)")"
+  done
+  printf '%s\n' "$out" | atomic "$rd/progress.md"
+  printf '%s\n' "$out"
+}
+
+cmd_list() {
+  local c
+  for c in "$(common_dir)"/df/*/run.conf; do
+    [ -e "$c" ] || continue
+    printf '%s  stage=%s  status=%s  track=%s\n' "$(basename "$(dirname "$c")")" \
+      "$(conf_get "$c" stage)" "$(conf_get "$c" status)" "$(conf_get "$c" track)"
+  done
+}
+
+cmd_clean() { # df clean <run-id> [--force]: removes worktree and state, keeps the branch
+  local rd c wt
+  rd=$(run_dir "$1"); c="$rd/run.conf"
+  [ -f "$c" ] || die "no such run: $1"
+  if [ "${2:-}" != --force ] && [ "$(cmd_lock "$1" check)" = live ]; then die "run is live; use --force"; fi
+  wt=$(conf_get "$c" worktree)
+  if [ -d "$wt" ]; then
+    if [ "${2:-}" != --force ] && [ -n "$(git -C "$wt" status --porcelain)" ]; then
+      die "worktree has uncommitted changes; use --force"
+    fi
+    git worktree remove --force "$wt"
+  fi
+  rm -rf "$rd"
+  git worktree prune
+}
+
+cmd=${1:-}; [ $# -gt 0 ] && shift
+case "$cmd" in
+  start) cmd_start "$@";;
+  validate) cmd_validate "$@";;
+  verdict) cmd_verdict "$@";;
+  gate) cmd_gate "$@";;
+  lock) cmd_lock "$@";;
+  snapshot) cmd_snapshot "$@";;
+  check-diff) cmd_check_diff "$@";;
+  canary-scan) cmd_canary_scan "$@";;
+  scrub) cmd_scrub "$@";;
+  status) cmd_status "$@";;
+  list) cmd_list;;
+  clean) cmd_clean "$@";;
+  run-dir) run_dir "$@";;
+  conf-get) conf_get "$@";;
+  conf-set) conf_set "$@";;
+  fm-get) fm_get "$@";;
+  fm-set) fm_set "$@";;
+  write) atomic "$@";;
+  *) die "usage: df {start|validate|verdict|gate|lock|snapshot|check-diff|canary-scan|scrub|status|list|clean|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
+esac
