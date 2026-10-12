@@ -30,6 +30,12 @@ for a in builder tester; do
 done
 # qa-author must be told not to read the plan or tests
 grep -q "must not read" "$ROOT/agents/qa-author.md" && ok "qa-author: barrier stated" || bad "qa-author: barrier stated"
+# live run finding: scenarios must be written against a worktree placeholder, not a fixed path
+grep -q "<WORKTREE>" "$ROOT/agents/qa-author.md" && ok "qa-author: uses <WORKTREE> placeholder" || bad "qa-author: uses <WORKTREE> placeholder"
+grep -q "<WORKTREE>" "$ROOT/agents/qa-functional.md" && ok "qa-functional: substitutes <WORKTREE>" || bad "qa-functional: substitutes <WORKTREE>"
+for a in builder tester qa-functional; do
+  grep -q "exactly as listed" "$ROOT/agents/$a.md" && ok "agent $a: runs listed commands unchanged" || bad "agent $a: runs listed commands unchanged"
+done
 # nobody may spawn agents
 for a in $AGENTS; do
   case "$(fm "$ROOT/agents/$a.md" tools)" in *Agent*|*Task*) bad "agent $a: cannot spawn agents";; *) ok "agent $a: cannot spawn agents";; esac

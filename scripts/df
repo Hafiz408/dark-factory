@@ -21,6 +21,8 @@ fm_get() { tr -d '\r' < "$1" | awk '/^---$/{n++; next} n==1' | sed -n "s/^$2: */
 fm_set() { awk -v k="$2" -v v="$3" '/^---$/{n++} n==1 && index($0, k ":")==1 {print k ": " v; next} {print}' "$1" | atomic "$1"; }
 
 finding() { printf -- '- severity: %s\n  source: %s\n  where: %s\n  what: %s\n' "$1" "$2" "$3" "$4"; }
+# Interpreter and tool artefacts are not changes made by a role.
+ARTEFACT_RE='(^|/)(__pycache__|\.pytest_cache|\.mypy_cache|node_modules)/|\.pyc$'
 TEST_RE='(^|/)(tests?|spec|__tests__)/|(_test|\.test|\.spec)\.[A-Za-z]+$|(^|/)test_[^/]*$'
 SECRET_RE='AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|([Pp]assword|[Pp]asswd|PASSWORD|[Ss]ecret|SECRET|[Tt]oken|TOKEN|[Aa]pi[_-]?[Kk]ey|API[_-]?KEY)[ ]*[=:][ ]*[^ ]+'
 
@@ -118,16 +120,16 @@ cmd_lock() { # df lock <run-id> acquire|refresh|release|check [session]
 
 cmd_snapshot() { # df snapshot <worktree>: hash of everything a read-only role must not change
   ( cd "$1" && {
-      git status --porcelain
+      git status --porcelain | cut -c4- | grep -Ev "$ARTEFACT_RE" || true
       git diff HEAD
-      git ls-files -o --exclude-standard | while IFS= read -r p; do printf '%s ' "$p"; sha < "$p"; done
+      git ls-files -o --exclude-standard | grep -Ev "$ARTEFACT_RE" | while IFS= read -r p; do printf '%s ' "$p"; sha < "$p"; done
     } | sha )
 }
 
 cmd_check_diff() { # df check-diff <worktree> <base_sha> <chunk.md>: findings on stdout
   set -f
   local wt=$1 base=$2 ch=$3 files scope allow p g hit st rest ok a
-  files=$( cd "$wt" && { git diff --name-only "$base"; git ls-files -o --exclude-standard; } | sort -u )
+  files=$( cd "$wt" && { git diff --name-only "$base"; git ls-files -o --exclude-standard; } | grep -Ev "$ARTEFACT_RE" | sort -u || true )
   if [ -z "$files" ]; then finding medium integrity "-" "empty diff for chunk"; return 0; fi
   scope=$(fm_get "$ch" scope | tr -d '[]' | tr ',' ' ')
   allow=$(fm_get "$ch" touches_tests | tr -d '[]' | tr ',' ' ')

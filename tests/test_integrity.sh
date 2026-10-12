@@ -91,4 +91,15 @@ out=$("$DF" check-diff "$R" "$BASE2" "$T/noscope.md")
 assert_contains "declares no scope" "$out" "missing scope is itself a finding"
 git checkout -q src/a.py
 
+# Live run finding: interpreter artefacts must not count as changes
+git checkout -q . ; git clean -fdq
+mkdir -p src/__pycache__ .pytest_cache
+echo x > src/__pycache__/a.cpython-314.pyc; echo y > .pytest_cache/v
+sA=$("$DF" snapshot "$R")
+echo "def k(): pass" >> src/a.py
+out=$("$DF" check-diff "$R" "$BASE2" "$T/ch.md")
+assert_eq "" "$out" "__pycache__ and .pytest_cache are not out-of-scope changes"
+git checkout -q src/a.py; git clean -fdq
+assert_eq "$sA" "$("$DF" snapshot "$R")" "artefacts do not change the snapshot"
+
 finish

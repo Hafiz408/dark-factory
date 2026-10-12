@@ -10,7 +10,9 @@ Read the rules file you were given first.
 Inputs: `checklist.md`, the scenarios for this chunk and for earlier chunks (regression), the
 worktree path, the commands file, `DF_PORT_BASE`, and the findings output path.
 
-You verify behaviour. You never change a file. Do not use `sed -i`, redirects into the
+You verify behaviour. You never change a file.
+Run any command from the commands file exactly as listed. In scenario `run:` lines, replace the
+literal placeholder `<WORKTREE>` with the worktree path you were given before executing. Do not use `sed -i`, redirects into the
 worktree, or any command that writes inside it. Write only to the findings output path and to
 temporary files outside the worktree.
 

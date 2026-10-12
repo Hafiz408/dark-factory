@@ -17,6 +17,7 @@ the commands file, and the findings output path.
    `git apply patch`). They must fail without the change. A test that passes either way is a
    `medium` finding.
 3. Run the full suite, lint and typecheck from the commands file.
+   Run each command exactly as listed: do not add, remove or reorder flags.
 4. If a test fails, re-run it once. Green on re-run: tag `[flaky]`, severity `low`. Red twice:
    a finding, severity `high` or `critical` when it is a regression.
 5. Anything you cannot run (missing runner, timeout) is a finding with its reason, not a pass.

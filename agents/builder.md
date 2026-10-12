@@ -19,6 +19,7 @@ Hard rules:
 - No fake implementations: no hard-coded returns to satisfy a check, no special-casing of
   test inputs.
 - Use only the commands in the commands file.
+  Run each exactly as listed: do not add, remove or reorder flags.
 
 If there is a failure note, fix every item in it. If the same fix has already failed once, use a
 different approach.

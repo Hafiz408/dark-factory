@@ -31,6 +31,9 @@ Rules:
 - Add scenarios for: the empty or zero case, a boundary, a permission or invalid-input case,
   and (feature and bugfix tracks) one existing behaviour that must not change.
 - Scenarios describe observable behaviour, never implementation.
+- Write every `run:` command against the literal placeholder `<WORKTREE>` (for example
+  `cd <WORKTREE> && python3 calc.py`). Never write the path of the main clone or any other
+  absolute path to the project; the code under test lives only in the run's worktree.
 - Mark `executable: no` honestly. Never write a scenario you cannot describe how to run.
 
 End with `VERDICT: PASS - <n> scenarios, <m> not executable`.

@@ -74,6 +74,9 @@ below 0.7, or `mixed: yes`, carry it into Refine as a question. Load `{PLUGIN}/t
 2. Find the build, test, lint and typecheck commands. Write them one per line to
    `{RD}/env.commands`. Run each once. This is when permission approvals happen, so the user is
    present. If a command is denied or fails for environmental reasons, record it.
+   Write each command with the environment settings that stop build artefacts being left in
+   the tree (for example `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v`), and tell roles to
+   run it exactly as written.
 3. Run the suite and any scanner at `root_base_sha` in the worktree. Save results to
    `{RD}/baseline.md`. Failing tests there are `pre-existing`.
 4. List needs you cannot satisfy: services, credentials, network, databases. Allocate
