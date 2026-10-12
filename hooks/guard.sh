@@ -2,8 +2,9 @@
 # PreToolUse(Bash) seat belt. Active only while a Dark Factory run lock exists.
 # Deny-list, not a sandbox. Exit 2 blocks the call and returns stderr to the model.
 set -u
-gd=$(git rev-parse --git-common-dir 2>/dev/null) || exit 0
-ls "$gd"/df/*/lock >/dev/null 2>&1 || exit 0
+g=$(git rev-parse --git-common-dir 2>/dev/null) || exit 0
+m=$(dirname "$(cd "$g" && pwd)")
+ls "$(dirname "$m")/.df-$(basename "$m")"/*/lock >/dev/null 2>&1 || exit 0
 
 input=$(cat)
 deny() { echo "Dark Factory guard: blocked ($1). Use a different approach or ask the user." >&2; exit 2; }

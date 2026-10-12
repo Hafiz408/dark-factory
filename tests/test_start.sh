@@ -9,7 +9,11 @@ rd=$(cd "$R" && "$DF" run-dir "$id")
 wt=$(cd "$R" && "$DF" conf-get "$rd/run.conf" worktree)
 assert_ok "worktree exists" test -d "$wt"
 assert_eq "df/$id" "$(git -C "$wt" rev-parse --abbrev-ref HEAD)" "branch is df/<id>"
-assert_ok "state is inside the git dir" test -f "$R/.git/df/$id/run.conf"
+SR="$(dirname "$R")/.df-$(basename "$R")"
+assert_ok "state is a hidden sibling of the repo" test -f "$SR/$id/run.conf"
+assert_fail "nothing is written under .git" test -e "$R/.git/df"
+( cd "$R" && git clean -fdxq )
+assert_ok "git clean -fdx cannot reach the state" test -f "$SR/$id/run.conf"
 assert_ok "input copied" test -f "$rd/input.md"
 assert_eq "14400" "$(cd "$R" && "$DF" conf-get "$rd/run.conf" budget_seconds)" "wall-clock budget recorded"
 case "$(cd "$R" && "$DF" conf-get "$rd/run.conf" started)" in ''|*[!0-9]*) bad "start time recorded";; *) ok "start time recorded";; esac

@@ -15,8 +15,8 @@ evaluate it and will hold the command for approval, which stalls an unattended r
 - `{PLUGIN}`: the plugin root. Take the "Base directory for this skill" path shown when this
   skill loaded and go two levels up (`.../skills/dark-factory` becomes the plugin root).
 - `{DF}`: `{PLUGIN}/scripts/df`. `{RULES}`: `{PLUGIN}/skills/dark-factory/rules.md`.
-- `{RD}`: the run's state directory, printed by `{DF} run-dir <run-id>` (inside the git
-  directory). `{WT}`: the worktree path, from `{DF} conf-get {RD}/run.conf worktree`.
+- `{RD}`: the run's state directory, printed by `{DF} run-dir <run-id>` (a hidden sibling of the
+  main clone, `.df-<repo>`, outside the working tree and `.git`). `{WT}`: the worktree path, from `{DF} conf-get {RD}/run.conf worktree`.
 - In the text below `{DF}`, `{RD}`, `{WT}`, `{PLUGIN}` and `{RULES}` mean "substitute the literal
   absolute path". Compute anything dynamic (for example the current time) in its own command.
 - Every spawn prompt must include: the rules path, the role's inputs as absolute paths, and the

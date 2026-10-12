@@ -5,8 +5,11 @@ set -eu
 
 die() { echo "df: $*" >&2; exit 1; }
 sha() { if command -v shasum >/dev/null 2>&1; then shasum | cut -d' ' -f1; else sha1sum | cut -d' ' -f1; fi; }
-common_dir() { (cd "$(git rev-parse --git-common-dir)" && pwd); }
-run_dir() { echo "$(common_dir)/df/$1"; }
+# State lives in a hidden sibling of the main clone, not under .git (the Write tool refuses .git/
+# as a sensitive path) and not in the working tree. git clean -fdx cannot reach it.
+main_root() { dirname "$(cd "$(git rev-parse --git-common-dir)" && pwd)"; }
+state_root() { local m; m=$(main_root); echo "$(dirname "$m")/.df-$(basename "$m")"; }
+run_dir() { echo "$(state_root)/$1"; }
 atomic() { local t="$1.tmp.$$"; cat > "$t" && mv "$t" "$1"; }
 
 # key=value files (run.conf)
@@ -185,7 +188,7 @@ $(printf '  chunk %s  %-8s attempts %s  %s' "$(fm_get "$f" id)" "$(fm_get "$f" s
 
 cmd_list() {
   local c
-  for c in "$(common_dir)"/df/*/run.conf; do
+  for c in "$(state_root)"/*/run.conf; do
     [ -e "$c" ] || continue
     printf '%s  stage=%s  status=%s  track=%s\n' "$(basename "$(dirname "$c")")" \
       "$(conf_get "$c" stage)" "$(conf_get "$c" status)" "$(conf_get "$c" track)"
@@ -194,6 +197,7 @@ cmd_list() {
 
 cmd_clean() { # df clean <run-id> [--force]: removes worktree and state, keeps the branch
   local rd c wt
+  [ -n "${1:-}" ] || die "clean: run id required"
   rd=$(run_dir "$1"); c="$rd/run.conf"
   [ -f "$c" ] || die "no such run: $1"
   if [ "${2:-}" != --force ] && [ "$(cmd_lock "$1" check)" = live ]; then die "run is live; use --force"; fi
