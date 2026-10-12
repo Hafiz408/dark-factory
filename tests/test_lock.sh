@@ -30,4 +30,9 @@ assert_eq "done" "$("$DF" conf-get "$("$DF" run-dir "$id")/run.conf" stage)" "fi
 assert_eq "none" "$("$DF" lock "$id" check)" "finish releases the lock"
 assert_ok "finished run still validates" "$DF" validate "$id"
 
+# Final review #9: a role may run for a long time between verdicts, so the default TTL is 1 hour
+"$DF" lock "$id" release
+printf 'session=sessL\nheartbeat=%s\n' "$(( $(date +%s) - 1000 ))" > "$("$DF" run-dir "$id")/lock"
+assert_eq "live" "$("$DF" lock "$id" check)" "a 1000 second old heartbeat is still live by default"
+
 finish

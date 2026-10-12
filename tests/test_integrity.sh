@@ -102,4 +102,30 @@ assert_eq "" "$out" "__pycache__ and .pytest_cache are not out-of-scope changes"
 git checkout -q src/a.py; git clean -fdq
 assert_eq "$sA" "$("$DF" snapshot "$R")" "artefacts do not change the snapshot"
 
+# Final review #1: a renamed-and-weakened test must not escape
+git checkout -q . ; git clean -fdq
+for i in 1 2 3 4 5 6 7 8; do echo "def test_$i(): assert compute($i) == $i" >> tests/test_big.py; done
+git add . && git commit -qm "big test" && BASE3=$(git rev-parse HEAD)
+git mv tests/test_big.py tests/test_renamed.py && sed -i.bak 's/== 5/is not None/' tests/test_renamed.py && rm -f tests/test_renamed.py.bak
+assert_contains "R" "$(git diff --name-status "$BASE3" | cut -c1)" "precondition: git reports this as a rename"
+out=$("$DF" check-diff "$R" "$BASE3" "$T/ch.md")
+assert_contains "tests/test_big.py" "$out" "renamed test file is flagged under its old path"
+assert_contains "severity: critical" "$out" "renamed test is critical"
+git reset -q --hard; git clean -fdq
+
+# Final review #3: non-ASCII file names inside scope are not out-of-scope
+printf 'x' > "src/tést.py"
+out=$("$DF" check-diff "$R" "$BASE3" "$T/ch.md")
+assert_eq "" "$out" "non-ASCII file name inside scope is not flagged"
+rm -f "src/tést.py"
+
+# Final review #11: source hash ignores test files and sees a reverted source change
+echo "def z(): pass" >> src/a.py
+h1=$("$DF" srchash "$R" "$BASE2")
+echo "def test_extra(): pass" > tests/test_extra.py
+assert_eq "$h1" "$("$DF" srchash "$R" "$BASE2")" "srchash ignores test files"
+git checkout -q src/a.py
+[ "$h1" != "$("$DF" srchash "$R" "$BASE2")" ] && ok "srchash changes when source is reverted" || bad "srchash changes when source is reverted"
+rm -f tests/test_extra.py
+
 finish

@@ -103,4 +103,18 @@ assert_ok "conf-set accepts a valid status" "$DF" conf-set "$T/enum.conf" status
 assert_eq "waiting_permission" "$("$DF" conf-get "$T/enum.conf" status)" "valid status stored"
 assert_eq "intake" "$("$DF" conf-get "$T/enum.conf" stage)" "refused write left stage unchanged"
 
+# Final review #2: an unknown severity word must not read as non-blocking
+printf -- '- severity: Medium\n  source: quality\n  where: a.py:1\n  what: x\n' > "$T/sev.md"
+assert_fail "gate rejects a capitalised severity" "$DF" gate "$T/sev.md"
+assert_contains "unknown severity" "$("$DF" gate "$T/sev.md" 2>&1 || true)" "gate says why"
+
+# Final review #5: fm-set on CRLF files and on an absent key
+printf -- '---\r\nid: 03\r\nstatus: pending\r\nattempts: 0\r\n---\r\nbody\r\n' > "$T/crlf2.md"
+"$DF" fm-set "$T/crlf2.md" status running
+assert_eq "running" "$("$DF" fm-get "$T/crlf2.md" status)" "fm-set works on a CRLF file"
+"$DF" fm-set "$T/crlf2.md" interrupts 1
+assert_eq "1" "$("$DF" fm-get "$T/crlf2.md" interrupts)" "fm-set adds an absent key"
+"$DF" fm-set "$T/crlf2.md" note 'C:\new\t'
+assert_eq 'C:\new\t' "$("$DF" fm-get "$T/crlf2.md" note)" "fm-set does not interpret backslashes"
+
 finish

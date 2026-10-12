@@ -115,9 +115,11 @@ for attempt in 1..3:
     {DF} fm-set chunk attempts <attempt>
     S0=$({DF} snapshot {WT})                       # not needed for builder
     spawn builder                                # inputs: spec, plan, chunk, last failure note
+    H1=$({DF} srchash {WT} base)                 # hash of non-test source after the builder
     findings = {DF} check-diff {WT} $base chunk    # integrity findings
     {DF} canary-scan {RD}/scenarios builder-output # leak => critical, regenerate scenarios
     spawn tester                                 # writes {RD}/panel/NN-aK-tester.md
+    if $({DF} srchash {WT} base) != H1: critical integrity finding (tester changed or reverted source)
     gate = {DF} gate (integrity + tester findings)
     if blocking: write failure note, reset, continue
     for each read-only role below: S=$({DF} snapshot {WT}) before, compare after
@@ -158,7 +160,7 @@ Details you must follow:
   included), or when the current epoch time (read in its own command) minus `started` exceeds `budget_seconds` (both in `run.conf`).
   On exhaustion stop gracefully and write the report; the run stays resumable after the user
   raises the budget with `{DF} conf-set`.
-- After every verdict: `{DF} lock <id> refresh`, append one line to `log.md`, run
+- Before every role spawn and after every verdict: `{DF} lock <id> refresh <session-id>`, append one line to `log.md`, run
   `{DF} status <id>`, and print one line to the user.
 
 ## Integrate
@@ -178,7 +180,7 @@ Details you must follow:
 ## Resume
 
 1. Pick the run: the id given, else the most recent unfinished one; ask only if several.
-2. `{DF} lock <id> acquire`. If it refuses, say the run is live in another session and stop
+2. Pick a new session id, then `{DF} lock <id> acquire <session-id>`. If it refuses, say the run is live in another session and stop
    (the user may pass `--force`, which releases the lock first).
 3. `{DF} validate <id>`. If it fails, show the message and stop. Never repair state silently.
 4. Confirm the worktree and branch exist and the branch head matches the last commit in

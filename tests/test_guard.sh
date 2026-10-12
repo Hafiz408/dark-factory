@@ -30,4 +30,15 @@ assert_ok "git commit allowed" call "git commit -m done"
 "$DF" lock "$id" release
 assert_ok "inert again after release" call "git push origin main"
 
+# Final review #6 to #8
+id=$("$DF" start "$R/in.txt")
+"$DF" lock "$id" acquire sessG
+wt=$("$DF" conf-get "$("$DF" run-dir "$id")/run.conf" worktree)
+assert_fail "git -C <dir> push blocked" call "git -C /some/wt push origin df/x"
+assert_fail "git --no-pager push blocked" call "git --no-pager push"
+assert_ok "git -C <dir> status allowed" call "git -C /some/wt status"
+assert_ok "rm -rf inside the worktree allowed even as an absolute path" call "rm -rf $wt/node_modules"
+assert_fail "rm -rf an absolute path outside the worktree blocked" call "rm -rf /tmp/somewhere-else"
+assert_ok "stale lock leaves the guard inert" bash -c "printf '{\"tool_input\":{\"command\":\"git push\"}}' | DF_LOCK_TTL=0 '$GUARD'"
+
 finish

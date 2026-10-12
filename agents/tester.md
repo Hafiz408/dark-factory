@@ -15,7 +15,9 @@ the commands file, and the findings output path.
 2. Prove the tests are not vacuous: run the new tests with the chunk's source changes
    temporarily reverted (`git diff -- <source files> > patch`, `git apply -R patch`, run, then
    `git apply patch`). They must fail without the change. A test that passes either way is a
-   `medium` finding.
+   `medium` finding. If `git apply` of the patch fails at any point, stop at once, do not run
+   anything else, and end with `VERDICT: BLOCKED - source left reverted: <error>`. Never leave
+   the source reverted.
 3. Run the full suite, lint and typecheck from the commands file.
    Run each command exactly as listed: do not add, remove or reorder flags.
 4. If a test fails, re-run it once. Green on re-run: tag `[flaky]`, severity `low`. Red twice:

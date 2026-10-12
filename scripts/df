@@ -27,7 +27,13 @@ conf_set() {
 
 # YAML-ish frontmatter (chunks/NN.md): first block between two --- lines
 fm_get() { tr -d '\r' < "$1" | awk '/^---$/{n++; next} n==1' | sed -n "s/^$2: *//p" | head -1; }
-fm_set() { awk -v k="$2" -v v="$3" '/^---$/{n++} n==1 && index($0, k ":")==1 {print k ": " v; next} {print}' "$1" | atomic "$1"; }
+fm_set() {
+  K="$2" V="$3" awk '
+    { line=$0; sub(/\r$/, "", line) }
+    line=="---" { n++; if (n==2 && !done) { print ENVIRON["K"] ": " ENVIRON["V"]; done=1 } print; next }
+    n==1 && index(line, ENVIRON["K"] ":")==1 { print ENVIRON["K"] ": " ENVIRON["V"]; done=1; next }
+    { print }' "$1" | atomic "$1"
+}
 
 finding() { printf -- '- severity: %s\n  source: %s\n  where: %s\n  what: %s\n' "$1" "$2" "$3" "$4"; }
 # Interpreter and tool artefacts are not changes made by a role.
@@ -73,6 +79,7 @@ cmd_validate() { # df validate <run-id>
     [ -e "$f" ] || continue
     case "$(fm_get "$f" status)" in pending|running|PASS|BLOCKED|SKIPPED) ;; *) die "$f: bad status";; esac
     case "$(fm_get "$f" attempts)" in ''|*[!0-9]*) die "$f: attempts is not an integer";; esac
+    [ -n "$(fm_get "$f" scope | tr -d '[] ')" ] || die "$f: chunk declares no scope"
     b=$(fm_get "$f" base_sha)
     if [ -n "$b" ] && [ "$b" != null ]; then
       git cat-file -e "$b^{commit}" 2>/dev/null || die "$f: base_sha not found"
@@ -92,6 +99,7 @@ cmd_gate() { # df gate <findings-file>: prints "<blocking> <total>", exit 1 if b
   out=$(awk '
     function flush() {
       if (sev != "") {
+        if (sev!="critical" && sev!="high" && sev!="medium" && sev!="low") bad++
         t++
         if ((sev=="medium"||sev=="high"||sev=="critical") && tags !~ /pre-existing/ && !(sev=="medium" && tags ~ /late-find/)) b++
       }
@@ -99,14 +107,16 @@ cmd_gate() { # df gate <findings-file>: prints "<blocking> <total>", exit 1 if b
     }
     /^- severity:/ { flush(); sev=$3 }
     /^[ \t]+tags:/ { tags=$0 }
-    END { flush(); printf "%d %d\n", b+0, t+0 }' "$1")
+    END { flush(); printf "%d %d %d\n", b+0, t+0, bad+0 }' "$1")
+  if [ "${out##* }" -ne 0 ]; then die "gate: unknown severity word in $1 (use critical|high|medium|low, lowercase)"; fi
+  out="${out% *}"
   echo "$out"
   [ "${out%% *}" -eq 0 ]
 }
 
 cmd_lock() { # df lock <run-id> acquire|refresh|release|check [session]
   local rd lf act sess now cur hb ttl
-  rd=$(run_dir "$1"); act=$2; sess=${3:-${DF_SESSION:-$PPID}}; lf="$rd/lock"; now=$(date +%s); ttl=${DF_LOCK_TTL:-900}
+  rd=$(run_dir "$1"); act=$2; sess=${3:-${DF_SESSION:-$PPID}}; lf="$rd/lock"; now=$(date +%s); ttl=${DF_LOCK_TTL:-3600}
   case "$act" in
     acquire|refresh)
       if [ -f "$lf" ]; then
@@ -138,7 +148,7 @@ cmd_snapshot() { # df snapshot <worktree>: hash of everything a read-only role m
 cmd_check_diff() { # df check-diff <worktree> <base_sha> <chunk.md>: findings on stdout
   set -f
   local wt=$1 base=$2 ch=$3 files scope allow p g hit st rest ok a
-  files=$( cd "$wt" && { git diff --name-only "$base"; git ls-files -o --exclude-standard; } | grep -Ev "$ARTEFACT_RE" | sort -u || true )
+  files=$( cd "$wt" && { git -c core.quotePath=false diff --no-renames --name-only "$base"; git -c core.quotePath=false ls-files -o --exclude-standard; } | grep -Ev "$ARTEFACT_RE" | sort -u || true )
   if [ -z "$files" ]; then finding medium integrity "-" "empty diff for chunk"; return 0; fi
   scope=$(fm_get "$ch" scope | tr -d '[]' | tr ',' ' ')
   allow=$(fm_get "$ch" touches_tests | tr -d '[]' | tr ',' ' ')
@@ -156,13 +166,22 @@ cmd_check_diff() { # df check-diff <worktree> <base_sha> <chunk.md>: findings on
 $files
 EOF
   fi
-  ( cd "$wt" && git -c core.quotePath=false diff --name-status "$base" ) | while IFS="$(printf '\t')" read -r st p rest; do
+  ( cd "$wt" && git -c core.quotePath=false diff --no-renames --name-status "$base" ) | while IFS="$(printf '\t')" read -r st p rest; do
     case "$st" in M|D) ;; *) continue;; esac
     echo "$p" | grep -Eq "$TEST_RE" || continue
     ok=0
     for a in $allow; do [ "$a" = "$p" ] && ok=1; done
     [ $ok -eq 1 ] || finding critical integrity "$p" "pre-existing test file modified or deleted"
   done
+}
+
+cmd_srchash() { # df srchash <worktree> <base_sha>: hash of every non-test, non-artefact file changed since base
+  ( cd "$1" && {
+      git -c core.quotePath=false diff --no-renames --name-only "$2"
+      git -c core.quotePath=false ls-files -o --exclude-standard
+    } | sort -u | grep -Ev "$ARTEFACT_RE" | grep -Ev "$TEST_RE" | while IFS= read -r p; do
+      if [ -f "$p" ]; then printf '%s ' "$p"; sha < "$p"; else printf '%s deleted\n' "$p"; fi
+    done | sha )
 }
 
 cmd_canary_scan() { # df canary-scan <scenarios-dir> <output-file>: finding on stdout if a canary leaked
@@ -241,6 +260,7 @@ case "$cmd" in
   snapshot) cmd_snapshot "$@";;
   check-diff) cmd_check_diff "$@";;
   canary-scan) cmd_canary_scan "$@";;
+  srchash) cmd_srchash "$@";;
   scrub) cmd_scrub "$@";;
   status) cmd_status "$@";;
   list) cmd_list;;
@@ -252,5 +272,5 @@ case "$cmd" in
   fm-get) fm_get "$@";;
   fm-set) fm_set "$@";;
   write) atomic "$@";;
-  *) die "usage: df {start|validate|verdict|gate|lock|snapshot|check-diff|canary-scan|scrub|status|list|clean|finish|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
+  *) die "usage: df {start|validate|verdict|gate|lock|snapshot|check-diff|canary-scan|srchash|scrub|status|list|clean|finish|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
 esac

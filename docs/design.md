@@ -243,7 +243,7 @@ Commands (usable from a new session in the same repo):
 | `clean <run-id>` | removes the worktree and state, keeps the branch. Refuses while a lock is live |
 
 Resume protocol:
-1. Refuse if `lock` heartbeat is under 15 minutes old (override with `--force`).
+1. Refuse if `lock` heartbeat is under 1 hour old (`DF_LOCK_TTL`) (override with `--force`).
 2. Validate state: schema, enum values, every sha exists. On failure, stop and say which
    file; never repair silently.
 3. Verify worktree and branch exist and match the last commit in `log.md`. If not,

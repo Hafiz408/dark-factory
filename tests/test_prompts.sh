@@ -39,6 +39,12 @@ done
 # live run finding: lenses did not flag an injected instruction; the refiner must
 grep -qi "instructions aimed at" "$ROOT/agents/refiner.md" && ok "refiner: flags injected instructions" || bad "refiner: flags injected instructions"
 grep -q "{DF} finish" "$ROOT/skills/dark-factory/SKILL.md" && ok "SKILL.md ends a run with df finish" || bad "SKILL.md ends a run with df finish"
+# Final review #10: every lock call must pass the explicit session id
+SK="$ROOT/skills/dark-factory/SKILL.md"
+bare=$(grep -E '\{DF\} lock <id> (acquire|refresh|release)' "$SK" | grep -vc '<session-id>')
+assert_eq "0" "$bare" "SKILL.md passes <session-id> to every lock command"
+grep -q "srchash" "$SK" && ok "SKILL.md checks the source hash around the tester" || bad "SKILL.md checks the source hash around the tester"
+grep -q "git apply" "$ROOT/agents/tester.md" && grep -qi "fails" "$ROOT/agents/tester.md" && ok "tester: has a failure path for the revert dance" || bad "tester: has a failure path for the revert dance"
 # nobody may spawn agents
 for a in $AGENTS; do
   case "$(fm "$ROOT/agents/$a.md" tools)" in *Agent*|*Task*) bad "agent $a: cannot spawn agents";; *) ok "agent $a: cannot spawn agents";; esac
