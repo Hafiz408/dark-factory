@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # Seeds must be red before the factory touches them, otherwise a "pass" proves nothing.
 . "$(dirname "$0")/lib.sh"
+export PYTHONDONTWRITEBYTECODE=1
 F="$ROOT/fixtures"
+# bytecode must never be tracked, and running the fixtures must not create any
+n=$(git -C "$ROOT" ls-files | grep -Ec '(^|/)__pycache__/|\.pyc$' || true)
+assert_eq "0" "$n" "no bytecode is tracked"
 for d in bugfix feature build adv-injection adv-no-runner adv-test-conflict adv-flaky; do
   assert_ok "fixture $d has input.md" test -f "$F/$d/input.md"
   assert_ok "fixture $d has expect.sh" test -x "$F/$d/expect.sh"
