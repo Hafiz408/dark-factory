@@ -1,6 +1,6 @@
 # Dark Factory: design (v1, hardened)
 
-Status: draft for review, revised after a three-lens adversarial review
+Status: approved by the user, revised after a three-lens adversarial review
 (see `docs/battle-test.md`). Platform: Claude Code on macOS, Linux and WSL.
 Form: markdown plugin, plus one small guard hook (section 10).
 
@@ -146,6 +146,10 @@ abstraction = medium; speculative subsystem = high; small dead flexibility = low
 - **Baseline rule.** Findings anchored to code or tests that were already failing at
   `root_base_sha` are recorded as `pre-existing` and do not block. The gate applies to
   regressions and new code.
+- **Late finds (D-A).** From attempt 2, a new medium finding on lines unchanged since the
+  previous attempt's review is tagged `late-find`, is advisory, and is listed in the
+  report. High and critical always block. Findings on changed lines, and findings carried
+  over from earlier attempts, keep blocking at medium.
 - **Precedence on contradiction:** security, then functional and impact, then quality, then
   ponytail. The merged note keeps the higher one and drops the lower.
 - **Waiver.** A finding that survives two attempts with a builder rebuttal in the chunk
@@ -358,7 +362,9 @@ instruction and checked by the integrity diff.
 | Tester gates panel | yes |
 | State location | inside the git directory |
 
-Open, need the user's answer:
+Resolved after review: D-A yes (applied in section 6), D-B yes (guard hook ships in v1),
+D-C deferred: the product name is decided before going public, repo stays private until
+then. Original questions:
 
 | ID | Question | Recommendation |
 |---|---|---|
