@@ -2,7 +2,8 @@
 
 Status: approved by the user, revised after a three-lens adversarial review
 (see `docs/battle-test.md`). Platform: Claude Code on macOS, Linux and WSL.
-Form: markdown plugin, plus one small guard hook (section 10).
+Form: markdown plugin, one tested bash helper (`scripts/df`), and one small guard hook
+(section 10).
 
 ## 1. Purpose
 
@@ -56,10 +57,10 @@ Out of v1:
 |---|---|---|---|
 | 0 | Start | Preconditions. Create run id, worktree `../<repo>-df-<run-id>` on `df/<run-id>`, state dir (section 8). Record `root_base_sha`. | worktree, state dir |
 | 1 | Intake | Store raw request verbatim (after secret scan) | `input.md` |
-| 2 | Route | `router` picks track and confidence. Below 0.7 the choice becomes a Refine question. | `run.json` |
+| 2 | Route | `router` picks track and confidence. Below 0.7 the choice becomes a Refine question. | `run.conf` |
 | 3 | Refine | Three `refiner` lenses in parallel (requirements, codebase fit, risk). Merge, resolve what the repo can answer, ask one batched round. Max 2 rounds per cycle. Codebase-fit lens reads by sampling entry points and the areas the input names, and states what it did not read. | `questions.md`, `spec.md` |
 | 4 | Plan | In parallel: `planner` (plan, chunk list with size budget and path scope) and `qa-author` (checklist and holdout scenarios, from the spec alone). `reviewer` (plan-coverage lens) checks both against every spec requirement and validates the chunk dependency graph. | `plan.md`, `scenarios/` |
-| 5 | Preflight | Detect stack (per package in a monorepo), install dependencies in the worktree, find test, lint and typecheck commands, run each once, run the suite and scanners at `root_base_sha` as the **baseline**, list required services and credentials. Anything unmet is shown at sign-off, not discovered later. | `run.json.env`, baseline |
+| 5 | Preflight | Detect stack (per package in a monorepo), install dependencies in the worktree, find test, lint and typecheck commands, run each once, run the suite and scanners at `root_base_sha` as the **baseline**, list required services and credentials. Anything unmet is shown at sign-off, not discovered later. | `run.conf.env`, baseline |
 | 6 | Sign-off | The only gate. One-screen summary. approve, amend, or abort. | `log.md` |
 | 7 | Slice | One file per chunk | `chunks/NN.md` |
 | 8 | Loop | Section 6 | commits on `df/<run-id>` |
@@ -100,7 +101,7 @@ Roles are fixed. A track is a markdown profile that configures them.
 
 Chunks run in dependency order. Every role is a fresh subagent. Only a one-line verdict
 returns to the orchestrator; detail goes to files. The orchestrator holds no run state in
-context: at every chunk boundary it re-reads `run.json` and the chunk file.
+context: at every chunk boundary it re-reads `run.conf` and the chunk file.
 
 ```
 record base_sha
@@ -172,7 +173,7 @@ medium or above in its file is treated as `FAIL`.
 
 ### Budgets
 
-`run.json.budget`: total attempts (3 x chunk count, fix chunks included), wall-clock
+`run.conf.budget`: total attempts (3 x chunk count, fix chunks included), wall-clock
 (default 4 h), per-command timeout (default from preflight), and tokens as best effort from
 subagent usage reports. Exhaustion stops gracefully, writes the report, and the run stays
 resumable with a raised budget.
@@ -208,12 +209,14 @@ fallback in `lenses/quality.md`.
 
 ## 8. State, progress, resume, clean
 
-State lives **inside the git directory**, not the working tree:
-`<git-common-dir>/df/<run-id>/`. Worktrees share it, `git clean -fdx` does not touch it,
-nothing is tracked, and no `.gitignore` edit is needed.
+State lives in a **hidden sibling of the main clone**, not in the working tree and not under
+`.git`: `<parent-of-repo>/.df-<repo>/<run-id>/`. Worktrees share it by absolute path,
+`git clean -fdx` cannot reach it, nothing is tracked, and no `.gitignore` edit is needed.
+(It is not under `.git` because the Write tool refuses `.git/` as a sensitive path, found in
+the first live run.) The user is asked once to allow the parent directory.
 
 ```
-run.json          track, worktree, branch, root_base_sha, env, budget, stage cursor, status
+run.conf          track, worktree, branch, root_base_sha, env, budget, stage cursor, status
 lock              session id + heartbeat, refreshed on every verdict
 input.md          raw request (scrubbed)
 questions.md      refine questions, pending and answered
@@ -227,7 +230,7 @@ progress.md       DERIVED view, regenerated after every verdict, never read for 
 report.md         final
 ```
 
-Source of truth: `run.json`, `chunks/*.md`, and role output files. Every state file is
+Source of truth: `run.conf`, `chunks/*.md`, and role output files. Every state file is
 written to a temp file and renamed.
 
 Commands (usable from a new session in the same repo):
@@ -270,6 +273,7 @@ Findings:
 
 Chunk frontmatter: `id, title, depends_on, status (pending|PASS|BLOCKED|SKIPPED),
 attempts, interrupts, base_sha, scope[], touches_tests[], scenarios[], done[]`.
+`status` is `pending|running|PASS|BLOCKED|SKIPPED`.
 
 Scenario: `chunks`, `given`, `when`, `then`, `run`, `executable: yes|no`, canary token.
 
@@ -311,6 +315,8 @@ Orchestrator-enforced integrity checks (not left to agent instructions):
 ```
 .claude-plugin/plugin.json
 skills/dark-factory/SKILL.md          orchestrator, only user entry point
+skills/dark-factory/rules.md          shared role rules
+scripts/df                            tested deterministic helper (state, locks, integrity)
 agents/  router refiner planner qa-author builder tester qa-functional reviewer
 lenses/  requirements codebase-fit risk                      (refiner)
          quality security impact plan-coverage adjudicate    (reviewer)
