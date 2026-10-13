@@ -41,6 +41,8 @@ Smallest fix that works (bugfix and feature):
   one-line reason it needs no change.
 - Add a second change location only when a path cannot reach the choke point, and say why.
 - Do not change the type, default or meaning of an existing option or API unless the spec asks.
+- A bugfix plan has at least one source-changing chunk, unless nothing reproduces (then
+  `VERDICT: BLOCKED - cannot reproduce`).
 - One chunk per concern. Do not add a "regression guard" chunk; the fix chunk's tests cover it.
 
 Chunk rules:
@@ -48,7 +50,7 @@ Chunk rules:
   fit it, split it.
 - `depends_on` must be acyclic and reference only lower ids.
 - `scope` lists the path globs the builder may change. Be tight.
-- `touches_tests` lists existing test files the chunk is allowed to modify. Default empty.
+- `touches_tests` lists existing test files the chunk is allowed to modify (globs allowed). Default empty.
 - Follow the track profile for what chunk 01 must be.
 - If no test runner exists, chunk 00 adds the smallest runner and says so.
 

@@ -27,5 +27,11 @@
 The reproduction test is green, the full suite is green, and no scenario regressed.
 
 ## Extra rules
+- If the reported symptom does not reproduce, do not stop at a test.
+  Find the nearest reproducible defect for the same input (different output, platform or
+  version) and plan the fix for that. Say at sign-off: "reported X does not reproduce; Y does;
+  fixing Y". You must never plan a test-only bugfix. If nothing reproduces at all, the
+  sign-off screen recommends abort.
 - Do not refactor around the bug. Cleanup is a separate request.
-- If the cause cannot be reproduced, end Refine with a question, not a guess.
+- While the user is still present (Refine), ask rather than guess about a symptom you cannot
+  reproduce; after sign-off, follow the rule above.

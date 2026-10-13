@@ -69,6 +69,8 @@ below 0.7, or `mixed: yes`, carry it into Refine as a question. Load `{PLUGIN}/t
    `chunks:` field. If it returns blocking findings, send them back to the planner or
    qa-author once. A second failure goes to sign-off as a warning.
 3. Scenarios marked `executable: no` are listed at sign-off as manual checks.
+4. If the planner returns `VERDICT: BLOCKED` (for example, nothing reproduces), do not slice;
+   carry the reason to sign-off as `Recommend abort: <reason>`.
 
 ### preflight
 1. Detect the stack (per package in a monorepo): package manifests, lockfiles, Makefile,
@@ -139,9 +141,15 @@ Details you must follow:
   its text in the role's output: `needs approval` or `haven't granted it yet` (spike S3). It sets
   `status=waiting_permission` and `waiting_on=<the command or path>`, saves state and stops the
   run. `{DF} status` then tells the user exactly what to allow.
+  Never write or append a verdict line to a role's output yourself, even when its report
+  states the result; a verdict you wrote is not evidence. Retry the role instead.
 - **TOO_BIG** from the builder: ask `planner` to re-slice that chunk once (not counted).
 - **NEEDS_DECISION**: take the stated conservative default, append it to `log.md` as an
-  assumption, continue. If there is no safe default, mark the chunk BLOCKED.
+  assumption, continue. If there is no safe default, mark the chunk BLOCKED. On the bugfix
+  track the conservative default is the one that makes the reported input behave correctly:
+  if the cause sits in a source file outside the chunk's `scope`, add that file to `scope`
+  (log it) and fix it. A test-only outcome is acceptable only when the defect cannot be
+  reproduced at all, and then the report must say so first (see Integrate).
 - **Read-only violation.** If `{DF} snapshot` differs after a read-only role, that is a
   `critical` integrity finding. Reset and continue.
 - **Merging findings.** Feed the concatenated findings through `{DF} gate`. On contradictions,
@@ -169,17 +177,24 @@ Details you must follow:
    branch diff against `root_base_sha`, while you run the full suite yourself.
 2. Then spawn `qa-functional` over every scenario against the final branch.
 3. Medium-and-above findings become fix chunks `FX-1`, `FX-2`, ... through the same loop. At
-   most 2 fix rounds.
+   most 2 fix rounds. Write each fix chunk's `scope` to cover every file named in its findings,
+   and list any existing test or test helper among them in `touches_tests`; otherwise the
+   integrity check rejects the attempt. A fix chunk changes only what its findings name: no new
+   test files, README or other prose unless a finding is about them.
 4. Write `report.md`: outcome per chunk (PASS, BLOCKED, SKIPPED), what was built, findings left
    with severity, waivers with reasons, assumptions, `UNVERIFIABLE` manual checks, baseline
    failures that were pre-existing, `late-find` and low findings (the "what to delete" list),
-   budget used, and one plain sentence stating whether the final branch is green.
-5. `{DF} finish <id> <session-id>` (sets stage and status to done and releases the lock). Tell the user the branch name and the worktree path. Never push,
+   budget used, and one plain sentence stating whether the final branch is green. If `{DF}
+   finish` prints `NOT FIXED` (the branch changes no source), the report's first line is
+   `NOT FIXED: <why>`, and your first sentence to the user says the reported problem is still
+   present and what a human must decide.
+5. `{DF} finish <id> <session-id>` (sets stage to done and status to done, or to `unresolved` when a bugfix branch changes no source, and releases the lock). Tell the user the branch name and the worktree path. Never push,
    merge or open a PR.
 
 ## Resume
 
-1. Pick the run: the id given, else the most recent unfinished one; ask only if several.
+1. Pick the run: the id given, else the most recent unfinished one (stage is not `done`); ask only if several.
+   A run with status `unresolved` is finished: report it, do not resume it.
 2. Pick a new session id, then `{DF} lock <id> acquire <session-id>`. If it refuses, say the run is live in another session and stop
    (the user may pass `--force`, which releases the lock first).
 3. `{DF} validate <id>`. If it fails, show the message and stop. Never repair state silently.

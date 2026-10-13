@@ -15,6 +15,11 @@ scan.
 
 ## Severity rubric
 
+Grade by the exposure the spec states. A local, single-user tool with no network or shared
+data: a crash, traceback or verbose error on pathological input (huge numbers, invalid
+encodings, oversized files) is `low`. The same flaw is `medium` or higher only when untrusted
+input reaches a network, another user, a shell, or persisted data.
+
 | Finding | Severity |
 |---|---|
 | Exploitable injection, auth bypass, secret committed, remote code execution | critical |

@@ -26,6 +26,7 @@ this rubric yourself. You hunt only for what to delete:
 |---|---|
 | Wrong behaviour, unhandled failure at a boundary, test that cannot fail | high |
 | Reinvented stdlib, needless dependency, single-implementation abstraction, duplicated logic | medium |
+| Duplication confined to test helpers or fixtures | low |
 | Speculative subsystem or large unused flexibility | high |
 | Fix wider than its cause (see Part 2) | medium |
 | Several tests asserting the same behaviour | low |

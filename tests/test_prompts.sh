@@ -105,7 +105,34 @@ grep -qi "intent, not wording" "$ROOT/agents/router.md" && ok "router: intent ov
 grep -q "uncovered" "$ROOT/agents/tester.md" && ok "tester: reports a criterion left uncovered by a deletion" || bad "tester: reports a criterion left uncovered by a deletion"
 grep -q "justifies it" "$ROOT/lenses/quality.md" && ok "quality lens: wide fix allowed when justified" || bad "quality lens: wide fix allowed when justified"
 grep -q "already promises" "$ROOT/agents/router.md" && grep -q "never produced" "$ROOT/agents/router.md" && grep -c "expected vs actual" "$ROOT/agents/router.md" | grep -q '^0$' && ok "router: no wording-keyed bullet left" || bad "router: no wording-keyed bullet left"
-grep -q "tester" "$ROOT/README.md" && ! grep -q "C -->|fail| N" "$ROOT/README.md" && ok "README: integrity failure still reaches the tester and gate" || bad "README: integrity failure still reaches the tester and gate"
+grep -q "C --> T" "$ROOT/README.md" && ! grep -q "C -->|fail| N" "$ROOT/README.md" && ok "README: integrity failure still reaches the tester and gate" || bad "README: integrity failure still reaches the tester and gate"
 ! grep -q "attempt < 3" "$ROOT/README.md" && ok "README: no raw < in a mermaid label" || bad "README: no raw < in a mermaid label"
+
+# Multi-repo evaluation findings
+SK="$ROOT/skills/dark-factory/SKILL.md"
+grep -q "NOT FIXED" "$SK" && ok "SKILL.md: report leads with NOT FIXED when finish says so" || bad "SKILL.md: report leads with NOT FIXED when finish says so"
+grep -q "makes the reported input behave correctly" "$SK" && ok "SKILL.md: bugfix NEEDS_DECISION default fixes the input" || bad "SKILL.md: bugfix NEEDS_DECISION default fixes the input"
+grep -q "named in its findings" "$SK" && ok "SKILL.md: fix chunk scope covers files named by findings" || bad "SKILL.md: fix chunk scope covers files named by findings"
+grep -q "test helper" "$SK" && ok "SKILL.md: fix chunk lists touched test helpers" || bad "SKILL.md: fix chunk lists touched test helpers"
+grep -q "unless a finding is about" "$SK" && ok "SKILL.md: fix chunk adds no docs unprompted" || bad "SKILL.md: fix chunk adds no docs unprompted"
+grep -qi "test helpers" "$ROOT/lenses/quality.md" && ok "quality lens: test-helper duplication is low" || bad "quality lens: test-helper duplication is low"
+grep -qi "exposure" "$ROOT/lenses/security.md" && ok "security lens: severity follows stated exposure" || bad "security lens: severity follows stated exposure"
+grep -qi "single-user" "$ROOT/lenses/security.md" && ok "security lens: local single-user case is named" || bad "security lens: local single-user case is named"
+grep -q "outside the chunk's" "$ROOT/agents/tester.md" && ok "tester: no new test files outside scope" || bad "tester: no new test files outside scope"
+
+grep -q "Never write or append a verdict" "$SK" && ok "SKILL.md: orchestrator never writes a role verdict" || bad "SKILL.md: orchestrator never writes a role verdict"
+# Evaluation: P1 (test-only bugfix) and build-track cost
+grep -q "nearest reproducible defect" "$ROOT/tracks/bugfix.md" && ok "bugfix track: plan the nearest reproducible defect" || bad "bugfix track: plan the nearest reproducible defect"
+grep -qi "never plan a test-only" "$ROOT/tracks/bugfix.md" && ok "bugfix track: no test-only plan" || bad "bugfix track: no test-only plan"
+grep -q "source-changing chunk" "$ROOT/agents/planner.md" && ok "planner: bugfix plan has a source-changing chunk" || bad "planner: bugfix plan has a source-changing chunk"
+grep -q "Typical size: 3 to 8 chunks" "$ROOT/tracks/build.md" && ok "build track: fewer, larger slices" || bad "build track: fewer, larger slices"
+grep -q "one concern, not one command" "$ROOT/tracks/build.md" && ok "build track: no chunk per command" || bad "build track: no chunk per command"
+
+# PR #2 review: SKILL.md prose gaps
+grep -q "planner returns .VERDICT: BLOCKED" "$SK" && grep -q "Recommend abort: <reason>" "$SK" && ok "SKILL.md: a blocked plan becomes a recommend-abort at sign-off" || bad "SKILL.md: a blocked plan becomes a recommend-abort at sign-off"
+grep -q "stage is not .done." "$SK" && ok "SKILL.md: unfinished means stage is not done" || bad "SKILL.md: unfinished means stage is not done"
+grep -q "status to done, or to .unresolved." "$SK" && ok "SKILL.md: finish may set status unresolved" || bad "SKILL.md: finish may set status unresolved"
+grep -q "| Typical size | 1 to 3 | 3 to 8 | 3 to 8 |" "$ROOT/docs/design.md" && ok "design.md matches the build track size" || bad "design.md matches the build track size"
+grep -q "eight real codebases" "$ROOT/README.md" && ok "README evidence counts real issues and builds separately" || bad "README evidence counts real issues and builds separately"
 
 finish
