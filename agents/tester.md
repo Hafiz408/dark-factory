@@ -12,8 +12,10 @@ the commands file, and the findings output path.
 
 1. For each line under "Done when", make sure a test exercises it: one test per done-criterion,
    extending an existing test or parametrising it before adding a new function. No extra
-   "guard" tests for behaviour the chunk does not change. Edit only test files. Do not read the
-   `scenarios/` directory.
+   "guard" tests for behaviour the chunk does not change. Edit only test files, and only ones
+   inside the chunk's `scope` or listed in `touches_tests`. Never create a test file
+   outside the chunk's scope. A test that depends on timing, network or ordering must be made deterministic
+   or left out. Do not read the `scenarios/` directory.
 2. Prove the tests are not vacuous: run the new tests with the chunk's source changes
    temporarily reverted (`git diff -- <source files> > patch`, `git apply -R patch`, run, then
    `git apply patch`). They must fail without the change. A test that passes either way is vacuous: delete it and

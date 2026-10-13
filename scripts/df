@@ -16,7 +16,7 @@ atomic() { local t="$1.tmp.$$"; cat > "$t" && mv "$t" "$1"; }
 conf_get() { tr -d '\r' < "$1" | sed -n "s/^$2=//p" | head -1; }
 conf_set() {
   case "$2=$3" in
-    status=active|status=waiting_permission|status=paused|status=done|status=aborted) ;;
+    status=active|status=waiting_permission|status=paused|status=done|status=unresolved|status=aborted) ;;
     status=*) die "conf-set: invalid status '$3'";;
     stage=intake|stage=route|stage=refine|stage=plan|stage=preflight|stage=signoff|stage=slice|stage=loop|stage=integrate|stage=done) ;;
     stage=*) die "conf-set: invalid stage '$3'";;
@@ -73,7 +73,7 @@ cmd_validate() { # df validate <run-id>
   done
   case "$(conf_get "$c" track)" in unrouted|bugfix|feature|build) ;; *) die "$c: bad track";; esac
   case "$(conf_get "$c" stage)" in intake|route|refine|plan|preflight|signoff|slice|loop|integrate|done) ;; *) die "$c: bad stage";; esac
-  case "$(conf_get "$c" status)" in active|waiting_permission|paused|done|aborted) ;; *) die "$c: bad status";; esac
+  case "$(conf_get "$c" status)" in active|waiting_permission|paused|done|unresolved|aborted) ;; *) die "$c: bad status";; esac
   git cat-file -e "$(conf_get "$c" root_base_sha)^{commit}" 2>/dev/null || die "$c: root_base_sha not found"
   for f in "$rd"/chunks/*.md; do
     [ -e "$f" ] || continue
@@ -213,10 +213,20 @@ cmd_scrub() { # df scrub <file>: scrubbed copy on stdout, exit 3 if anything was
 }
 
 cmd_finish() { # df finish <run-id> [session]: end state is written together, then the lock is released
-  local rd; rd=$(run_dir "$1")
-  [ -f "$rd/run.conf" ] || die "no such run: $1"
-  conf_set "$rd/run.conf" stage done
-  conf_set "$rd/run.conf" status done
+  local rd c st=done wt base track
+  rd=$(run_dir "$1"); c="$rd/run.conf"
+  [ -f "$c" ] || die "no such run: $1"
+  track=$(conf_get "$c" track); wt=$(conf_get "$c" worktree); base=$(conf_get "$c" root_base_sha)
+  # eval P1: a bugfix or feature run whose branch changed no source is not a fix; say so, loudly
+  if [ "$track" = bugfix ] || [ "$track" = feature ]; then
+    if [ -d "$wt" ] && [ -z "$(git -C "$wt" -c core.quotePath=false diff --name-only --no-renames "$base" HEAD |
+         grep -Ev "$ARTEFACT_RE" | grep -Ev "$TEST_RE" | grep -Evi '\.(md|rst|txt)$')" ]; then
+      st=unresolved
+      echo "NOT FIXED: the branch changes no source file (tests and docs only); see report.md" >&2
+    fi
+  fi
+  conf_set "$c" stage done
+  conf_set "$c" status "$st"
   cmd_lock "$1" release "${2:-}"
 }
 

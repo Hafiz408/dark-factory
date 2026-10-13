@@ -108,4 +108,16 @@ grep -q "already promises" "$ROOT/agents/router.md" && grep -q "never produced" 
 grep -q "tester" "$ROOT/README.md" && ! grep -q "C -->|fail| N" "$ROOT/README.md" && ok "README: integrity failure still reaches the tester and gate" || bad "README: integrity failure still reaches the tester and gate"
 ! grep -q "attempt < 3" "$ROOT/README.md" && ok "README: no raw < in a mermaid label" || bad "README: no raw < in a mermaid label"
 
+# Multi-repo evaluation findings
+SK="$ROOT/skills/dark-factory/SKILL.md"
+grep -q "NOT FIXED" "$SK" && ok "SKILL.md: report leads with NOT FIXED when finish says so" || bad "SKILL.md: report leads with NOT FIXED when finish says so"
+grep -q "makes the reported input behave correctly" "$SK" && ok "SKILL.md: bugfix NEEDS_DECISION default fixes the input" || bad "SKILL.md: bugfix NEEDS_DECISION default fixes the input"
+grep -q "named in its findings" "$SK" && ok "SKILL.md: fix chunk scope covers files named by findings" || bad "SKILL.md: fix chunk scope covers files named by findings"
+grep -q "test helper" "$SK" && ok "SKILL.md: fix chunk lists touched test helpers" || bad "SKILL.md: fix chunk lists touched test helpers"
+grep -q "unless a finding is about" "$SK" && ok "SKILL.md: fix chunk adds no docs unprompted" || bad "SKILL.md: fix chunk adds no docs unprompted"
+grep -qi "test helpers" "$ROOT/lenses/quality.md" && ok "quality lens: test-helper duplication is low" || bad "quality lens: test-helper duplication is low"
+grep -qi "exposure" "$ROOT/lenses/security.md" && ok "security lens: severity follows stated exposure" || bad "security lens: severity follows stated exposure"
+grep -qi "single-user" "$ROOT/lenses/security.md" && ok "security lens: local single-user case is named" || bad "security lens: local single-user case is named"
+grep -q "outside the chunk's" "$ROOT/agents/tester.md" && ok "tester: no new test files outside scope" || bad "tester: no new test files outside scope"
+
 finish

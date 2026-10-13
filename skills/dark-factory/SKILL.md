@@ -141,7 +141,11 @@ Details you must follow:
   run. `{DF} status` then tells the user exactly what to allow.
 - **TOO_BIG** from the builder: ask `planner` to re-slice that chunk once (not counted).
 - **NEEDS_DECISION**: take the stated conservative default, append it to `log.md` as an
-  assumption, continue. If there is no safe default, mark the chunk BLOCKED.
+  assumption, continue. If there is no safe default, mark the chunk BLOCKED. On the bugfix
+  track the conservative default is the one that makes the reported input behave correctly:
+  if the cause sits in a source file outside the chunk's `scope`, add that file to `scope`
+  (log it) and fix it. A test-only outcome is acceptable only when the defect cannot be
+  reproduced at all, and then the report must say so first (see Integrate).
 - **Read-only violation.** If `{DF} snapshot` differs after a read-only role, that is a
   `critical` integrity finding. Reset and continue.
 - **Merging findings.** Feed the concatenated findings through `{DF} gate`. On contradictions,
@@ -169,11 +173,17 @@ Details you must follow:
    branch diff against `root_base_sha`, while you run the full suite yourself.
 2. Then spawn `qa-functional` over every scenario against the final branch.
 3. Medium-and-above findings become fix chunks `FX-1`, `FX-2`, ... through the same loop. At
-   most 2 fix rounds.
+   most 2 fix rounds. Write each fix chunk's `scope` to cover every file named in its findings,
+   and list any existing test or test helper among them in `touches_tests`; otherwise the
+   integrity check rejects the attempt. A fix chunk changes only what its findings name: no new
+   test files, README or other prose unless a finding is about them.
 4. Write `report.md`: outcome per chunk (PASS, BLOCKED, SKIPPED), what was built, findings left
    with severity, waivers with reasons, assumptions, `UNVERIFIABLE` manual checks, baseline
    failures that were pre-existing, `late-find` and low findings (the "what to delete" list),
-   budget used, and one plain sentence stating whether the final branch is green.
+   budget used, and one plain sentence stating whether the final branch is green. If `{DF}
+   finish` prints `NOT FIXED` (the branch changes no source), the report's first line is
+   `NOT FIXED: <why>`, and your first sentence to the user says the reported problem is still
+   present and what a human must decide.
 5. `{DF} finish <id> <session-id>` (sets stage and status to done and releases the lock). Tell the user the branch name and the worktree path. Never push,
    merge or open a PR.
 
