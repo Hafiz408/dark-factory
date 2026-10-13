@@ -79,6 +79,17 @@ grep -q 'Base directory for this skill' "$S" && ok "SKILL.md derives plugin root
 for sub in $(grep -o '{DF} [a-z-]*' "$S" | awk '{print $2}' | sort -u); do
   grep -q "^  $sub)" "$ROOT/scripts/df" && ok "df subcommand '$sub' exists" || bad "df subcommand '$sub' exists"
 done
+# Validator finding: an unquoted ${CLAUDE_PLUGIN_ROOT} splits on a space and the guard never runs
+python3 - "$ROOT/hooks/hooks.json" <<'PY' && ok "hook command quotes the plugin root" || bad "hook command quotes the plugin root"
+import json,sys
+h=json.load(open(sys.argv[1]))
+for ev in h["hooks"].values():
+    for m in ev:
+        for hk in m["hooks"]:
+            c=hk["command"]
+            assert '"${CLAUDE_PLUGIN_ROOT}' in c, c
+PY
+grep -q '"description"' "$ROOT/.claude-plugin/marketplace.json" && ok "marketplace has a description" || bad "marketplace has a description"
 python3 -c "import json,sys; json.load(open('$ROOT/hooks/hooks.json')); json.load(open('$ROOT/.claude-plugin/plugin.json'))" \
   && ok "json manifests parse" || bad "json manifests parse"
 

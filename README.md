@@ -10,8 +10,11 @@ Status: v0.1, private. Claude Code only. macOS, Linux and WSL.
 ## Install
 
 ```bash
-claude --plugin-dir /path/to/dark-factory
+claude plugin marketplace add /path/to/dark-factory      # or owner/repo once published
+claude plugin install dark-factory@dark-factory --scope project
 ```
+
+Try it without installing: `claude --plugin-dir /path/to/dark-factory`.
 
 ## Use
 

@@ -1,0 +1,15 @@
+{
+  "name": "dark-factory",
+  "description": "Dark Factory: refine a request, sign off once, then build, test and QA unattended with a routed team of subagents.",
+  "owner": {
+    "name": "hafiz-ebono"
+  },
+  "plugins": [
+    {
+      "name": "dark-factory",
+      "source": "./",
+      "description": "Spec in, tested software out. Refine with the user, sign off once, then a routed team of subagents builds, tests and QAs in a loop.",
+      "version": "0.1.0"
+    }
+  ]
+}
