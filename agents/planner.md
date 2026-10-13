@@ -48,7 +48,7 @@ Chunk rules:
   fit it, split it.
 - `depends_on` must be acyclic and reference only lower ids.
 - `scope` lists the path globs the builder may change. Be tight.
-- `touches_tests` lists existing test files the chunk is allowed to modify. Default empty.
+- `touches_tests` lists existing test files the chunk is allowed to modify (globs allowed). Default empty.
 - Follow the track profile for what chunk 01 must be.
 - If no test runner exists, chunk 00 adds the smallest runner and says so.
 

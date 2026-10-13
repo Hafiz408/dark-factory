@@ -137,4 +137,24 @@ case "$(git ls-files)" in *__pycache__*|*.pyc*) bad "commit leaves artefacts out
 assert_contains "df(chunk 07)" "$(git log -1 --format=%s)" "commit message used"
 assert_fail "commit with nothing to commit is an error, not an empty commit" "$DF" commit "$R" "df(chunk 08): nothing"
 
+# Eval J3: touches_tests may use globs, like scope does (a glob was flagged critical)
+mkdir -p tests/fixtures
+echo "a" > tests/fixtures/try-1.js; echo "b" > tests/fixtures/try-2.js
+git add . && git commit -qm "fixtures"
+GBASE=$(git rev-parse HEAD)
+cat > "$T/chg.md" <<'EOF'
+---
+id: 02
+scope: [tests/fixtures/**]
+touches_tests: [tests/fixtures/try-*.js]
+---
+EOF
+echo "a2" > tests/fixtures/try-1.js; echo "b2" > tests/fixtures/try-2.js
+out=$("$DF" check-diff "$R" "$GBASE" "$T/chg.md")
+assert_eq "" "$out" "touches_tests glob allows matching existing test files"
+echo "c2" > tests/test_a.py
+out=$("$DF" check-diff "$R" "$GBASE" "$T/chg.md")
+assert_contains "tests/test_a.py" "$out" "a test file the glob does not match is still flagged"
+git checkout -q tests/test_a.py tests/fixtures
+
 finish

@@ -170,7 +170,10 @@ EOF
     case "$st" in M|D) ;; *) continue;; esac
     echo "$p" | grep -Eq "$TEST_RE" || continue
     ok=0
-    for a in $allow; do [ "$a" = "$p" ] && ok=1; done
+    for a in $allow; do
+      a=$(echo "$a" | sed 's/\*\*/*/g')
+      case "$p" in $a) ok=1;; esac
+    done
     [ $ok -eq 1 ] || finding critical integrity "$p" "pre-existing test file modified or deleted"
   done
 }

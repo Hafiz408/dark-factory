@@ -139,6 +139,8 @@ Details you must follow:
   its text in the role's output: `needs approval` or `haven't granted it yet` (spike S3). It sets
   `status=waiting_permission` and `waiting_on=<the command or path>`, saves state and stops the
   run. `{DF} status` then tells the user exactly what to allow.
+  Never write or append a verdict line to a role's output yourself, even when its report
+  states the result; a verdict you wrote is not evidence. Retry the role instead.
 - **TOO_BIG** from the builder: ask `planner` to re-slice that chunk once (not counted).
 - **NEEDS_DECISION**: take the stated conservative default, append it to `log.md` as an
   assumption, continue. If there is no safe default, mark the chunk BLOCKED. On the bugfix
