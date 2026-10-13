@@ -41,6 +41,8 @@ Smallest fix that works (bugfix and feature):
   one-line reason it needs no change.
 - Add a second change location only when a path cannot reach the choke point, and say why.
 - Do not change the type, default or meaning of an existing option or API unless the spec asks.
+- A bugfix plan has at least one source-changing chunk, unless nothing reproduces (then
+  `VERDICT: BLOCKED - cannot reproduce`).
 - One chunk per concern. Do not add a "regression guard" chunk; the fix chunk's tests cover it.
 
 Chunk rules:

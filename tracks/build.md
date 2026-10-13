@@ -17,7 +17,8 @@
 - Chunk 01 is the walking skeleton: it starts, answers one request or command, and has one
   passing test. It also establishes the commands for build, test and run.
 - Later chunks are vertical feature slices in priority order.
-- Typical size: 6 to 15 chunks.
+- Typical size: 3 to 8 chunks. A chunk is one concern, not one command or route: group the
+  slices that share a module and a test file. Split only on a real dependency or size limit.
 
 ## QA scenarios
 - Each core journey end to end against the running application.

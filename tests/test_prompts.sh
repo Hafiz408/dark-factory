@@ -121,4 +121,11 @@ grep -qi "single-user" "$ROOT/lenses/security.md" && ok "security lens: local si
 grep -q "outside the chunk's" "$ROOT/agents/tester.md" && ok "tester: no new test files outside scope" || bad "tester: no new test files outside scope"
 
 grep -q "Never write or append a verdict" "$SK" && ok "SKILL.md: orchestrator never writes a role verdict" || bad "SKILL.md: orchestrator never writes a role verdict"
+# Evaluation: P1 (test-only bugfix) and build-track cost
+grep -q "nearest reproducible defect" "$ROOT/tracks/bugfix.md" && ok "bugfix track: plan the nearest reproducible defect" || bad "bugfix track: plan the nearest reproducible defect"
+grep -qi "never plan a test-only" "$ROOT/tracks/bugfix.md" && ok "bugfix track: no test-only plan" || bad "bugfix track: no test-only plan"
+grep -q "source-changing chunk" "$ROOT/agents/planner.md" && ok "planner: bugfix plan has a source-changing chunk" || bad "planner: bugfix plan has a source-changing chunk"
+grep -q "Typical size: 3 to 8 chunks" "$ROOT/tracks/build.md" && ok "build track: fewer, larger slices" || bad "build track: fewer, larger slices"
+grep -q "one concern, not one command" "$ROOT/tracks/build.md" && ok "build track: no chunk per command" || bad "build track: no chunk per command"
+
 finish
