@@ -70,5 +70,31 @@ Prompt-layer only; each has a structural check in `tests/test_prompts.sh`.
 | ~6x test volume; attempts burned on guard tests that could not go red | Tester: one test per done-criterion, extend before adding; a vacuous test is deleted, not a finding (reproduction test excepted) |
 | Enhancement routed as bugfix by wording | Router decides on intent, not wording |
 
-**Not yet re-measured.** These are instructions, so the effect needs live re-runs of #113 and
-#342 on the same snapshots; compare source lines, test lines and attempts against the table above.
+## Re-run with the changes
+
+Same two snapshots, fresh clones with no earlier branches reachable, plugin installed from this
+branch through the marketplace. Upstream's tests applied after the run; controls revert only
+the source change. The re-run used the prompts as of the first commit of this section; the
+review wording fixes landed after it started.
+
+| | #113 before | #113 after | #342 before | #342 after |
+|---|---|---|---|---|
+| Upstream's test, factory fix | passes | **passes** | 37/37 | **37/37** |
+| Upstream's test, control | fails | fails | fails | fails |
+| Source change | +7/-1, 3 places | **+2/-1, 2 places** | +10/-5 | +13/-1 |
+| Tests it added | +144 lines | **+42** | +134 | **+90** |
+| Chunks | 3 | **2** | 2 | 2 |
+| Attempts per chunk | 1/3/2 | **1/1** | 1/2 | **1/1** |
+| Wall clock | ~45 min + crash/resume | **~30 min, no interruption** | ~44 min | **~28 min** |
+| Routed as | bugfix | bugfix | bugfix | bugfix |
+
+Full suites with upstream's tests applied: 342 passed (#113), 306 passed (#342; upstream's
+`test_style.py` replaces the factory's additions to that file).
+
+**Read honestly.** One run per task. Tests added dropped 71% and 33%, attempts fell to one per
+chunk, and time fell by a third or more. The #113 fix is now two places instead of three but
+is still not upstream's single `_format_value` line (it fixes `_justify` and
+`_str_block_width`, which together cover the same output). #342's source change is no
+smaller in lines. Routing did not change: #342 is still `bugfix`, so the intent rule did not
+move that case. The #113 run had no crash, so resume was not exercised again. Token cost is
+still not measured.
