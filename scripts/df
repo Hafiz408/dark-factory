@@ -216,14 +216,17 @@ cmd_scrub() { # df scrub <file>: scrubbed copy on stdout, exit 3 if anything was
 }
 
 cmd_finish() { # df finish <run-id> [session]: end state is written together, then the lock is released
-  local rd c st=done wt base track
+  local rd c st=done wt base track tre prose
   rd=$(run_dir "$1"); c="$rd/run.conf"
   [ -f "$c" ] || die "no such run: $1"
   track=$(conf_get "$c" track); wt=$(conf_get "$c" worktree); base=$(conf_get "$c" root_base_sha)
-  # eval P1: a bugfix or feature run whose branch changed no source is not a fix; say so, loudly
-  if [ "$track" = bugfix ] || [ "$track" = feature ]; then
-    if [ -d "$wt" ] && [ -z "$(git -C "$wt" -c core.quotePath=false diff --name-only --no-renames "$base" HEAD |
-         grep -Ev "$ARTEFACT_RE" | grep -Ev "$TEST_RE" | grep -Evi '\.(md|rst|txt)$')" ]; then
+  # eval P1: a bugfix run whose branch changed no source is not a fix; say so, loudly.
+  # Test support files and prose do not count as source; config and requirements files do.
+  tre="$TEST_RE|(^|/)(conftest\.py|testdata|fixtures?)(/|$)|(Test|Tests)\.(java|kt|cs)$|_spec\.rb$"
+  prose='(^|/)(docs?|doc)/|(^|/)CHANGELOG[^/]*$|\.(md|rst)$'
+  if [ "$track" = bugfix ] && [ -d "$wt" ] && git -C "$wt" rev-parse --verify -q "$base^{commit}" >/dev/null; then
+    if [ -z "$(git -C "$wt" -c core.quotePath=false diff --name-only --no-renames "$base" HEAD |
+         grep -Ev "$ARTEFACT_RE" | grep -Ev "$tre" | grep -Eiv "$prose")" ]; then
       st=unresolved
       echo "NOT FIXED: the branch changes no source file (tests and docs only); see report.md" >&2
     fi

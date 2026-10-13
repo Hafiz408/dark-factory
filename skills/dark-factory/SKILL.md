@@ -69,6 +69,8 @@ below 0.7, or `mixed: yes`, carry it into Refine as a question. Load `{PLUGIN}/t
    `chunks:` field. If it returns blocking findings, send them back to the planner or
    qa-author once. A second failure goes to sign-off as a warning.
 3. Scenarios marked `executable: no` are listed at sign-off as manual checks.
+4. If the planner returns `VERDICT: BLOCKED` (for example, nothing reproduces), do not slice;
+   carry the reason to sign-off as `Recommend abort: <reason>`.
 
 ### preflight
 1. Detect the stack (per package in a monorepo): package manifests, lockfiles, Makefile,
@@ -186,12 +188,13 @@ Details you must follow:
    finish` prints `NOT FIXED` (the branch changes no source), the report's first line is
    `NOT FIXED: <why>`, and your first sentence to the user says the reported problem is still
    present and what a human must decide.
-5. `{DF} finish <id> <session-id>` (sets stage and status to done and releases the lock). Tell the user the branch name and the worktree path. Never push,
+5. `{DF} finish <id> <session-id>` (sets stage to done and status to done, or to `unresolved` when a bugfix branch changes no source, and releases the lock). Tell the user the branch name and the worktree path. Never push,
    merge or open a PR.
 
 ## Resume
 
-1. Pick the run: the id given, else the most recent unfinished one; ask only if several.
+1. Pick the run: the id given, else the most recent unfinished one (stage is not `done`); ask only if several.
+   A run with status `unresolved` is finished: report it, do not resume it.
 2. Pick a new session id, then `{DF} lock <id> acquire <session-id>`. If it refuses, say the run is live in another session and stop
    (the user may pass `--force`, which releases the lock first).
 3. `{DF} validate <id>`. If it fails, show the message and stop. Never repair state silently.

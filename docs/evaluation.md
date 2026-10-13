@@ -38,8 +38,8 @@ it. One run per task. Baseline build: `6434696`.
 sign-off approval. Active time is roughly the figure shown.
 
 Upstream's own source change, for comparison: PT-1 1 line, J1 16, R1 20, J2 8, G1 79, J3 16.
-The factory's source change was at or below upstream's in every passing task except PT-1
-(3 changed lines against 1) and R1 (50 changed lines against 20, about 2.5x). J2 touched only
+The factory's source change was at or below upstream's in G1, J2 and J3, and above it in PT-1
+(3 changed lines against 1), J1 (22 against 16) and R1 (50 against 20, about 2.5x). J2 touched only
 `formatter.js` for source (8 lines against upstream's 8) and added docs and a changelog entry.
 
 ## What it did well
@@ -68,6 +68,9 @@ The factory's source change was at or below upstream's in every passing task exc
 | 8 | Orchestrator hand-appended a missing VERDICT line | J3 chunk 02 | **Fixed**: forbidden; retry the role |
 | 9 | Router keyed on wording | PT-2 (a request for new output) was routed `bugfix` in both rounds | Open, low impact: the bugfix track still produced a correct, minimal fix |
 | 10 | Build tasks cost far more than the code is worth | B1: 10 chunks, 646 test lines for 383 source lines, ~2 hours; most of it was findings 4 to 7 | **Partly fixed**: those four rules, plus the build track now plans 3 to 8 chunks and groups slices that share a module. Not re-measured |
+
+Rows 1 to 8 were fixed test-first and verified by the unit and structural tests only. None has
+been re-run live; they are instructions to models and need a second evaluation round to confirm.
 
 ## Harness artefacts (not plugin defects)
 

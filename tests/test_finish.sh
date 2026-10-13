@@ -43,4 +43,35 @@ set -- $(mk bugfix); R=$1 id=$2 rd=$4
 assert_ok "validate accepts unresolved" bash -c "cd '$R' && '$DF' validate '$id'"
 assert_contains "unresolved" "$(cd "$R" && "$DF" list)" "list shows unresolved"
 
+# PR #2 review: false positives and negatives of the no-source check
+chg() { # chg <wt> <path> : commit a one-line change at <path>
+  mkdir -p "$1/$(dirname "$2")"; echo "$RANDOM" > "$1/$2"; $G -C "$1" add -A; $G -C "$1" commit -qm "chg $2"
+}
+run_finish() { (cd "$1" && "$DF" finish "$2" s1 >/dev/null 2>&1); }
+
+set -- $(mk bugfix); R=$1 id=$2 wt=$3 rd=$4
+chg "$wt" requirements.txt; run_finish "$R" "$id"
+assert_eq "done" "$(status_of "$R" "$rd")" "a requirements.txt-only fix is a fix"
+
+set -- $(mk bugfix); R=$1 id=$2 wt=$3 rd=$4
+chg "$wt" CMakeLists.txt; run_finish "$R" "$id"
+assert_eq "done" "$(status_of "$R" "$rd")" "a CMakeLists.txt-only fix is a fix"
+
+set -- $(mk bugfix); R=$1 id=$2 wt=$3 rd=$4
+chg "$wt" conftest.py; chg "$wt" testdata/case.json; run_finish "$R" "$id"
+assert_eq "unresolved" "$(status_of "$R" "$rd")" "conftest and testdata only is still test-only"
+
+set -- $(mk bugfix); R=$1 id=$2 wt=$3 rd=$4
+chg "$wt" docs/guide.txt; run_finish "$R" "$id"
+assert_eq "unresolved" "$(status_of "$R" "$rd")" "docs/ only is not a fix"
+
+set -- $(mk feature); R=$1 id=$2 wt=$3 rd=$4
+chg "$wt" tests/test_y.py; run_finish "$R" "$id"
+assert_eq "done" "$(status_of "$R" "$rd")" "feature track is never marked unresolved"
+
+set -- $(mk bugfix); R=$1 id=$2 wt=$3 rd=$4
+(cd "$R" && "$DF" conf-set "$rd/run.conf" worktree /nonexistent/path)
+run_finish "$R" "$id"
+assert_eq "done" "$(status_of "$R" "$rd")" "a missing worktree does not mislabel the run"
+
 finish

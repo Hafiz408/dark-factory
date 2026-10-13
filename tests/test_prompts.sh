@@ -128,4 +128,11 @@ grep -q "source-changing chunk" "$ROOT/agents/planner.md" && ok "planner: bugfix
 grep -q "Typical size: 3 to 8 chunks" "$ROOT/tracks/build.md" && ok "build track: fewer, larger slices" || bad "build track: fewer, larger slices"
 grep -q "one concern, not one command" "$ROOT/tracks/build.md" && ok "build track: no chunk per command" || bad "build track: no chunk per command"
 
+# PR #2 review: SKILL.md prose gaps
+grep -q "planner returns .VERDICT: BLOCKED" "$SK" && grep -q "Recommend abort: <reason>" "$SK" && ok "SKILL.md: a blocked plan becomes a recommend-abort at sign-off" || bad "SKILL.md: a blocked plan becomes a recommend-abort at sign-off"
+grep -q "stage is not .done." "$SK" && ok "SKILL.md: unfinished means stage is not done" || bad "SKILL.md: unfinished means stage is not done"
+grep -q "status to done, or to .unresolved." "$SK" && ok "SKILL.md: finish may set status unresolved" || bad "SKILL.md: finish may set status unresolved"
+grep -q "| Typical size | 1 to 3 | 3 to 8 | 3 to 8 |" "$ROOT/docs/design.md" && ok "design.md matches the build track size" || bad "design.md matches the build track size"
+grep -q "eight real codebases" "$ROOT/README.md" && ok "README evidence counts real issues and builds separately" || bad "README evidence counts real issues and builds separately"
+
 finish

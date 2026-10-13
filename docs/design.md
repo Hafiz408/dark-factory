@@ -93,7 +93,7 @@ Roles are fixed. A track is a markdown profile that configures them.
 | Plan shape | root cause hypothesis, minimal diff | map existing patterns, vertical slices | architecture, walking skeleton, slices |
 | Chunk 1 | failing repro test, red before any fix | thinnest end-to-end slice | walking skeleton that starts and responds |
 | No test runner | chunk 0 adds the smallest runner, flagged at sign-off | same | part of the skeleton |
-| Typical size | 1 to 3 | 3 to 8 | 6 to 15 |
+| Typical size | 1 to 3 | 3 to 8 | 3 to 8 |
 | Holdout QA | symptom gone, neighbours unchanged | new journeys work, existing unchanged | end-to-end journeys on the running app |
 | Done | repro green, suite green, no scenario regressed | criteria met, suite green, scenarios pass | app starts, journeys pass, suite green |
 

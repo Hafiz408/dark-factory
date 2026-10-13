@@ -83,8 +83,9 @@ flowchart TD
 
 ## Evidence
 
-Run on real issues in ten codebases (Python, JavaScript, Go, Rust; 3k to 98k lines; bug,
-feature and build tracks), each graded by a hidden test the factory never saw. Every failure
+Run on eight real codebases (nine issues) plus two specs built from scratch, across Python, JavaScript, Go and
+Rust (3k to 98k lines; bug, feature and build tracks), each graded by a hidden test the factory
+never saw. One run each; one task did not finish. Every failure
 and what changed because of it is in `docs/evaluation.md` and `docs/field-test.md`.
 
 No guarantee of correct output, no sandbox, prompt injection mitigated and not solved, native
