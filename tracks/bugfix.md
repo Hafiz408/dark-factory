@@ -9,12 +9,13 @@
 ## Plan shape
 1. Root-cause hypothesis with the file and function it points to, and the evidence.
 2. Minimal diff: the smallest change that removes the cause, not the symptom.
-3. Every other caller of the code being changed (fix it once where all callers route through).
+3. Every other caller of the code being changed. Name the choke point all callers route
+   through and fix it there once; do not patch each call site.
 
 ## Chunks
 - Chunk 01 is ALWAYS a failing reproduction test. It must be red against the unfixed code. The
   tester verifies this before any fix is accepted.
-- Chunk 02 is the fix. Further chunks only for additional callers or a regression guard.
+- Chunk 02 is the fix. Further chunks only for a caller that cannot reach the choke point.
 - Typical size: 1 to 3 chunks.
 
 ## QA scenarios
