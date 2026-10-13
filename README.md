@@ -123,12 +123,14 @@ The router decides on intent, not wording.
 
 ## Evidence and limits
 
-Run against two real issues in `jazzband/prettytable`; both passed the maintainers' own
-hidden tests. Results, including what it did badly, are in `docs/field-test.md`. Scenario
-review is in `docs/battle-test.md`, what was run live in `docs/acceptance.md`.
+Run against real issues in ten codebases (Python, JavaScript, Go, Rust; 3k to 98k lines; bug,
+feature and build tracks), each graded by a hidden upstream or black-box test the factory never
+saw. Results, including every failure and what was changed because of it, are in
+`docs/evaluation.md` and `docs/field-test.md`. Scenario review is in `docs/battle-test.md`,
+what was run live in `docs/acceptance.md`.
 
 No guarantee of correct output, no sandbox, prompt injection mitigated and not solved, native
-Windows unsupported, each live scenario run once.
+Windows unsupported, each live scenario run once, token cost not measured.
 
 ## Development
 
