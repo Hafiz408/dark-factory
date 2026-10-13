@@ -93,4 +93,12 @@ grep -q '"description"' "$ROOT/.claude-plugin/marketplace.json" && ok "marketpla
 python3 -c "import json,sys; json.load(open('$ROOT/hooks/hooks.json')); json.load(open('$ROOT/.claude-plugin/plugin.json'))" \
   && ok "json manifests parse" || bad "json manifests parse"
 
+# Field test (prettytable): fixes were too wide, tests too many, router keyed on wording
+grep -q "choke point" "$ROOT/agents/planner.md" && ok "planner: names the choke point" || bad "planner: names the choke point"
+grep -q "choke point" "$ROOT/tracks/bugfix.md" && ok "bugfix track: one fix point" || bad "bugfix track: one fix point"
+grep -q "Fix wider than its cause" "$ROOT/lenses/quality.md" && ok "quality lens: flags a fix wider than its cause" || bad "quality lens: flags a fix wider than its cause"
+grep -q "one test per done-criterion" "$ROOT/agents/tester.md" && ok "tester: caps test volume" || bad "tester: caps test volume"
+grep -q "delete it" "$ROOT/agents/tester.md" && ok "tester: drops a test that cannot go red" || bad "tester: drops a test that cannot go red"
+grep -qi "intent, not wording" "$ROOT/agents/router.md" && ok "router: intent over wording" || bad "router: intent over wording"
+
 finish

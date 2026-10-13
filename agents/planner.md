@@ -35,6 +35,14 @@ scenarios: []
 ## Failure notes
 ```
 
+Smallest fix that works (bugfix and feature):
+- In `plan.md` name the **choke point**: the one function or module every affected path
+  already routes through. Fix it there. List every other call site you looked at, each with a
+  one-line reason it needs no change.
+- Add a second change location only when a path cannot reach the choke point, and say why.
+- Do not change the type, default or meaning of an existing option or API unless the spec asks.
+- One chunk per concern. Do not add a "regression guard" chunk; the fix chunk's tests cover it.
+
 Chunk rules:
 - One concern per chunk. At most 8 files touched and at most 5 done-criteria. If you cannot
   fit it, split it.

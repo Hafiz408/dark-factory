@@ -58,3 +58,17 @@ One run per task. This shows the path works on real code, not that it is reliabl
 
 One language, one repo, two tasks. No monorepo, no repo that needs services, no task that
 needed a design discussion, no large codebase.
+
+## Changes made in response (feat/minimal-diff)
+
+Prompt-layer only; each has a structural check in `tests/test_prompts.sh`.
+
+| Finding | Change |
+|---|---|
+| Fix touched 3 places where one choke point existed | Planner names the choke point and justifies every untouched call site; bugfix track fixes it once |
+| Wider-than-needed fix not flagged | Quality lens: "fix wider than its cause" is `medium` |
+| ~6x test volume; attempts burned on guard tests that could not go red | Tester: one test per done-criterion, extend before adding; a vacuous test is deleted, not a finding (reproduction test excepted) |
+| Enhancement routed as bugfix by wording | Router decides on intent, not wording |
+
+**Not yet re-measured.** These are instructions, so the effect needs live re-runs of #113 and
+#342 on the same snapshots; compare source lines, test lines and attempts against the table above.

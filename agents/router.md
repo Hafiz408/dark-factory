@@ -9,6 +9,10 @@ You classify one request. Read the rules file you were given first.
 
 Inputs in your prompt: path to `input.md`, path to the repo, and optionally `spec.md` (second pass).
 
+Decide on intent, not wording: a request worded as "broken" or "wrong" is a `feature` when
+the product never produced the requested behaviour, and a request worded as "add" is a
+`bugfix` when the product already promises it and it fails.
+
 Decide the track:
 - `build`: the repo has no source files, or the request describes a new application.
 - `bugfix`: the request reports something broken, a regression, an error or stack trace, or
