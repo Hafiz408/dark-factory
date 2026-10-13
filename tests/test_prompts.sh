@@ -105,7 +105,7 @@ grep -qi "intent, not wording" "$ROOT/agents/router.md" && ok "router: intent ov
 grep -q "uncovered" "$ROOT/agents/tester.md" && ok "tester: reports a criterion left uncovered by a deletion" || bad "tester: reports a criterion left uncovered by a deletion"
 grep -q "justifies it" "$ROOT/lenses/quality.md" && ok "quality lens: wide fix allowed when justified" || bad "quality lens: wide fix allowed when justified"
 grep -q "already promises" "$ROOT/agents/router.md" && grep -q "never produced" "$ROOT/agents/router.md" && grep -c "expected vs actual" "$ROOT/agents/router.md" | grep -q '^0$' && ok "router: no wording-keyed bullet left" || bad "router: no wording-keyed bullet left"
-grep -q "tester" "$ROOT/README.md" && ! grep -q "C -->|fail| N" "$ROOT/README.md" && ok "README: integrity failure still reaches the tester and gate" || bad "README: integrity failure still reaches the tester and gate"
+grep -q "C --> T" "$ROOT/README.md" && ! grep -q "C -->|fail| N" "$ROOT/README.md" && ok "README: integrity failure still reaches the tester and gate" || bad "README: integrity failure still reaches the tester and gate"
 ! grep -q "attempt < 3" "$ROOT/README.md" && ok "README: no raw < in a mermaid label" || bad "README: no raw < in a mermaid label"
 
 # Multi-repo evaluation findings
