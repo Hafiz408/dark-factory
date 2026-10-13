@@ -1,11 +1,10 @@
 # Dark Factory
 
-Spec in, tested software out. Give it an idea, PRD, feature request or bug report. It asks you
-only what the repo cannot answer, you sign off once, then a team of subagents builds, tests and
-QAs in a loop with nobody in the middle. You get a branch and a report. It never pushes,
-merges or opens a PR.
+Give it a bug report, feature request, PRD or an idea. It asks only what the repo can't
+answer, you sign off once, then a team of subagents builds, tests and QAs in a loop with nobody
+in the middle. You get a git branch and a report. It never pushes, merges or opens a PR.
 
-Status: v0.1, private. Claude Code only. macOS, Linux and WSL.
+Claude Code plugin. v0.1, private. macOS, Linux, WSL.
 
 ## Install
 
@@ -23,111 +22,70 @@ Try without installing: `claude --plugin-dir /path/to/dark-factory`.
 /dark-factory list | status [run-id] | resume [run-id] | clean <run-id>
 ```
 
-`resume` works from a brand-new session in the same repo. All state is on disk.
+You answer one batch of questions (at most 8, each with a default) and approve once. `resume`
+works from a new session: all state is on disk.
+
+## What you get
+
+- **Routed work.** `bugfix`, `feature` or `build` is picked for you and changes how it plans.
+- **A branch `df/<run-id>`** in a separate git worktree, one commit per passing chunk.
+- **`report.md`:** what was built, what was left (with severity), assumptions, and one plain
+  line saying whether the branch is green. A bugfix that changed no source says **NOT FIXED**.
+- **Hands-off QA.** Four parallel read-only reviewers, medium-or-above findings block.
+- **Resume** after a crash, closed laptop or expired login, losing at most one attempt.
 
 ## How it works
 
-You are involved at two points only: answering questions, and one sign-off.
-
 ```mermaid
 flowchart LR
-    A([Your request]) --> R[Route<br/>bugfix / feature / build]
+    A([Your request]) --> R[Route]
     R --> F[Refine<br/>gap questions]
-    F --> P[Plan<br/>chunks + QA scenarios]
+    F --> P[Plan<br/>chunks + hidden QA scenarios]
     P --> PF[Preflight<br/>deps, commands, baseline]
-    PF --> S{{Sign-off<br/>approve / amend / abort}}
-    S --> L[[Loop per chunk<br/>build, test, QA]]
+    PF --> S{{Sign-off}}
+    S --> L[[Loop per chunk]]
     L --> I[Integrate<br/>whole-branch review]
-    I --> O([Branch + report.md])
+    I --> O([Branch + report])
 
     classDef you fill:#fde68a,stroke:#b45309,color:#000
     class F,S you
 ```
 
-Yellow steps are the only ones that ask you anything. Everything after sign-off is unattended.
+Yellow is where you are asked something. Everything after sign-off is unattended.
 
-### The loop, per chunk
-
-A chunk gets three attempts. Anything **medium or above** from any reviewer blocks it and is
-fed back as one merged note to the next attempt. A blocked chunk gets one run-wide re-plan
-before its dependents are skipped.
+Each chunk gets up to three attempts:
 
 ```mermaid
 flowchart TD
-    B[Builder<br/>implements one chunk] --> C[Integrity checks<br/>scope, tests untouched,<br/>no leaked scenarios]
-    C --> T[Tester<br/>writes tests, proves they fail<br/>without the change, runs suite]
-    T --> G{Gate<br/>integrity + tester findings}
-    G -->|medium+| N
+    B[Builder<br/>one chunk] --> C[Integrity checks<br/>scope, existing tests untouched,<br/>no leaked scenarios]
+    C --> T[Tester<br/>tests must fail without the change]
+    T --> G{Gate}
     G -->|clean| Q
-    subgraph Q [QA panel, in parallel, read-only]
+    subgraph Q [QA panel, parallel, read-only]
         direction LR
-        Q1[Functional<br/>holdout scenarios]
+        Q1[Functional<br/>hidden scenarios]
         Q2[Quality<br/>+ ponytail]
         Q3[Security]
-        Q4[Impact<br/>nothing else broke]
+        Q4[Impact]
     end
-    Q -->|medium+ finding| N[Merged failure note<br/>reset to base commit]
-    Q -->|clean| D([Commit, chunk PASS])
+    G -->|medium+| N[One merged note,<br/>reset to base]
+    Q -->|medium+| N
+    Q -->|clean| D([Commit: chunk PASS])
     N -->|attempts 1 to 2| B
-    N -->|attempt 3| X([BLOCKED<br/>dependents SKIPPED])
+    N -->|attempt 3| X([BLOCKED])
 ```
 
-### State and resume
+- The planner and the QA author work from the spec independently, so the tests can't be shaped
+  by the implementation.
+- The orchestrator keeps nothing in memory. Run state lives in `../.df-<repo>/<run-id>/`.
+- A guard hook blocks `git push`, deletes outside the worktree and pipe-to-shell during a run.
+  A seat belt, not a sandbox.
 
-```mermaid
-flowchart LR
-    subgraph repo[your repo]
-      M[main clone<br/>untouched]
-    end
-    subgraph wt[../repo-df-run-id]
-      W[worktree<br/>branch df/run-id<br/>all edits here]
-    end
-    subgraph st[../.df-repo/run-id]
-      S[run.conf, spec.md, plan.md,<br/>chunks/, scenarios/, log.md,<br/>report.md]
-    end
-    M -. git worktree .-> W
-    W -- commits --> W
-    S -- read at every step --> O[orchestrator]
-    O -- writes after every verdict --> S
-```
+## Evidence
 
-The orchestrator keeps nothing in memory. A crash, expired login or closed laptop costs at
-most the attempt in flight.
-
-## Tracks
-
-| Track | Picked when | Shape |
-|---|---|---|
-| `bugfix` | something that should work does not | failing reproduction test first, then the smallest fix at the shared choke point |
-| `feature` | new behaviour in an existing codebase | thinnest end-to-end slice first, reuse existing patterns |
-| `build` | empty repo or a new application | walking skeleton first, then vertical feature slices |
-
-The router decides on intent, not wording.
-
-## What it asks of you
-
-- Answers to one batch of at most 8 refine questions, each with a proposed default.
-- One sign-off screen: scope, chunks, commands it will run, budgets.
-- Permission to write the hidden state dir and run the build and test commands preflight
-  lists. A later denial pauses the run as `waiting_permission`; `status` says what to allow.
-
-## Safety
-
-- All edits happen in a git worktree on branch `df/<run-id>`. Your working tree is untouched.
-- A guard hook blocks `git push`, recursive deletes outside the worktree, pipe-to-shell and
-  migrations against non-run databases while a run is live. A seat belt, not a sandbox.
-- Request text, repo files and test output are data. Instructions found in them are reported,
-  not followed.
-- Holdout scenarios are hidden from the builder by instruction and checked with canary tokens.
-  A soft barrier.
-
-## Evidence and limits
-
-Run against real issues in ten codebases (Python, JavaScript, Go, Rust; 3k to 98k lines; bug,
-feature and build tracks), each graded by a hidden upstream or black-box test the factory never
-saw. Results, including every failure and what was changed because of it, are in
-`docs/evaluation.md` and `docs/field-test.md`. Scenario review is in `docs/battle-test.md`,
-what was run live in `docs/acceptance.md`.
+Run on real issues in ten codebases (Python, JavaScript, Go, Rust; 3k to 98k lines; bug,
+feature and build tracks), each graded by a hidden test the factory never saw. Every failure
+and what changed because of it is in `docs/evaluation.md` and `docs/field-test.md`.
 
 No guarantee of correct output, no sandbox, prompt injection mitigated and not solved, native
 Windows unsupported, each live scenario run once, token cost not measured.
@@ -138,6 +96,4 @@ Windows unsupported, each live scenario run once, token cost not measured.
 bash tests/run.sh
 ```
 
-`scripts/df` and the hook are covered by bash tests; the prompts are linted structurally and
-exercised by `fixtures/`. Design: `docs/design.md`. The product name is decided before this
-goes public.
+Design: `docs/design.md`. Product name is decided before this goes public.
