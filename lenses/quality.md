@@ -17,8 +17,8 @@ this rubric yourself. You hunt only for what to delete:
 - Speculative flexibility, hooks or options nobody asked for.
 - Something that already exists elsewhere in this repo.
 - Fix wider than its cause: the diff edits several call sites (or changes an existing option's
-  type or meaning) when one shared function they all route through would fix them. Name that
-  function in the finding.
+  type or meaning) when one shared function they all route through would fix them, unless the spec or `plan.md`
+  justifies it. Name that function in the finding.
 
 ## Severity rubric
 

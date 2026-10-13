@@ -44,20 +44,21 @@ flowchart LR
     class F,S you
 ```
 
-Yellow steps are the only ones that talk to you. Everything after sign-off is unattended.
+Yellow steps are the only ones that ask you anything. Everything after sign-off is unattended.
 
 ### The loop, per chunk
 
 A chunk gets three attempts. Anything **medium or above** from any reviewer blocks it and is
-fed back as one merged note to the next attempt.
+fed back as one merged note to the next attempt. A blocked chunk gets one run-wide re-plan
+before its dependents are skipped.
 
 ```mermaid
 flowchart TD
-    B[Builder<br/>implements one chunk] --> C{Integrity checks<br/>scope, tests untouched,<br/>no leaked scenarios}
-    C -->|fail| N
+    B[Builder<br/>implements one chunk] --> C[Integrity checks<br/>scope, tests untouched,<br/>no leaked scenarios]
     C --> T[Tester<br/>writes tests, proves they fail<br/>without the change, runs suite]
-    T -->|findings| N
-    T -->|green| Q
+    T --> G{Gate<br/>integrity + tester findings}
+    G -->|medium+| N
+    G -->|clean| Q
     subgraph Q [QA panel, in parallel, read-only]
         direction LR
         Q1[Functional<br/>holdout scenarios]
@@ -67,7 +68,7 @@ flowchart TD
     end
     Q -->|medium+ finding| N[Merged failure note<br/>reset to base commit]
     Q -->|clean| D([Commit, chunk PASS])
-    N -->|attempt < 3| B
+    N -->|attempts 1 to 2| B
     N -->|attempt 3| X([BLOCKED<br/>dependents SKIPPED])
 ```
 

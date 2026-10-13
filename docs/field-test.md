@@ -50,7 +50,7 @@ One run per task. This shows the path works on real code, not that it is reliabl
 
 | Defect | Status |
 |---|---|
-| `${CLAUDE_PLUGIN_ROOT}` unquoted in `hooks.json`; a path with a space would split and the guard would silently never run (found by `claude plugin validate`) | fixed on `feat/marketplace` |
+| `${CLAUDE_PLUGIN_ROOT}` unquoted in `hooks.json`; a path with a space would split and the guard would silently never run (found by `claude plugin validate`) | fixed in PR #1 |
 | No marketplace manifest, so the plugin could not be installed | fixed on `feat/marketplace` |
 | Install at project scope leaves an untracked `.claude/` in the target repo, which the factory then lists as "not included" | noted, expected |
 
