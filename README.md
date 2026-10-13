@@ -1,9 +1,9 @@
 # Dark Factory
 
-Spec in, tested software out. Give it an idea, PRD, feature request or bug report. It asks
-you the questions it cannot answer from the repo, you sign off once, and a routed team of
-subagents then builds, tests and QAs in a loop with nobody in the middle. You get a branch and
-a report. It never pushes, merges or opens a PR.
+Spec in, tested software out. Give it an idea, PRD, feature request or bug report. It asks you
+only what the repo cannot answer, you sign off once, then a team of subagents builds, tests and
+QAs in a loop with nobody in the middle. You get a branch and a report. It never pushes,
+merges or opens a PR.
 
 Status: v0.1, private. Claude Code only. macOS, Linux and WSL.
 
@@ -14,59 +14,120 @@ claude plugin marketplace add /path/to/dark-factory      # or owner/repo once pu
 claude plugin install dark-factory@dark-factory --scope project
 ```
 
-Try it without installing: `claude --plugin-dir /path/to/dark-factory`.
+Try without installing: `claude --plugin-dir /path/to/dark-factory`.
 
 ## Use
 
 ```
 /dark-factory <idea, PRD, ticket text, bug report, or a path>
-/dark-factory list
-/dark-factory status [run-id]
-/dark-factory resume [run-id]
-/dark-factory clean <run-id>
+/dark-factory list | status [run-id] | resume [run-id] | clean <run-id>
 ```
 
 `resume` works from a brand-new session in the same repo. All state is on disk.
 
-## What happens
+## How it works
 
-1. **Route.** A classifier picks `bugfix`, `feature` or `build`. You never answer this.
-2. **Refine.** Three lenses (requirements, codebase fit, risk) find gaps in parallel. You get
-   one batched round of at most 8 questions, each with a proposed default.
-3. **Plan.** A planner writes the plan and chunks while a separate QA author writes the QA
-   checklist and holdout scenarios from the spec alone, before any code exists.
-4. **Preflight.** It installs dependencies in the worktree, finds the test commands, runs them
-   once and records a baseline so pre-existing failures are not blamed on the change.
-5. **Sign-off.** The only gate. One screen. Approve, amend, or abort.
-6. **Loop**, per chunk: build, test, then a parallel QA panel of four read-only agents
-   (functional, quality + `ponytail`, security, impact). Anything medium or above must be fixed.
-   Three attempts, then the chunk is BLOCKED and the run continues with what it can.
-7. **Integrate.** Whole-branch review and every scenario once more. Findings of medium or above
-   become fix chunks. Then `report.md`.
+You are involved at two points only: answering questions, and one sign-off.
 
-## What it will ask of you
+```mermaid
+flowchart LR
+    A([Your request]) --> R[Route<br/>bugfix / feature / build]
+    R --> F[Refine<br/>gap questions]
+    F --> P[Plan<br/>chunks + QA scenarios]
+    P --> PF[Preflight<br/>deps, commands, baseline]
+    PF --> S{{Sign-off<br/>approve / amend / abort}}
+    S --> L[[Loop per chunk<br/>build, test, QA]]
+    L --> I[Integrate<br/>whole-branch review]
+    I --> O([Branch + report.md])
 
-- Answers to the refine questions, and one sign-off.
-- Permission to write to the hidden state directory `<parent>/.df-<repo>/`, and to run the
-  build and test commands preflight lists. Approvals happen at preflight, while you are
-  present. A later denial pauses the run as `waiting_permission` and `status` prints exactly
-  what to allow. It never spins on a denial.
+    classDef you fill:#fde68a,stroke:#b45309,color:#000
+    class F,S you
+```
+
+Yellow steps are the only ones that talk to you. Everything after sign-off is unattended.
+
+### The loop, per chunk
+
+A chunk gets three attempts. Anything **medium or above** from any reviewer blocks it and is
+fed back as one merged note to the next attempt.
+
+```mermaid
+flowchart TD
+    B[Builder<br/>implements one chunk] --> C{Integrity checks<br/>scope, tests untouched,<br/>no leaked scenarios}
+    C -->|fail| N
+    C --> T[Tester<br/>writes tests, proves they fail<br/>without the change, runs suite]
+    T -->|findings| N
+    T -->|green| Q
+    subgraph Q [QA panel, in parallel, read-only]
+        direction LR
+        Q1[Functional<br/>holdout scenarios]
+        Q2[Quality<br/>+ ponytail]
+        Q3[Security]
+        Q4[Impact<br/>nothing else broke]
+    end
+    Q -->|medium+ finding| N[Merged failure note<br/>reset to base commit]
+    Q -->|clean| D([Commit, chunk PASS])
+    N -->|attempt < 3| B
+    N -->|attempt 3| X([BLOCKED<br/>dependents SKIPPED])
+```
+
+### State and resume
+
+```mermaid
+flowchart LR
+    subgraph repo[your repo]
+      M[main clone<br/>untouched]
+    end
+    subgraph wt[../repo-df-run-id]
+      W[worktree<br/>branch df/run-id<br/>all edits here]
+    end
+    subgraph st[../.df-repo/run-id]
+      S[run.conf, spec.md, plan.md,<br/>chunks/, scenarios/, log.md,<br/>report.md]
+    end
+    M -. git worktree .-> W
+    W -- commits --> W
+    S -- read at every step --> O[orchestrator]
+    O -- writes after every verdict --> S
+```
+
+The orchestrator keeps nothing in memory. A crash, expired login or closed laptop costs at
+most the attempt in flight.
+
+## Tracks
+
+| Track | Picked when | Shape |
+|---|---|---|
+| `bugfix` | something that should work does not | failing reproduction test first, then the smallest fix at the shared choke point |
+| `feature` | new behaviour in an existing codebase | thinnest end-to-end slice first, reuse existing patterns |
+| `build` | empty repo or a new application | walking skeleton first, then vertical feature slices |
+
+The router decides on intent, not wording.
+
+## What it asks of you
+
+- Answers to one batch of at most 8 refine questions, each with a proposed default.
+- One sign-off screen: scope, chunks, commands it will run, budgets.
+- Permission to write the hidden state dir and run the build and test commands preflight
+  lists. A later denial pauses the run as `waiting_permission`; `status` says what to allow.
 
 ## Safety
 
-- All edits happen in a git worktree `../<repo>-df-<run-id>` on branch `df/<run-id>`.
+- All edits happen in a git worktree on branch `df/<run-id>`. Your working tree is untouched.
 - A guard hook blocks `git push`, recursive deletes outside the worktree, pipe-to-shell and
-  migrations against non-run databases while a run is live. It is a seat belt, not a sandbox.
-- Request text, repo files and test output are treated as data. Instructions found in them
-  are not followed and are reported.
-- Holdout scenarios are hidden from the builder by instruction and checked with a canary. This
-  is a soft barrier. A determined agent with a shell could find them.
+  migrations against non-run databases while a run is live. A seat belt, not a sandbox.
+- Request text, repo files and test output are data. Instructions found in them are reported,
+  not followed.
+- Holdout scenarios are hidden from the builder by instruction and checked with canary tokens.
+  A soft barrier.
 
-## Known limits
+## Evidence and limits
 
-See `docs/battle-test.md` (67 reviewed scenarios) and `docs/acceptance.md` (what was run live).
-Short version: no guarantee of correct output, no sandbox, prompt injection is mitigated and
-not solved, native Windows is unsupported, and each live scenario was run once.
+Run against two real issues in `jazzband/prettytable`; both passed the maintainers' own
+hidden tests. Results, including what it did badly, are in `docs/field-test.md`. Scenario
+review is in `docs/battle-test.md`, what was run live in `docs/acceptance.md`.
+
+No guarantee of correct output, no sandbox, prompt injection mitigated and not solved, native
+Windows unsupported, each live scenario run once.
 
 ## Development
 
@@ -74,8 +135,6 @@ not solved, native Windows is unsupported, and each live scenario was run once.
 bash tests/run.sh
 ```
 
-The helper (`scripts/df`) and hook are covered by bash tests. The prompts are linted
-structurally and exercised by the live fixtures in `fixtures/`. Design: `docs/design.md`.
-Plan: `docs/implementation-plan.md`.
-
-The product name is not final. It is decided before this goes public.
+`scripts/df` and the hook are covered by bash tests; the prompts are linted structurally and
+exercised by `fixtures/`. Design: `docs/design.md`. The product name is decided before this
+goes public.
