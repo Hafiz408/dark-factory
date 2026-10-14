@@ -9,7 +9,7 @@ Claude Code plugin. v0.1, open source. macOS, Linux, WSL.
 ## Install
 
 ```bash
-claude plugin marketplace add hafiz-ebono/dark-factory
+claude plugin marketplace add Hafiz408/dark-factory
 claude plugin install dark-factory@dark-factory --scope project
 ```
 
