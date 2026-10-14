@@ -2,7 +2,7 @@
   "name": "dark-factory",
   "description": "Dark Factory: refine a request, sign off once, then build, test and QA unattended with a routed team of subagents.",
   "owner": {
-    "name": "hafiz-ebono"
+    "name": "Hafiz408"
   },
   "plugins": [
     {
