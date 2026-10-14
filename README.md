@@ -4,16 +4,16 @@ Give it a bug report, feature request, PRD or an idea. It asks only what the rep
 answer, you sign off once, then a team of subagents builds, tests and QAs in a loop with nobody
 in the middle. You get a git branch and a report. It never pushes, merges or opens a PR.
 
-Claude Code plugin. v0.1, private. macOS, Linux, WSL.
+Claude Code plugin. v0.1, open source. macOS, Linux, WSL.
 
 ## Install
 
 ```bash
-claude plugin marketplace add /path/to/dark-factory      # or owner/repo once published
+claude plugin marketplace add hafiz-ebono/dark-factory
 claude plugin install dark-factory@dark-factory --scope project
 ```
 
-Try without installing: `claude --plugin-dir /path/to/dark-factory`.
+Try without installing: clone the repo, then `claude --plugin-dir ./dark-factory`.
 
 ## Use
 
