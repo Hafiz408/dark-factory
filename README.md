@@ -34,7 +34,10 @@ state is on disk.
 - **A branch** (`df/<run-id>`, or the name you give) in a separate git worktree, one commit per passing chunk.
 - **`report.md`:** functional changes first, then high-level technical changes, then what was
   left (with severity), assumptions, and one plain line saying whether the branch is green. A bugfix that changed no source says **NOT FIXED**.
-- **Hands-off QA.** Four parallel read-only reviewers, medium-or-above findings block.
+- **Review before QA.** Four read-only review lenses per chunk (quality, over-engineering,
+  security, impact), then a whole-branch review that also checks the goal was met. Medium or
+  above blocks. Hidden QA scenarios run only once that review is clean.
+- **A run that cannot get clean pauses.** It tells you what is open and never reports a pass.
 - **Resume** after a crash, closed laptop or expired login, losing at most one attempt.
 
 ## How it works
@@ -47,8 +50,10 @@ flowchart LR
     P --> PF[Preflight<br/>deps, commands, baseline]
     PF --> S{{Sign-off}}
     S --> L[[Loop per chunk]]
-    L --> I[Integrate<br/>whole-branch review]
-    I --> O([Branch + report])
+    L --> I[Review<br/>whole branch, until clean]
+    I --> QA[QA<br/>hidden scenarios]
+    QA -->|fails| I
+    QA --> O([Branch + report])
 
     classDef you fill:#fde68a,stroke:#b45309,color:#000
     class F,S you
@@ -64,10 +69,10 @@ flowchart TD
     C --> T[Tester<br/>tests must fail without the change]
     T --> G{Gate}
     G -->|clean| Q
-    subgraph Q [QA panel, parallel, read-only]
+    subgraph Q [Review panel, parallel, read-only]
         direction LR
-        Q1[Functional<br/>hidden scenarios]
-        Q2[Quality<br/>+ ponytail]
+        Q1[Quality]
+        Q2[Ponytail<br/>over-engineering]
         Q3[Security]
         Q4[Impact]
     end

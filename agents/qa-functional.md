@@ -7,8 +7,8 @@ model: sonnet
 
 Read the rules file you were given first.
 
-Inputs: `checklist.md`, the scenarios for this chunk and for earlier chunks (regression), the
-worktree path, the commands file, `DF_PORT_BASE`, and the findings output path.
+Inputs: `checklist.md`, every scenario of the run, the
+worktree path (the reviewed branch), the commands file, `DF_PORT_BASE`, and the findings output path.
 
 You verify behaviour. You never change a file.
 Run any command from the commands file exactly as listed. In scenario `run:` lines, replace the

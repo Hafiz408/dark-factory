@@ -117,4 +117,25 @@ assert_eq "1" "$("$DF" fm-get "$T/crlf2.md" interrupts)" "fm-set adds an absent 
 "$DF" fm-set "$T/crlf2.md" note 'C:\new\t'
 assert_eq 'C:\new\t' "$("$DF" fm-get "$T/crlf2.md" note)" "fm-set does not interpret backslashes"
 
+# v2 slice 2: review and qa stages, integrate kept as an alias, paused runs say what is open
+printf 'status=active\nstage=loop\n' > "$T/st.conf"
+for s in review qa integrate; do assert_ok "conf-set accepts stage $s" "$DF" conf-set "$T/st.conf" stage "$s"; done
+R2=$(mkrepo); echo x > "$R2/in.txt"; i2=$(cd "$R2" && "$DF" start "$R2/in.txt"); rd2=$(cd "$R2" && "$DF" run-dir "$i2")
+assert_eq "3" "$("$DF" conf-get "$rd2/run.conf" max_review_rounds)" "start records max_review_rounds"
+assert_eq "2" "$("$DF" conf-get "$rd2/run.conf" max_qa_rounds)" "start records max_qa_rounds"
+for s in integrate review qa; do
+  "$DF" conf-set "$rd2/run.conf" stage "$s"
+  assert_ok "validate accepts stage $s" bash -c "cd '$R2' && '$DF' validate '$i2'"
+done
+"$DF" conf-set "$rd2/run.conf" status paused; "$DF" conf-set "$rd2/run.conf" waiting_on "review cap reached, 1 blocking"
+assert_contains "waiting on: review cap reached, 1 blocking" "$(cd "$R2" && "$DF" status "$i2")" "status says what a paused run waits on"
+
+# v2 slice 2 review: caps and round counters are integers; no value may carry a newline
+assert_fail "conf-set refuses a non-integer cap" "$DF" conf-set "$T/st.conf" max_review_rounds lots
+assert_fail "conf-set refuses a non-integer round" "$DF" conf-set "$T/st.conf" qa_round x
+assert_ok "conf-set accepts an integer round" "$DF" conf-set "$T/st.conf" review_round 2
+assert_fail "conf-set refuses a value with a newline" "$DF" conf-set "$T/st.conf" waiting_on "$(printf 'a\nstatus=done')"
+assert_eq "0" "$("$DF" conf-get "$rd2/run.conf" review_round)" "start records review_round 0"
+assert_eq "0" "$("$DF" conf-get "$rd2/run.conf" qa_round)" "start records qa_round 0"
+
 finish

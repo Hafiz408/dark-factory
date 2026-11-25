@@ -5,7 +5,7 @@
 fm() { awk '/^---$/{n++; next} n==1' "$1" | sed -n "s/^$2: *//p" | head -1; }
 
 AGENTS="router refiner planner qa-author builder tester qa-functional reviewer"
-LENSES="requirements codebase-fit risk quality security impact plan-coverage adjudicate"
+LENSES="requirements codebase-fit risk quality ponytail goal security impact plan-coverage adjudicate"
 TRACKS="bugfix feature build"
 
 for a in $AGENTS; do
@@ -52,7 +52,7 @@ for a in $AGENTS; do
 done
 
 for l in $LENSES; do assert_ok "lens $l exists" test -f "$ROOT/lenses/$l.md"; done
-for l in quality security impact plan-coverage; do
+for l in quality ponytail goal security impact plan-coverage; do
   grep -q "Severity rubric" "$ROOT/lenses/$l.md" && ok "lens $l: has severity rubric" || bad "lens $l: has severity rubric"
 done
 for t in $TRACKS; do
@@ -68,7 +68,7 @@ for a in $AGENTS; do grep -q "$a" "$S" && ok "SKILL.md uses $a" || bad "SKILL.md
 for l in $LENSES; do grep -q "$l" "$S" "$ROOT/agents/reviewer.md" "$ROOT/agents/refiner.md" 2>/dev/null && ok "lens $l is referenced" || bad "lens $l is referenced"; done
 for w in "never push" "Never push" ; do :; done
 grep -qi "never push" "$S" && ok "SKILL.md: no push" || bad "SKILL.md: no push"
-grep -q "last time you ask" "$S" && ok "SKILL.md: single gate" || bad "SKILL.md: single gate"
+grep -q "last question before the report" "$S" && ok "SKILL.md: single gate" || bad "SKILL.md: single gate"
 grep -q "run.conf" "$S" && ok "SKILL.md: uses run.conf" || bad "SKILL.md: uses run.conf"
 # Spike S4a: shell variables in a Bash command force an approval prompt, so SKILL.md uses
 # {DF} placeholders that the orchestrator substitutes with a literal absolute path.
@@ -96,14 +96,14 @@ python3 -c "import json,sys; json.load(open('$ROOT/hooks/hooks.json')); json.loa
 # Field test (prettytable): fixes were too wide, tests too many, router keyed on wording
 grep -q "choke point" "$ROOT/agents/planner.md" && ok "planner: names the choke point" || bad "planner: names the choke point"
 grep -q "choke point" "$ROOT/tracks/bugfix.md" && ok "bugfix track: one fix point" || bad "bugfix track: one fix point"
-grep -q "Fix wider than its cause" "$ROOT/lenses/quality.md" && ok "quality lens: flags a fix wider than its cause" || bad "quality lens: flags a fix wider than its cause"
+grep -q "Fix wider than its cause" "$ROOT/lenses/ponytail.md" && ok "quality lens: flags a fix wider than its cause" || bad "quality lens: flags a fix wider than its cause"
 grep -q "one test per done-criterion" "$ROOT/agents/tester.md" && ok "tester: caps test volume" || bad "tester: caps test volume"
 grep -q "delete it" "$ROOT/agents/tester.md" && ok "tester: drops a test that cannot go red" || bad "tester: drops a test that cannot go red"
 grep -qi "intent, not wording" "$ROOT/agents/router.md" && ok "router: intent over wording" || bad "router: intent over wording"
 
 # PR #1 review
 grep -q "uncovered" "$ROOT/agents/tester.md" && ok "tester: reports a criterion left uncovered by a deletion" || bad "tester: reports a criterion left uncovered by a deletion"
-grep -q "justifies it" "$ROOT/lenses/quality.md" && ok "quality lens: wide fix allowed when justified" || bad "quality lens: wide fix allowed when justified"
+grep -q "justifies it" "$ROOT/lenses/ponytail.md" && ok "quality lens: wide fix allowed when justified" || bad "quality lens: wide fix allowed when justified"
 grep -q "already promises" "$ROOT/agents/router.md" && grep -q "never produced" "$ROOT/agents/router.md" && grep -c "expected vs actual" "$ROOT/agents/router.md" | grep -q '^0$' && ok "router: no wording-keyed bullet left" || bad "router: no wording-keyed bullet left"
 grep -q "C --> T" "$ROOT/README.md" && ! grep -q "C -->|fail| N" "$ROOT/README.md" && ok "README: integrity failure still reaches the tester and gate" || bad "README: integrity failure still reaches the tester and gate"
 ! grep -q "attempt < 3" "$ROOT/README.md" && ok "README: no raw < in a mermaid label" || bad "README: no raw < in a mermaid label"
@@ -148,7 +148,7 @@ done
 grep -qF '[df <run-id>] <stage>: <event>' "$SK" && ok "SKILL.md: milestone line format" || bad "SKILL.md: milestone line format"
 grep -q "print one line to the user" "$SK" && bad "SKILL.md: no user line per verdict" || ok "SKILL.md: no user line per verdict"
 grep -q "not per role spawn" "$SK" && ok "SKILL.md: milestones, not role spawns" || bad "SKILL.md: milestones, not role spawns"
-a=$(sed -n '/^## Integrate/,$p' "$SK" | grep -n "## Functional changes" | head -1 | cut -d: -f1); b=$(sed -n '/^## Integrate/,$p' "$SK" | grep -n "## Technical changes" | head -1 | cut -d: -f1)
+a=$(sed -n '/^## Report/,$p' "$SK" | grep -n "## Functional changes" | head -1 | cut -d: -f1); b=$(sed -n '/^## Report/,$p' "$SK" | grep -n "## Technical changes" | head -1 | cut -d: -f1)
 [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ] && ok "SKILL.md: report leads with functional then technical changes" || bad "SKILL.md: report leads with functional then technical changes"
 grep -q "not confirmed" "$SK" && ok "SKILL.md: an unconfirmed criterion is reported as such" || bad "SKILL.md: an unconfirmed criterion is reported as such"
 
@@ -158,5 +158,36 @@ grep -qF '[df <run-id>] done: ' "$SK" && grep -q "nothing after the event" "$SK"
 grep -q "could not fetch" "$SK" && ok "SKILL.md: a stale base is surfaced to the user" || bad "SKILL.md: a stale base is surfaced to the user"
 grep -q "last line before the final" "$SK" && ok "SKILL.md: the closing milestone line has one place" || bad "SKILL.md: the closing milestone line has one place"
 grep -q "NOT FIXED sentence when it applies" "$SK" && ok "SKILL.md: NOT FIXED opens the final message" || bad "SKILL.md: NOT FIXED opens the final message"
+
+# v2 slice 2: review must pass before QA
+panel=$(grep "in ONE message spawn reviewer(quality)" "$SK")
+case "$panel" in *"reviewer(ponytail)"*"reviewer(security)"*"reviewer(impact)"*) ok "SKILL.md: per-chunk panel is the four review lenses";; *) bad "SKILL.md: per-chunk panel is the four review lenses";; esac
+case "$panel" in *qa-functional*) bad "SKILL.md: functional QA left the per-chunk panel";; *) ok "SKILL.md: functional QA left the per-chunk panel";; esac
+grep -q "^## Review" "$SK" && grep -q "^## QA" "$SK" && ! grep -q "^## Integrate" "$SK" && ok "SKILL.md: review and QA are separate stages" || bad "SKILL.md: review and QA are separate stages"
+r=$(grep -n "^## Review" "$SK" | head -1 | cut -d: -f1); q=$(grep -n "^## QA" "$SK" | head -1 | cut -d: -f1)
+[ -n "$r" ] && [ -n "$q" ] && [ "$r" -lt "$q" ] && ok "SKILL.md: review comes before QA" || bad "SKILL.md: review comes before QA"
+grep -q "max_review_rounds" "$SK" && grep -q "max_qa_rounds" "$SK" && ok "SKILL.md: both loops have a cap in run.conf" || bad "SKILL.md: both loops have a cap in run.conf"
+grep -q "does not enter QA" "$SK" && grep -q "status paused" "$SK" && grep -q 'waiting_on "<what is open>"' "$SK" && ok "SKILL.md: an unclean review pauses before QA" || bad "SKILL.md: an unclean review pauses before QA"
+grep -q "reviewer(goal)" "$SK" && grep -q "chunk files" "$SK" && ok "SKILL.md: consolidated review adds the goal lens with the chunk files" || bad "SKILL.md: consolidated review adds the goal lens with the chunk files"
+G="$ROOT/lenses/goal.md"
+grep -q "Done when" "$G" && grep -q "file:line" "$G" && grep -q "not met" "$G" && ok "goal lens: every criterion met or not met, with evidence" || bad "goal lens: every criterion met or not met, with evidence"
+grep -q "ponytail:ponytail-review" "$ROOT/lenses/ponytail.md" && ! grep -q "ponytail:ponytail-review" "$ROOT/lenses/quality.md" && ok "ponytail is its own lens" || bad "ponytail is its own lens"
+grep -q "source: .*goal" "$ROOT/skills/dark-factory/rules.md" && ok "rules: goal is a finding source" || bad "rules: goal is a finding source"
+sed -n '/^## QA/,/^## Report/p' "$SK" | grep -q "symptoms only" && ok "SKILL.md: QA failures reach the builder as symptoms only" || bad "SKILL.md: QA failures reach the builder as symptoms only"
+grep -q "integrate" "$ROOT/docs/design.md" && grep -q "alias" "$ROOT/docs/design.md" && ok "design.md: integrate is documented as an alias of review" || bad "design.md: integrate is documented as an alias of review"
+
+# v2 slice 2 branch review
+grep -q "run.conf review_round <n>" "$SK" && grep -q "Add 1 to .qa_round." "$SK" && ok "SKILL.md: round counters live in run.conf" || bad "SKILL.md: round counters live in run.conf"
+grep -q "Do not run" "$SK" && grep -q "PAUSED: <what is open>" "$SK" && ok "SKILL.md: a paused run is not finished and its report says PAUSED" || bad "SKILL.md: a paused run is not finished and its report says PAUSED"
+sed -n '/^## Resume/,$p' "$SK" | grep -q "BLOCKED" && sed -n '/^## Resume/,$p' "$SK" | grep -q "attempts 0" && ok "SKILL.md: resume reopens blocked chunks" || bad "SKILL.md: resume reopens blocked chunks"
+sed -n '/^## Resume/,$p' "$SK" | grep -q "At .review. or .qa." && ok "SKILL.md: resume has a rule for review and qa" || bad "SKILL.md: resume has a rule for review and qa"
+sed -n '/^## QA/,/^## Report/p' "$SK" | grep -q "chunks:" && ok "SKILL.md: a QA fix chunk takes its scope from the scenario's chunks" || bad "SKILL.md: a QA fix chunk takes its scope from the scenario's chunks"
+sed -n '/^## Review/,/^## QA/p' "$SK" | grep -q "On entry" && ok "SKILL.md: blocked chunks are checked on entering review" || bad "SKILL.md: blocked chunks are checked on entering review"
+sed -n '/^## Review/,/^## QA/p' "$SK" | grep -q "stage qa" && ok "SKILL.md: a clean review sets stage qa" || bad "SKILL.md: a clean review sets stage qa"
+n=$(sed -n '/^## The loop/,/^## Review/p' "$SK" | grep -c "spawn qa-functional\|qa-functional +")
+assert_eq "0" "$n" "SKILL.md: nothing in the loop spawns qa-functional"
+grep -q "every scenario" "$ROOT/agents/qa-functional.md" && ! grep -q "for this chunk" "$ROOT/agents/qa-functional.md" && ok "qa-functional: runs every scenario, not per chunk" || bad "qa-functional: runs every scenario, not per chunk"
+grep -q "qa_functional, review_quality" "$ROOT/docs/design.md" && bad "design.md: pseudocode panel has no functional QA" || ok "design.md: pseudocode panel has no functional QA"
+grep -q "impact | goal |" "$ROOT/docs/design.md" && ok "design.md: goal is a finding source" || bad "design.md: goal is a finding source"
 
 finish
