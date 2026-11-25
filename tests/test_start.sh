@@ -54,6 +54,37 @@ for order in "--base v1 --branch feat-a" "--branch feat-b --base v1"; do
   assert_eq "$T1" "$(cf "$out" root_base_sha)" "flags '$order': root_base_sha"
 done
 
+# refusals leave nothing behind (AC-6, AC-11)
+X=$(mkrepo); echo x > "$X/in.txt"; git -C "$X" branch existing
+SX="$(dirname "$X")/.df-$(basename "$X")"
+snap() { echo "$(ls "$SX" 2>/dev/null | wc -l | tr -d ' ')|$(git -C "$X" worktree list)|$(git -C "$X" branch --list)"; }
+refuse() { # <desc> <expected stderr> <args...>   (runs in $X; asserts exit 1, exact stderr, no leftovers)
+  local d=$1 want=$2 before err rc; shift 2; before=$(snap)
+  err=$(cd "$X" && "$DF" start "$@" 2>&1 >/dev/null); rc=$?
+  assert_eq "1" "$rc" "$d: exit 1"
+  assert_eq "$want" "$err" "$d: message"
+  assert_eq "$before" "$(snap)" "$d: no leftovers"
+}
+U="df: usage: df start <input-file> [--base <ref>] [--branch <name>]"
+EX=$(git -C "$X" rev-parse existing)
+refuse "unresolved base" "df: start: base ref 'nope' not found" "$X/in.txt" --base nope
+refuse "invalid branch" "df: start: invalid branch name 'a..b'" "$X/in.txt" --branch a..b
+git -C "$X" checkout -q -b other; git -C "$X" checkout -q -
+refuse "branch @{-1}" "df: start: invalid branch name '@{-1}'" "$X/in.txt" --branch '@{-1}'
+refuse "existing branch" "df: start: branch 'existing' already exists" "$X/in.txt" --branch existing
+assert_eq "$EX" "$(git -C "$X" rev-parse existing)" "existing branch SHA unchanged"
+refuse "missing input" "df: start: input file '$X/nope.txt' not found" "$X/nope.txt"
+refuse "usage: no input" "$U"
+refuse "usage: input starts with -" "$U" -x
+refuse "usage: flag without value" "$U" "$X/in.txt" --base
+refuse "usage: value starts with -" "$U" "$X/in.txt" --branch -x
+refuse "usage: unknown flag" "$U" "$X/in.txt" --bogus v
+refuse "usage: repeated flag" "$U" "$X/in.txt" --base HEAD --base HEAD
+refuse "usage: extra positional" "$U" "$X/in.txt" extra
+G=$(mktemp -d); echo x > "$G/in.txt"
+( cd "$G" && DF_ALLOW_INIT=1 "$DF" start "$G/in.txt" --bogus v >/dev/null 2>&1 )
+assert_fail "usage error under DF_ALLOW_INIT leaves no .git" test -e "$G/.git"
+
 # not a git repo
 N=$(mktemp -d); echo x > "$N/in.txt"
 assert_fail "non-git dir refused" bash -c "cd '$N' && '$DF' start '$N/in.txt'"

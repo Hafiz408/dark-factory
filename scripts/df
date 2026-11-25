@@ -42,28 +42,37 @@ TEST_RE='(^|/)(tests?|spec|__tests__)/|(_test|\.test|\.spec)\.[A-Za-z]+$|(^|/)te
 SECRET_RE='AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|([Pp]assword|[Pp]asswd|PASSWORD|[Ss]ecret|SECRET|[Tt]oken|TOKEN|[Aa]pi[_-]?[Kk]ey|API[_-]?KEY)[ ]*[=:][ ]*[^ ]+'
 
 cmd_start() { # df start <input-file> [--base <ref>] [--branch <name>]   (DF_ALLOW_INIT=1 permits git init, build track only)
-  local input=${1:-} top id wt rd base bref="" branch="" baseref=""
-  shift || true
-  while [ $# -gt 1 ]; do
+  local input=${1:-} top id wt rd base bref="" branch="" baseref="" hb="" hr="" usage
+  usage="usage: df start <input-file> [--base <ref>] [--branch <name>]"
+  case $input in ""|-*) die "$usage" ;; esac
+  shift
+  while [ $# -gt 0 ]; do
+    [ $# -ge 2 ] || die "$usage"
+    case $2 in -*) die "$usage" ;; esac
     case $1 in
-      --base) bref=$2 ;;
-      --branch) branch=$2 ;;
-      *) break ;;
+      --base) [ -z "$hb" ] || die "$usage"; hb=1; bref=$2 ;;
+      --branch) [ -z "$hr" ] || die "$usage"; hr=1; branch=$2 ;;
+      *) die "$usage" ;;
     esac
     shift 2
   done
+  [ -f "$input" ] && [ -r "$input" ] || die "start: input file '$input' not found"
   if ! git rev-parse --git-dir >/dev/null 2>&1; then
     [ "${DF_ALLOW_INIT:-}" = 1 ] || die "not a git repo (DF_ALLOW_INIT=1 allows git init for the build track)"
     git init -q
   fi
   git rev-parse HEAD >/dev/null 2>&1 ||
     git -c user.name=dark-factory -c user.email=df@localhost commit -q --allow-empty -m "df: initial commit"
+  if [ -n "$hr" ]; then
+    [ "$(git check-ref-format --branch "$branch" 2>/dev/null)" = "$branch" ] || die "start: invalid branch name '$branch'"
+    ! git show-ref --verify -q "refs/heads/$branch" || die "start: branch '$branch' already exists"
+  fi
   top=$(git rev-parse --show-toplevel)
   id="r$(date +%y%m%d-%H%M%S)-$$"
   wt="$(dirname "$top")/$(basename "$top")-df-$id"
-  [ -n "$branch" ] || branch="df/$id"
+  [ -n "$hr" ] || branch="df/$id"
   base=$(git rev-parse --verify -q "${bref:-HEAD}^{commit}") || die "start: base ref '$bref' not found"
-  baseref=${bref:-$(git symbolic-ref -q --short HEAD || echo detached)}
+  baseref=${hb:+$bref}; [ -n "$hb" ] || baseref=$(git symbolic-ref -q --short HEAD || echo detached)
   git worktree add -q -b "$branch" "$wt" "$base"
   rd=$(run_dir "$id")
   mkdir -p "$rd/chunks" "$rd/scenarios" "$rd/panel"
