@@ -413,9 +413,5 @@ case "$cmd" in
   fm-get) fm_get "$@";;
   fm-set) fm_set "$@";;
   write) atomic "$@";;
-<<<<<<< HEAD
-  *) die "usage: df {start|validate|verdict|gate|lock|snapshot|check-diff|canary-scan|srchash|commit|scrub|status|list|clean|finish|lessons-set|metrics|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
-=======
-  *) die "usage: df {start|validate|profile-pin|verdict|gate|lock|snapshot|check-diff|canary-scan|srchash|commit|scrub|status|list|clean|finish|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
->>>>>>> feat/v2-slice4-profile-e2e
+  *) die "usage: df {start|validate|profile-pin|verdict|gate|lock|snapshot|check-diff|canary-scan|srchash|commit|scrub|status|list|clean|finish|lessons-set|metrics|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
 esac
