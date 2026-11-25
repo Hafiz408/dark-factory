@@ -8,7 +8,7 @@ mk() { # mk <track> -> prints "<R> <id> <wt> <rd>"
   R=$(mkrepo); echo "x" > "$R/in.txt"
   id=$(cd "$R" && "$DF" start "$R/in.txt"); rd=$(cd "$R" && "$DF" run-dir "$id")
   wt=$(cd "$R" && "$DF" conf-get "$rd/run.conf" worktree)
-  (cd "$R" && "$DF" conf-set "$rd/run.conf" track "$1")
+  (cd "$R" && "$DF" conf-set "$rd/run.conf" track "$1" && "$DF" conf-set "$rd/run.conf" stage qa)
   echo "$R $id $wt $rd"
 }
 status_of() { (cd "$1" && "$DF" conf-get "$2/run.conf" status); }
@@ -73,5 +73,21 @@ set -- $(mk bugfix); R=$1 id=$2 wt=$3 rd=$4
 (cd "$R" && "$DF" conf-set "$rd/run.conf" worktree /nonexistent/path)
 run_finish "$R" "$id"
 assert_eq "done" "$(status_of "$R" "$rd")" "a missing worktree does not mislabel the run"
+
+# v2 slice 2 review: finish must refuse a run that is not clean
+set -- $(mk feature); R=$1 id=$2 wt=$3 rd=$4
+(cd "$R" && "$DF" conf-set "$rd/run.conf" stage review)
+assert_fail "finish refuses a run that has not reached QA" bash -c "cd '$R' && '$DF' finish '$id' s1"
+(cd "$R" && "$DF" conf-set "$rd/run.conf" stage qa && "$DF" conf-set "$rd/run.conf" status paused)
+assert_fail "finish refuses a paused run" bash -c "cd '$R' && '$DF' finish '$id' s1"
+assert_eq "paused" "$(status_of "$R" "$rd")" "a refused finish leaves the status alone"
+(cd "$R" && "$DF" conf-set "$rd/run.conf" status active)
+printf -- '---\nid: 01\ntitle: t\nstatus: BLOCKED\nattempts: 3\nbase_sha: null\nscope: [src/**]\n---\n' > "$rd/chunks/01.md"
+assert_fail "finish refuses a run with a BLOCKED chunk" bash -c "cd '$R' && '$DF' finish '$id' s1"
+(cd "$R" && "$DF" fm-set "$rd/chunks/01.md" status PASS)
+assert_ok "finish accepts a clean run at qa" bash -c "cd '$R' && '$DF' finish '$id' s1"
+set -- $(mk feature); R=$1 id=$2 wt=$3 rd=$4
+(cd "$R" && "$DF" conf-set "$rd/run.conf" stage integrate)
+assert_ok "finish accepts the v0.1 stage integrate" bash -c "cd '$R' && '$DF' finish '$id' s1"
 
 finish

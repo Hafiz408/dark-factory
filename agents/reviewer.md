@@ -12,7 +12,8 @@ You are read-only. Never edit, write or move a file in the worktree. Use Bash on
 (git log, git show, grep, running scanners or tests that already exist). Write only to the
 findings output path.
 
-Inputs: the lens file, `spec.md`, the diff against `base_sha`, the worktree path, the findings
+Inputs: the lens file, `spec.md`, the diff against the base you are given (the chunk's `base_sha`, or `root_base_sha`
+for the consolidated review), the worktree path, the findings
 output path, `root_base_sha`, and optionally the previous attempt's patch and findings. The
 goal lens also receives the chunk files; no other lens does.
 

@@ -181,7 +181,7 @@ Details you must follow:
   blocked: mark transitive dependents SKIPPED and continue with independent chunks.
 - **Budgets.** Stop when attempts used exceed `max_attempts` x chunk count (fix chunks
   included), or when the current epoch time (read in its own command) minus `started` exceeds `budget_seconds` (both in `run.conf`).
-  On exhaustion stop gracefully and write the report; the run stays resumable after the user
+  On exhaustion pause (see Pausing, under Review); the run stays resumable after the user
   raises the budget with `{DF} conf-set`.
 - Before every role spawn and after every verdict: `{DF} lock <id> refresh <session-id>`, append one line to `log.md`, and run
   `{DF} status <id>`.
@@ -199,42 +199,63 @@ Details you must follow:
 ## Review (stage `review`)
 
 The consolidated review of the whole branch. QA does not start until this is clean. A run
-started on v0.1 may show stage `integrate`; treat it as `review`.
+started on v0.1 may show stage `integrate`; treat it as `review`. The stage stays `review`
+while its fix chunks run through the loop.
 
-1. In ONE message spawn reviewer(quality), reviewer(ponytail), reviewer(security),
+On entry: `{DF} conf-set {RD}/run.conf stage review`. If any chunk is BLOCKED or SKIPPED, pause
+now (see Pausing) without spawning anything; no fix chunks are made for a chunk that already
+used its attempts and its re-plan.
+
+A round is one pass of step 1. The round number lives in `run.conf` as `review_round`, never in
+your head.
+
+1. Add 1 to `review_round` (`{DF} conf-get`, then `{DF} conf-set {RD}/run.conf review_round <n>`).
+   In ONE message spawn reviewer(quality), reviewer(ponytail), reviewer(security),
    reviewer(impact) and reviewer(goal) over the whole branch diff against `root_base_sha`,
    while you run the full suite yourself. Pass the chunk files to the goal reviewer only.
-   Snapshot around these read-only roles as in the loop.
-2. Feed the findings through `{DF} gate`. Blocking findings, and a red suite, become fix chunks
-   `FX-1`, `FX-2`, ... through the same loop. Write each fix chunk's `scope` to cover every
-   file named in its findings, and list any existing test or test helper among them in
-   `touches_tests`; otherwise the integrity check rejects the attempt. A fix chunk changes only
-   what its findings name: no new test files, README or other prose unless a finding is about
-   them. Then run step 1 again; that is the next round.
-3. Cap: `max_review_rounds` in `run.conf` (default 3). The count restarts each time QA sends
-   work back here.
-4. **Stopping before QA.** The run does not enter QA when the cap is reached with blocking
-   findings left, or when any chunk is BLOCKED or SKIPPED (no fix chunks are made for a chunk
-   that already used its attempts and its re-plan). Instead: write the report (below), with
-   `PAUSED: <what is open>` as its first line; run
-   `{DF} conf-set {RD}/run.conf waiting_on "<what is open>"` and
-   `{DF} conf-set {RD}/run.conf status paused`; leave `stage` where it is; run
-   `{DF} lock <id> release <session-id>`; and tell the user what is open and that `resume`
-   continues after they raise the cap with `{DF} conf-set` or amend the plan. Do not run
-   `{DF} finish` for a paused run.
+   Snapshot around these read-only roles as in the loop. Write outputs to
+   `{RD}/panel/review-r<n>-<lens>.md`.
+2. Feed the findings through `{DF} gate`. Nothing blocking and a green suite: the review is
+   clean; run `{DF} conf-set {RD}/run.conf stage qa` and go to QA.
+3. Otherwise, if `review_round` has reached `max_review_rounds` (default 3): pause (see
+   Pausing). Make no fix chunks, so nothing unreviewed lands on the branch.
+4. Otherwise the blocking findings, and a red suite, become fix chunks `FX-1`, `FX-2`, ...
+   through the same loop. Write each fix chunk's `scope` to cover every file
+   named in its findings, and list any existing test or test helper among them in `touches_tests`;
+   otherwise the integrity check rejects the attempt. A fix chunk changes only what its
+   findings name: no new test files, README or other prose unless a finding is about them.
+   A fix chunk that ends BLOCKED pauses the run. Then go to step 1.
+
+### Pausing
+
+The run does not enter QA, and is never finished, while something is open. To pause:
+write the report (below) with `PAUSED: <what is open>` as its first line; run
+`{DF} conf-set {RD}/run.conf waiting_on "<what is open>"` (one line) and
+`{DF} conf-set {RD}/run.conf status paused`; leave `stage` where it is; run
+`{DF} lock <id> release <session-id>`; print the `[df <run-id>] <stage>: paused, <what is open>`
+line; and tell the user what is open and how to continue:
+- a cap was reached: raise it with `{DF} conf-set {RD}/run.conf max_review_rounds <n>` (or
+  `max_qa_rounds`), then `resume`;
+- a chunk is BLOCKED or SKIPPED: optionally edit that chunk file or `plan.md` in the run
+  directory, then `resume`, which reopens those chunks.
+Do not run `{DF} finish` for a paused run; it refuses. An exhausted attempt or time budget
+pauses the same way.
 
 ## QA (stage `qa`)
 
-Functional QA runs only against a branch the review passed.
+Functional QA runs only against a branch the review passed. The QA round number lives in
+`run.conf` as `qa_round`.
 
-1. Spawn `qa-functional` over every scenario against the reviewed branch, with a snapshot
-   before and after.
+1. Add 1 to `qa_round`. Spawn `qa-functional` over every scenario against the reviewed branch,
+   with a snapshot before and after. Write its output to `{RD}/panel/qa-r<n>.md`.
 2. All pass: go to Report and finish.
-3. A failure becomes a fix chunk through the loop. It carries symptoms only, never scenario
-   text. The fix then goes back through Review (its round count restarts at 1) before QA runs
-   again. One pass through this stage is one QA round.
-4. Cap: `max_qa_rounds` in `run.conf` (default 2). On the cap with failures left, pause exactly
-   as in Review step 4.
+3. Otherwise, if `qa_round` has reached `max_qa_rounds` (default 2): pause (see Pausing).
+4. Otherwise each failure becomes a fix chunk. It carries symptoms only, never scenario text.
+   QA findings name behaviour, not files, so take the fix chunk's `scope` and `touches_tests`
+   from the chunks listed in the failing scenario's `chunks:` field (their union), and write
+   its "Done when" as the expected behaviour in your own words. Then run
+   `{DF} conf-set {RD}/run.conf stage review` and `{DF} conf-set {RD}/run.conf review_round 0`,
+   run the fix chunks through the loop, and go through Review again before QA runs again.
 
 ## Report and finish
 
@@ -261,8 +282,6 @@ Functional QA runs only against a branch the review passed.
 ## Resume
 
 1. Pick the run: the id given, else the most recent unfinished one (stage is not `done`); ask only if several.
-   A run with status `paused`: show its `waiting_on`, set `status active`, and continue at the
-   recorded stage. If the same cap is still reached it pauses again at once; say so.
    A run with status `unresolved` is finished: report it, do not resume it.
 2. Pick a new session id, then `{DF} lock <id> acquire <session-id>`. If it refuses, say the run is live in another session and stop
    (the user may pass `--force`, which releases the lock first).
@@ -273,6 +292,18 @@ Functional QA runs only against a branch the review passed.
    report. Do not rebase. The base is the commit `base_ref` (from `run.conf`) now points to; when
    `base_ref` is absent or `detached`, it is `HEAD` of the main clone. When `base_ref` is not a
    branch name (a sha, `HEAD~1`), there is nothing to compare: skip the drift check.
-6. Before sign-off: re-ask only unanswered questions. In the loop: reset a dirty tree to the
+6. A run with status `paused` (do this only now, after the lock is yours): show its
+   `waiting_on`; run `{DF} conf-set {RD}/run.conf status active`; set every BLOCKED and SKIPPED
+   chunk back to `status pending` and `attempts 0` with `{DF} fm-set`, log it, and run those
+   chunks through the loop before anything else. A run paused at a cap continues from the
+   step that paused it (Review step 3 or QA step 3), using that round's findings on disk: if
+   the counter still equals its cap it pauses again at once, and you say so; if the cap was
+   raised, carry on to the next step.
+7. At `review` or `qa`, for a run that was interrupted rather than paused: first finish any
+   chunk whose status is `running` or `pending` by the loop rules below. Then redo the
+   current round from its start, keeping its number: subtract 1 from the counter
+   (`review_round` or `qa_round`) so that step 1 of that stage brings it back, and ignore that
+   round's partial outputs.
+8. Before sign-off: re-ask only unanswered questions. In the loop: reset a dirty tree to the
    chunk's `base_sha`, count the interrupted attempt in `interrupts` (cap 3), and restart at the
    first role without a valid recorded verdict.

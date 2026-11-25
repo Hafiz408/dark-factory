@@ -15,7 +15,10 @@ atomic() { local t="$1.tmp.$$"; cat > "$t" && mv "$t" "$1"; }
 # key=value files (run.conf)
 conf_get() { tr -d '\r' < "$1" | sed -n "s/^$2=//p" | head -1; }
 conf_set() {
+  case "$3" in *[[:cntrl:]]*) die "conf-set: $2 must be a single line";; esac
   case "$2=$3" in
+    max_review_rounds=*|max_qa_rounds=*|review_round=*|qa_round=*)
+      case "$3" in ''|*[!0-9]*) die "conf-set: $2 must be an integer";; esac ;;
     status=active|status=waiting_permission|status=paused|status=done|status=unresolved|status=aborted) ;;
     status=*) die "conf-set: invalid status '$3'";;
     stage=intake|stage=route|stage=refine|stage=plan|stage=preflight|stage=signoff|stage=slice|stage=loop|stage=integrate|stage=review|stage=qa|stage=done) ;; # integrate: v0.1 name for review
@@ -93,7 +96,7 @@ cmd_start() { # df start <input-file> [--base <ref>] [--branch <name>]   (DF_ALL
   cp "$input" "$rd/input.md"
   { echo "track=unrouted"; echo "worktree=$wt"; echo "branch=$branch"; echo "root_base_sha=$base"; echo "base_ref=$baseref"
     echo "stage=intake"; echo "status=active"
-    echo "started=$(date +%s)"; echo "budget_seconds=${DF_BUDGET_SECONDS:-14400}"; echo "max_attempts=3"; echo "max_review_rounds=3"; echo "max_qa_rounds=2"; } | atomic "$rd/run.conf"
+    echo "started=$(date +%s)"; echo "budget_seconds=${DF_BUDGET_SECONDS:-14400}"; echo "max_attempts=3"; echo "max_review_rounds=3"; echo "max_qa_rounds=2"; echo "review_round=0"; echo "qa_round=0"; } | atomic "$rd/run.conf"
   echo "$id"
 }
 
@@ -249,9 +252,16 @@ cmd_scrub() { # df scrub <file>: scrubbed copy on stdout, exit 3 if anything was
 }
 
 cmd_finish() { # df finish <run-id> [session]: end state is written together, then the lock is released
-  local rd c st=done wt base track tre prose
+  local rd c st=done wt base track tre prose f
   rd=$(run_dir "$1"); c="$rd/run.conf"
   [ -f "$c" ] || die "no such run: $1"
+  # Only a run that came through QA clean may finish; anything else pauses and stays resumable.
+  case "$(conf_get "$c" stage)" in qa|integrate|done) ;; *) die "finish: run has not completed QA (stage $(conf_get "$c" stage))";; esac
+  case "$(conf_get "$c" status)" in active|done|unresolved) ;; *) die "finish: run is $(conf_get "$c" status): $(conf_get "$c" waiting_on)";; esac
+  for f in "$rd"/chunks/*.md; do
+    [ -e "$f" ] || continue
+    case "$(fm_get "$f" status)" in BLOCKED|SKIPPED) die "finish: chunk $(fm_get "$f" id) is $(fm_get "$f" status)";; esac
+  done
   track=$(conf_get "$c" track); wt=$(conf_get "$c" worktree); base=$(conf_get "$c" root_base_sha)
   # eval P1: a bugfix run whose branch changed no source is not a fix; say so, loudly.
   # Test support files and prose do not count as source; config and requirements files do.

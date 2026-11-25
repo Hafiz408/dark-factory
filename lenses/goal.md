@@ -20,7 +20,7 @@ manual check can confirm is `met` when the code for it is present, and you say s
 | Finding | Severity |
 |---|---|
 | An acceptance criterion or a "Done when" line is not met | high |
-| Met, but no test would fail if it stopped being met | medium |
+| Met, but no test would fail if it stopped being met | low |
 | Built beyond the spec (also report to ponytail's attention) | low |
 
 Set `source: goal`.

@@ -167,13 +167,27 @@ grep -q "^## Review" "$SK" && grep -q "^## QA" "$SK" && ! grep -q "^## Integrate
 r=$(grep -n "^## Review" "$SK" | head -1 | cut -d: -f1); q=$(grep -n "^## QA" "$SK" | head -1 | cut -d: -f1)
 [ -n "$r" ] && [ -n "$q" ] && [ "$r" -lt "$q" ] && ok "SKILL.md: review comes before QA" || bad "SKILL.md: review comes before QA"
 grep -q "max_review_rounds" "$SK" && grep -q "max_qa_rounds" "$SK" && ok "SKILL.md: both loops have a cap in run.conf" || bad "SKILL.md: both loops have a cap in run.conf"
-grep -q "does not enter QA" "$SK" && grep -q "status paused" "$SK" && grep -q "waiting_on" "$SK" && ok "SKILL.md: an unclean review pauses before QA" || bad "SKILL.md: an unclean review pauses before QA"
+grep -q "does not enter QA" "$SK" && grep -q "status paused" "$SK" && grep -q 'waiting_on "<what is open>"' "$SK" && ok "SKILL.md: an unclean review pauses before QA" || bad "SKILL.md: an unclean review pauses before QA"
 grep -q "reviewer(goal)" "$SK" && grep -q "chunk files" "$SK" && ok "SKILL.md: consolidated review adds the goal lens with the chunk files" || bad "SKILL.md: consolidated review adds the goal lens with the chunk files"
 G="$ROOT/lenses/goal.md"
 grep -q "Done when" "$G" && grep -q "file:line" "$G" && grep -q "not met" "$G" && ok "goal lens: every criterion met or not met, with evidence" || bad "goal lens: every criterion met or not met, with evidence"
 grep -q "ponytail:ponytail-review" "$ROOT/lenses/ponytail.md" && ! grep -q "ponytail:ponytail-review" "$ROOT/lenses/quality.md" && ok "ponytail is its own lens" || bad "ponytail is its own lens"
 grep -q "source: .*goal" "$ROOT/skills/dark-factory/rules.md" && ok "rules: goal is a finding source" || bad "rules: goal is a finding source"
-grep -q "symptoms only" "$SK" && ok "SKILL.md: QA failures reach the builder as symptoms only" || bad "SKILL.md: QA failures reach the builder as symptoms only"
+sed -n '/^## QA/,/^## Report/p' "$SK" | grep -q "symptoms only" && ok "SKILL.md: QA failures reach the builder as symptoms only" || bad "SKILL.md: QA failures reach the builder as symptoms only"
 grep -q "integrate" "$ROOT/docs/design.md" && grep -q "alias" "$ROOT/docs/design.md" && ok "design.md: integrate is documented as an alias of review" || bad "design.md: integrate is documented as an alias of review"
+
+# v2 slice 2 branch review
+grep -q "run.conf review_round <n>" "$SK" && grep -q "Add 1 to .qa_round." "$SK" && ok "SKILL.md: round counters live in run.conf" || bad "SKILL.md: round counters live in run.conf"
+grep -q "Do not run" "$SK" && grep -q "PAUSED: <what is open>" "$SK" && ok "SKILL.md: a paused run is not finished and its report says PAUSED" || bad "SKILL.md: a paused run is not finished and its report says PAUSED"
+sed -n '/^## Resume/,$p' "$SK" | grep -q "BLOCKED" && sed -n '/^## Resume/,$p' "$SK" | grep -q "attempts 0" && ok "SKILL.md: resume reopens blocked chunks" || bad "SKILL.md: resume reopens blocked chunks"
+sed -n '/^## Resume/,$p' "$SK" | grep -q "At .review. or .qa." && ok "SKILL.md: resume has a rule for review and qa" || bad "SKILL.md: resume has a rule for review and qa"
+sed -n '/^## QA/,/^## Report/p' "$SK" | grep -q "chunks:" && ok "SKILL.md: a QA fix chunk takes its scope from the scenario's chunks" || bad "SKILL.md: a QA fix chunk takes its scope from the scenario's chunks"
+sed -n '/^## Review/,/^## QA/p' "$SK" | grep -q "On entry" && ok "SKILL.md: blocked chunks are checked on entering review" || bad "SKILL.md: blocked chunks are checked on entering review"
+sed -n '/^## Review/,/^## QA/p' "$SK" | grep -q "stage qa" && ok "SKILL.md: a clean review sets stage qa" || bad "SKILL.md: a clean review sets stage qa"
+n=$(sed -n '/^## The loop/,/^## Review/p' "$SK" | grep -c "spawn qa-functional\|qa-functional +")
+assert_eq "0" "$n" "SKILL.md: nothing in the loop spawns qa-functional"
+grep -q "every scenario" "$ROOT/agents/qa-functional.md" && ! grep -q "for this chunk" "$ROOT/agents/qa-functional.md" && ok "qa-functional: runs every scenario, not per chunk" || bad "qa-functional: runs every scenario, not per chunk"
+grep -q "qa_functional, review_quality" "$ROOT/docs/design.md" && bad "design.md: pseudocode panel has no functional QA" || ok "design.md: pseudocode panel has no functional QA"
+grep -q "impact | goal |" "$ROOT/docs/design.md" && ok "design.md: goal is a finding source" || bad "design.md: goal is a finding source"
 
 finish

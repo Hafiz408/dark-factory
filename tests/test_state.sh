@@ -130,4 +130,12 @@ done
 "$DF" conf-set "$rd2/run.conf" status paused; "$DF" conf-set "$rd2/run.conf" waiting_on "review cap reached, 1 blocking"
 assert_contains "waiting on: review cap reached, 1 blocking" "$(cd "$R2" && "$DF" status "$i2")" "status says what a paused run waits on"
 
+# v2 slice 2 review: caps and round counters are integers; no value may carry a newline
+assert_fail "conf-set refuses a non-integer cap" "$DF" conf-set "$T/st.conf" max_review_rounds lots
+assert_fail "conf-set refuses a non-integer round" "$DF" conf-set "$T/st.conf" qa_round x
+assert_ok "conf-set accepts an integer round" "$DF" conf-set "$T/st.conf" review_round 2
+assert_fail "conf-set refuses a value with a newline" "$DF" conf-set "$T/st.conf" waiting_on "$(printf 'a\nstatus=done')"
+assert_eq "0" "$("$DF" conf-get "$rd2/run.conf" review_round)" "start records review_round 0"
+assert_eq "0" "$("$DF" conf-get "$rd2/run.conf" qa_round)" "start records qa_round 0"
+
 finish

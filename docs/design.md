@@ -116,7 +116,7 @@ for attempt in 1..MAX_ATTEMPTS (3):
         a failing test is re-run once; green on re-run = flaky, finding low, listed
         any finding >= medium -> failure note, reset, continue
     assert worktree unchanged by read-only roles (section 9)
-    parallel( qa_functional, review_quality, review_security, review_impact )
+    parallel( review_quality, review_ponytail, review_security, review_impact )
         any finding >= medium -> one merged failure note (symptoms only), reset, continue
     commit "df(chunk NN): title"; status = PASS; break
 else:
@@ -200,8 +200,11 @@ Functional QA runs only against a branch the review has passed.
    name suffix.)
 3a. **Stopping before QA.** When a cap is reached with blocking findings, or any chunk is
    BLOCKED or SKIPPED, the run writes its report, sets status `paused` with `waiting_on`, keeps
-   its stage and releases the lock. `resume` continues after the user raises the cap or amends
-   the plan. `unresolved` keeps its v0.1 meaning.
+   its stage and releases the lock. `resume` continues after the user raises the cap, or
+   reopens BLOCKED and SKIPPED chunks (attempts back to 0) after the user has had the chance
+   to edit them. Round numbers live in `run.conf` (`review_round`, `qa_round`), so a cap
+   holds across sessions. `df finish` refuses a run that is paused, has not reached `qa`, or
+   has a BLOCKED or SKIPPED chunk. `unresolved` keeps its v0.1 meaning.
 
 Trade-off accepted: wrong behaviour is found after review instead of per chunk, so a
 functional miss costs a fix chunk plus a review round. The tester still runs the suite per
@@ -246,7 +249,7 @@ State lives in a **hidden sibling of the main clone**, not in the working tree a
 the first live run.) The user is asked once to allow the parent directory.
 
 ```
-run.conf          track, worktree, branch, base_ref, root_base_sha, env, budget, max_review_rounds, max_qa_rounds, stage cursor, status
+run.conf          track, worktree, branch, base_ref, root_base_sha, env, budget, max_review_rounds, max_qa_rounds, review_round, qa_round, stage cursor, status
 lock              session id + heartbeat, refreshed on every verdict
 input.md          raw request (scrubbed)
 questions.md      refine questions, pending and answered
@@ -295,7 +298,7 @@ Findings:
 
 ```
 - severity: critical | high | medium | low
-  source: functional | quality | ponytail | security | impact | tester | integrity
+  source: functional | quality | ponytail | security | impact | goal | tester | integrity
   where: <file:line or behaviour>
   what: <one line>
   tags: [pre-existing] [flaky] [late-find]
