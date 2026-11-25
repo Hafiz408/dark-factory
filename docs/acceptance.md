@@ -94,3 +94,20 @@ is covered by a structural test only; it has not been re-run live.
 
 One earlier attempt was stopped by hand when the branch review's fixes landed, and one was cut
 off by a usage limit; neither is counted.
+
+## v2 slices 3-5 (ship, repo profile and e2e, retro), 2026-11-25
+
+One run of `fixtures/feature` on the top of the v2 stack (slices 3-6 together), with a local
+bare repository as `origin`, driven by the same script that answers "ok" and "approve".
+
+| What | Result |
+|---|---|
+| Outcome | **pass**, 1 chunk, 1 attempt, 1 review round, 1 QA round, `done/done` |
+| Ship (slice 3) | Asked "Push `df/<run-id>` and open a PR into `main`? (yes / no)". The driver's "ok" was recorded as `ship_confirmed=no`; the bare origin still had only `main`. |
+| Profile and e2e (slice 4) | Preflight drafted `profile.md` beside the clone (no e2e command for this CLI); the report and milestone line say `e2e: not configured`, never a pass. |
+| Retro (slice 5) | Six repo lessons installed (facts with run and chunk evidence), six plugin proposals collected, one `metrics.tsv` row with outcome `done`. |
+| Milestone lines | All 15 match `[df <run-id>] <stage>: <event>`. |
+
+The run was cut off once by a usage limit and resumed with `--force`; the retro's proposals
+include counting the wall-clock budget as active time, because that idle gap pushed the run
+past 4 hours.
