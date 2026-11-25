@@ -223,6 +223,68 @@ assert_eq "0" "$rc" "sweep no gh: exit 0"; assert_eq "" "$out" "sweep no gh: sil
 N=$(mktemp -d); out=$(cd "$N" && "$DF" sweep 2>&1); rc=$?
 assert_eq "0" "$rc" "sweep outside git: exit 0"; assert_eq "" "$out" "sweep outside git: silent"
 
+# df clean --branch
+shipped() { local id; id=$(newrun); df conf-set "$SC/$id/run.conf" base_ref main; df ship "$id" t "$T/body.md" >/dev/null 2>&1; echo "$id"; }
+intact() { # intact <desc> <id>: worktree, state and local branch all still there
+  local c="$SC/$2/run.conf"
+  assert_ok "$1: worktree kept" test -d "$(df conf-get "$c" worktree)"
+  assert_ok "$1: state kept" test -f "$c"
+  assert_ok "$1: branch kept" git -C "$C" show-ref --verify --quiet "refs/heads/$(df conf-get "$c" branch)"
+}
+for fl in "--branch --force" "--force --branch"; do
+  K=$(shipped); KC="$SC/$K/run.conf"; kb=$(df conf-get "$KC" branch); kw=$(df conf-get "$KC" worktree)
+  df clean "$K" $fl >/dev/null 2>&1; rc=$?
+  assert_eq "0" "$rc" "clean $fl: exit 0"
+  assert_fail "clean $fl: worktree gone" test -e "$kw"
+  assert_fail "clean $fl: state gone" test -e "$SC/$K"
+  assert_fail "clean $fl: local branch gone" git -C "$C" show-ref --verify --quiet "refs/heads/$kb"
+  assert_ok "clean $fl: origin branch kept" git -C "$ORIGIN" show-ref --verify --quiet "refs/heads/$kb"
+done
+K=$(shipped); KC="$SC/$K/run.conf"; kw=$(df conf-get "$KC" worktree)
+df conf-set "$KC" pushed_sha ""
+e=$(df clean "$K" --branch 2>&1); rc=$?
+assert_eq "1" "$rc" "clean: pushed_sha missing: exit 1"; assert_contains "pushed_sha" "$e" "clean: pushed_sha missing: message"; intact "pushed_sha missing" "$K"
+K=$(shipped); KC="$SC/$K/run.conf"; kw=$(df conf-get "$KC" worktree)
+echo x > "$kw/dirty.txt"
+for fl in "--branch" "--branch --force"; do
+  e=$(df clean "$K" $fl 2>&1); rc=$?
+  assert_eq "1" "$rc" "clean dirty ($fl): exit 1"; assert_contains "uncommitted" "$e" "clean dirty ($fl): message"; intact "dirty ($fl)" "$K"
+done
+K=$(shipped); KC="$SC/$K/run.conf"; kw=$(df conf-get "$KC" worktree)
+git -C "$kw" commit -q --allow-empty -m more
+e=$(df clean "$K" --branch 2>&1); rc=$?
+assert_eq "1" "$rc" "clean: head differs: exit 1"; assert_contains "pushed_sha" "$e" "clean: head differs: message"; intact "head differs" "$K"
+# checked out elsewhere: another worktree, and the main clone
+K=$(shipped); KC="$SC/$K/run.conf"; kb=$(df conf-get "$KC" branch); kw=$(df conf-get "$KC" worktree)
+git -C "$kw" checkout -q --detach; git -C "$C" worktree add -q "$T/other-wt" "$kb"
+e=$(df clean "$K" --branch 2>&1); rc=$?
+assert_eq "1" "$rc" "clean: checked out in another worktree: exit 1"; assert_contains "checked out" "$e" "clean: other worktree: message"; intact "other worktree" "$K"
+git -C "$C" worktree remove --force "$T/other-wt"
+git -C "$kw" checkout -q "$kb"
+git -C "$kw" checkout -q --detach; git -C "$C" checkout -q "$kb"
+e=$(df clean "$K" --branch 2>&1); rc=$?
+assert_eq "1" "$rc" "clean: checked out in main clone: exit 1"; assert_contains "checked out" "$e" "clean: main clone: message"; intact "main clone" "$K"
+git -C "$C" checkout -q main
+# bad options
+K=$(shipped)
+for fl in "--bogus" "--branch --branch" "--force --force" "--branch --bogus"; do
+  e=$(df clean "$K" $fl 2>&1); rc=$?
+  assert_eq "1" "$rc" "clean $fl: exit 1"; assert_contains "usage" "$e" "clean $fl: usage"; intact "clean $fl" "$K"
+done
+# missing worktree dir, head equal: succeeds
+K=$(shipped); KC="$SC/$K/run.conf"; kb=$(df conf-get "$KC" branch); kw=$(df conf-get "$KC" worktree)
+rm -rf "$kw"
+df clean "$K" --branch >/dev/null 2>&1; rc=$?
+assert_eq "0" "$rc" "clean: missing worktree dir: exit 0"
+assert_fail "clean: missing worktree dir: branch gone" git -C "$C" show-ref --verify --quiet "refs/heads/$kb"
+assert_fail "clean: missing worktree dir: state gone" test -e "$SC/$K"
+# plain clean keeps the branch
+K=$(shipped); KC="$SC/$K/run.conf"; kb=$(df conf-get "$KC" branch); kw=$(df conf-get "$KC" worktree)
+df clean "$K" >/dev/null 2>&1; rc=$?
+assert_eq "0" "$rc" "plain clean: exit 0"
+assert_fail "plain clean: worktree gone" test -e "$kw"; assert_fail "plain clean: state gone" test -e "$SC/$K"
+assert_ok "plain clean: branch kept" git -C "$C" show-ref --verify --quiet "refs/heads/$kb"
+
 grep -q "^  fixed)" "$DF" && ok "df dispatches fixed" || bad "df dispatches fixed"
 
 finish

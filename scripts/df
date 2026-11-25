@@ -386,21 +386,52 @@ cmd_sweep() { # df sweep: list runs whose PR is merged; always exit 0, never wri
   return 0
 }
 
-cmd_clean() { # df clean <run-id> [--force]: removes worktree and state, keeps the branch
-  local rd c wt
-  [ -n "${1:-}" ] || die "clean: run id required"
-  rd=$(run_dir "$1"); c="$rd/run.conf"
-  [ -f "$c" ] || die "no such run: $1"
-  if [ "${2:-}" != --force ] && [ "$(cmd_lock "$1" check)" = live ]; then die "run is live; use --force"; fi
+physpath() { # physical path of a dir, or of a missing dir via its parent
+  if [ -d "$1" ]; then (cd -P "$1" && pwd -P); else printf '%s/%s\n' "$(cd -P "$(dirname "$1")" 2>/dev/null && pwd -P)" "$(basename "$1")"; fi
+}
+
+cmd_clean() { # df clean <run-id> [--force] [--branch]: removes worktree and state; --branch also deletes the local branch
+  local rd c wt id=${1:-} force="" hb="" usage br ps own p line cur
+  usage="usage: df clean <run-id> [--force] [--branch]"
+  case $id in ""|-*) die "clean: run id required; $usage" ;; esac
+  shift
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --force) [ -z "$force" ] || die "$usage"; force=1 ;;
+      --branch) [ -z "$hb" ] || die "$usage"; hb=1 ;;
+      *) die "$usage" ;;
+    esac
+    shift
+  done
+  rd=$(run_dir "$id"); c="$rd/run.conf"
+  [ -f "$c" ] || die "no such run: $id"
+  if [ -z "$force" ] && [ "$(cmd_lock "$id" check)" = live ]; then die "run is live; use --force"; fi
   wt=$(conf_get "$c" worktree)
+  if [ -n "$hb" ]; then
+    br=$(conf_get "$c" branch); ps=$(conf_get "$c" pushed_sha)
+    printf '%s' "$ps" | grep -Eq '^[0-9a-f]{40}$' || die "clean: --branch needs a recorded pushed_sha"
+    git check-ref-format --branch "$br" >/dev/null 2>&1 || die "clean: bad branch name"
+    if [ -d "$wt" ] && [ -n "$(git -C "$wt" status --porcelain)" ]; then die "clean: worktree has uncommitted changes"; fi
+    if git show-ref --verify --quiet "refs/heads/$br" && [ "$(git rev-parse "refs/heads/$br")" != "$ps" ]; then
+      die "clean: branch head differs from pushed_sha"
+    fi
+    own=$(physpath "$wt"); cur=""
+    while IFS= read -r line; do
+      case $line in
+        "worktree "*) cur=${line#worktree } ;;
+        "branch refs/heads/$br") p=$(physpath "$cur"); [ "$p" = "$own" ] || die "clean: branch is checked out in $cur" ;;
+      esac
+    done < <(git worktree list --porcelain)
+  fi
   if [ -d "$wt" ]; then
-    if [ "${2:-}" != --force ] && [ -n "$(git -C "$wt" status --porcelain)" ]; then
+    if [ -z "$hb" ] && [ -z "$force" ] && [ -n "$(git -C "$wt" status --porcelain)" ]; then
       die "worktree has uncommitted changes; use --force"
     fi
     git worktree remove --force "$wt"
   fi
   rm -rf "$rd"
   git worktree prune
+  if [ -n "$hb" ] && git show-ref --verify --quiet "refs/heads/$br"; then git branch -D -- "$br" >/dev/null; fi
 }
 
 cmd=${1:-}; [ $# -gt 0 ] && shift
