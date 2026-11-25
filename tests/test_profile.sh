@@ -81,6 +81,11 @@ printf -- '---\ne2e_cmd: npm run e2e\n---\n## Signing in for tests\nPassword: re
 assert_ok "prose naming the credential variable validates" v
 rm -f "$P"
 
+# fourth review: a literal secret next to a variable is still a secret
+prof 'start_cmd: DB_PASSWORD=hunter2 ./run.sh --port $PORT'
+assert_fail "a literal password beside a variable is refused" v
+rm -f "$P"
+
 # e2e stage
 T=$(mktemp -d); printf 'status=active\nstage=qa\n' > "$T/c"
 assert_ok "conf-set accepts stage e2e" "$DF" conf-set "$T/c" stage e2e

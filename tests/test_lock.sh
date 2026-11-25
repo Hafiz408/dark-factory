@@ -36,4 +36,17 @@ assert_ok "finished run still validates" "$DF" validate "$id"
 printf 'session=sessL\nheartbeat=%s\n' "$(( $(date +%s) - 1000 ))" > "$("$DF" run-dir "$id")/lock"
 assert_eq "live" "$("$DF" lock "$id" check)" "a 1000 second old heartbeat is still live by default"
 
+# fourth review: one run executes per repo at a time
+R2=$(mkrepo); echo x > "$R2/in.txt"
+a=$(cd "$R2" && "$DF" start "$R2/in.txt"); (cd "$R2" && "$DF" lock "$a" acquire sA)
+assert_fail "start refuses while another run is live" bash -c "cd '$R2' && '$DF' start '$R2/in.txt'"
+(cd "$R2" && "$DF" lock "$a" release)
+b=$(cd "$R2" && "$DF" start "$R2/in.txt")
+assert_ok "start works once no run is live" test -n "$b"
+(cd "$R2" && "$DF" lock "$b" acquire sB)
+assert_fail "acquire refuses while another run is live (resume)" bash -c "cd '$R2' && '$DF' lock '$a' acquire sA2"
+assert_ok "the live run can still refresh its own lock" bash -c "cd '$R2' && '$DF' lock '$b' refresh sB"
+(cd "$R2" && "$DF" lock "$b" release)
+assert_ok "acquire works once the other run released" bash -c "cd '$R2' && '$DF' lock '$a' acquire sA2"
+
 finish

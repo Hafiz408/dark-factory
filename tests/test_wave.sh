@@ -113,4 +113,14 @@ w3t=$(cd "$R3" && "$DF" conf-get "$rd3/run.conf" worktree); git -C "$R3" worktre
 (cd "$R3" && "$DF" clean "$i3" --force)
 assert_ok "clean keeps a user worktree that only shares the prefix" test -d "$w3t-copy"
 
+# fourth review: clean copes with a deleted sub-worktree and a sub-branch checked out elsewhere
+R4=$(mkrepo); echo x > "$R4/in.txt"; i4=$(cd "$R4" && "$DF" start "$R4/in.txt"); rd4=$(cd "$R4" && "$DF" run-dir "$i4")
+printf -- '---\nid: 01\nstatus: pending\nattempts: 0\nscope: [a/**]\n---\n' > "$rd4/chunks/01.md"
+printf -- '---\nid: 02\nstatus: pending\nattempts: 0\nscope: [b/**]\n---\n' > "$rd4/chunks/02.md"
+s41=$(cd "$R4" && "$DF" sub-add "$i4" 01); s42=$(cd "$R4" && "$DF" sub-add "$i4" 02); [ -n "$s41" ] && [ -n "$s42" ] || { bad "sub-add"; finish; }
+rm -rf "$s41"
+b42=$(git -C "$s42" rev-parse --abbrev-ref HEAD); git -C "$s42" checkout -q --detach; git -C "$R4" worktree add -q "$(mktemp -d)/look" "$b42"
+assert_ok "clean finishes despite a deleted sub-worktree and a checked-out sub-branch" bash -c "cd '$R4' && '$DF' clean '$i4' --force"
+assert_fail "and the run state is gone" test -d "$rd4"
+
 finish

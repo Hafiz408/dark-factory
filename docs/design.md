@@ -262,8 +262,9 @@ and infra failures, and writes `retro.md`:
   lines), and `df lessons-set` installs it only if it is at most 30 lines of at most 200
   characters and holds no secret and no holdout-scenario canary; otherwise the old file
   stays. The retro never reads `scenarios/` or the QA outputs, and `df state-hash` checks it
-  wrote nothing outside its three output files. A per-repo lock (`df repo-lock`) serialises
-  writes to the shared lessons, proposals and metrics, and the retro holds it across that check. A paused run's retro keeps the stage it
+  wrote nothing outside its three output files. One run executes per repo at a time
+  (`df start` and `df lock acquire` refuse while another run's lock is live), so the shared
+  profile, lessons, proposals and metrics have a single writer. A paused run's retro keeps the stage it
   stopped at, so it cannot be finished from there. The codebase-fit refiner, planner and builder get it
   inside `<data>`.
 - **Plugin proposals:** changes to prompts, lenses or rubrics the evidence supports. Never

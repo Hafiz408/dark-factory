@@ -40,7 +40,8 @@ while IFS= read -r seg; do
             case "$t" in "$w"|"$w"/*) ok=1;; esac
             # a chunk's sub-worktree is <worktree>-c<NN> or <worktree>-cFX-<n>, nothing else
             case "$t" in "$w"-c*) sub=${t#"$w"-c}; sub=${sub%%/*}
-              case "$sub" in [0-9]|[0-9][0-9]|[0-9][0-9][0-9]|FX-[0-9]|FX-[0-9][0-9]) ok=1;; esac;; esac
+              case "$sub" in [0-9]|[0-9][0-9]|[0-9][0-9][0-9]) ok=1;;
+                FX-?*) case "${sub#FX-}" in *[!0-9]*) ;; *) ok=1;; esac;; esac;; esac
           done
           [ "$ok" = 1 ] || deny "recursive delete outside the worktree";;
       '~'*|'$HOME'*|..|../*|*/..|*/../*|'*') deny "recursive delete outside the worktree";;

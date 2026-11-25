@@ -272,7 +272,6 @@ sed -n '/^### Pausing/,/^## QA/p' "$SK" | grep -q "{DF} pause <id>" && ok "SKILL
 sed -n '/^## Resume/,$p' "$SK" | grep -q "{DF} unpause <id>" && ok "SKILL.md: resume credits paused time through df unpause" || bad "SKILL.md: resume credits paused time through df unpause"
 sed -n '/^## Resume/,$p' "$SK" | grep -q "when it is" && sed -n '/^## Resume/,$p' "$SK" | grep -q "0 the round never started" && ok "SKILL.md: resume never sets a round counter below 0" || bad "SKILL.md: resume never sets a round counter below 0"
 RT3=$(sed -n '/\*\*Retro (stage/,/\*\*Ship (stage/p' "$SK")
-echo "$RT3" | grep -q "{DF} repo-lock <id> acquire" && echo "$RT3" | grep -q "{DF} repo-lock <id> release" && ok "SKILL.md: the retro holds the repo lock across its write check" || bad "SKILL.md: the retro holds the repo lock across its write check"
 grep -q "status paused\`; run" "$SK" && bad "SKILL.md: no hand-set paused status left" || ok "SKILL.md: no hand-set paused status left"
 
 finish
