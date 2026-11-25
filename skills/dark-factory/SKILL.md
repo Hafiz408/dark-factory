@@ -78,7 +78,9 @@ below 0.7, or `mixed: yes`, carry it into Refine as a question. Load `{PLUGIN}/t
 
 ### refine (you talk to the user here)
 1. Spawn three `refiner` agents in ONE message, mode `lens`, with lens files
-   `requirements`, `codebase-fit`, `risk`. Output to `{RD}/gaps-<lens>.md`.
+   `requirements`, `codebase-fit`, `risk`. Output to `{RD}/gaps-<lens>.md`. If `lessons.md`
+   exists beside `{PROFILE}`, pass it to the codebase-fit refiner (and later to the planner and
+   every builder) wrapped in `<data>`: facts from earlier runs on this repo.
 2. Spawn one `refiner` in mode `merge`. It writes `questions.md`.
 3. Show the user the questions (at most 8, each with a proposed default). Wait for answers.
    Append them to `questions.md`. Run merge again. At most 2 rounds per cycle. A risk-lens gap
@@ -217,7 +219,7 @@ Details you must follow:
   `[df r261125-101500-123] loop: chunk 02 PASS (2/4), attempt 1` and
   `[df r261125-101500-123] review: round 2, 1 blocking (security)`. The milestones are: a
   stage is entered; a chunk reaches PASS, is retried, or is BLOCKED; each review round; each
-  QA round's result; the e2e result; a pause; each ship step; and the end of the run, as `[df <run-id>] done: <green or not green>`.
+  QA round's result; the e2e result; the retro; a pause; each ship step; and the end of the run, as `[df <run-id>] done: <green or not green>`.
   That closing line is printed once, after `{DF} finish`, as the last line before the final
   message; entering the `done` stage is not announced separately. Every line has both parts
   and nothing after the event. Print nothing else between sign-off and the final message,
@@ -256,7 +258,8 @@ your head.
 ### Pausing
 
 The run does not enter QA, and is never finished, while something is open. To pause:
-write the report (below) with `PAUSED: <what is open>` as its first line; run
+write the report (below) with `PAUSED: <what is open>` as its first line; run the retro
+(Report, ship and finish, step 2); run
 `{DF} conf-set {RD}/run.conf waiting_on "<what is open>"` (one line) and
 `{DF} conf-set {RD}/run.conf status paused`; leave `stage` where it is; run
 `{DF} lock <id> release <session-id>`; print the `[df <run-id>] <stage>: paused, <what is open>`
@@ -323,7 +326,16 @@ Proves nothing else changed. Run `{DF} conf-set {RD}/run.conf stage e2e`.
    finish` prints `NOT FIXED` (the branch changes no source), the report's first line is
    `NOT FIXED: <why>`, above both sections, and your first sentence to the user says the
    reported problem is still present and what a human must decide.
-2. **Ship (stage `ship`).** Only a run that came through QA and E2E is offered a push. A paused run is never offered
+2. **Retro (stage `retro`).** Run `{DF} conf-set {RD}/run.conf stage retro`. Spawn `retro`
+   with the run directory, the current `lessons.md` beside `{PROFILE}` (if any), and the output
+   paths `{RD}/retro.md`, `{RD}/lessons-new.md`, `{RD}/proposals-new.md`. Then run
+   `{DF} lessons-set <id>` (it installs the new lessons, at most 30 lines and no secret, or
+   refuses and keeps the old ones; relay a refusal in one line) and `{DF} metrics <id>`.
+   Repo lessons are applied automatically to later runs. Plugin proposals are never applied:
+   they are collected in `proposals.md` beside `{PROFILE}` and listed in the final message for
+   the user to decide on. A paused run also gets a retro (it is where the most is learned),
+   then stops without the ship step.
+3. **Ship (stage `ship`).** Only a run that came through QA and E2E is offered a push. A paused run is never offered
    a push, and neither is a bugfix
    run that fixed nothing: run `{DF} fixed <id>`; if it exits non-zero, skip to step 3. Ask
    only when `git -C {WT} remote get-url origin` and `gh auth status` both succeed; otherwise
@@ -340,11 +352,11 @@ Proves nothing else changed. Run `{DF} conf-set {RD}/run.conf stage e2e`.
    and one for the PR. If it refuses, relay the reason in one line and go on to step 3; the
    branch stays local. `{DF} ship` is the only way anything is pushed. Never push by hand,
    never force, never merge.
-3. `{DF} finish <id> <session-id>` (sets stage to done and status to done, or to `unresolved` when a bugfix branch changes no source, and releases the lock).
+4. `{DF} finish <id> <session-id>` (sets stage to done and status to done, or to `unresolved` when a bugfix branch changes no source, and releases the lock).
    If it prints `NOT FIXED`, put the `NOT FIXED: <why>` line at the top of `report.md` now.
    Your final message to the user is, in this order: the NOT FIXED sentence when it applies,
    the two sections, the one plain sentence stating whether the branch is green, the PR URL
-   when one was opened, and one line with the branch name and the worktree path.
+   when one was opened, this run's plugin proposals (one line each, or none), and one line with the branch name and the worktree path.
 
 ## Resume
 

@@ -42,6 +42,10 @@ state is on disk.
   never committed) naming its e2e command and how to start the app. After QA the run checks
   that nothing which passed before now fails. Without one, the report says "e2e: not
   configured".
+- **It learns per repo.** After each run a retro writes facts about the repo that would have
+  saved an attempt (`../.df-<repo>/lessons.md`, at most 30 lines, fed to later runs) and
+  suggestions for the plugin itself (`proposals.md`, never applied for you). `metrics.tsv`
+  keeps one row per run so you can see whether attempts go down.
 - **A run that cannot get clean pauses.** It tells you what is open and never reports a pass.
 - **Resume** after a crash, closed laptop or expired login, losing at most one attempt.
 - **A PR on request.** A run that came through QA asks "Push and open a PR?"; only "yes"

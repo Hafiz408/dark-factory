@@ -4,7 +4,7 @@
 
 fm() { awk '/^---$/{n++; next} n==1' "$1" | sed -n "s/^$2: *//p" | head -1; }
 
-AGENTS="router refiner planner qa-author builder tester qa-functional reviewer"
+AGENTS="router refiner planner qa-author builder tester qa-functional reviewer retro"
 LENSES="requirements codebase-fit risk quality ponytail goal security impact plan-coverage adjudicate"
 TRACKS="bugfix feature build"
 
@@ -20,8 +20,9 @@ for a in $AGENTS; do
 done
 
 # read-only roles must not have Write or Edit
-for a in qa-functional reviewer; do
+for a in qa-functional reviewer retro; do
   t="$(fm "$ROOT/agents/$a.md" tools)"
+  [ "$a" = retro ] && t=$(echo "$t" | sed 's/Write//')
   case "$t" in *Edit*|*Write*|*MultiEdit*) bad "agent $a: read-only tools";; *) ok "agent $a: read-only tools";; esac
 done
 # builder and tester are not given scenario access by instruction
@@ -220,5 +221,14 @@ grep -q "Signing in for tests" "$SK" && grep -q "outside .<data>." "$SK" && ok "
 grep -q "browser" "$ROOT/agents/qa-author.md" && ok "qa-author: browser-only scenarios are manual checks" || bad "qa-author: browser-only scenarios are manual checks"
 grep -q "| S5 |" "$ROOT/docs/spikes.md" && ok "spikes: browser tool names recorded" || bad "spikes: browser tool names recorded"
 grep -q "source: .*e2e" "$ROOT/skills/dark-factory/rules.md" && ok "rules: e2e is a finding source" || bad "rules: e2e is a finding source"
+
+# v2 slice 5: retro and lessons
+RT=$(sed -n '/\*\*Retro (stage/,/\*\*Ship (stage/p' "$SK")
+[ -n "$RT" ] && ok "SKILL.md: has a retro stage before ship" || bad "SKILL.md: has a retro stage before ship"
+echo "$RT" | grep -q "{DF} lessons-set <id>" && echo "$RT" | grep -q "{DF} metrics <id>" && ok "SKILL.md: retro installs lessons and records metrics" || bad "SKILL.md: retro installs lessons and records metrics"
+echo "$RT" | grep -q "never applied" && ok "SKILL.md: plugin proposals are never applied" || bad "SKILL.md: plugin proposals are never applied"
+grep -q "lessons.md" "$SK" && grep -q "refiner" "$SK" && sed -n '/^### refine/,/^### plan/p' "$SK" | grep -q "lessons" && ok "SKILL.md: lessons reach the refiner" || bad "SKILL.md: lessons reach the refiner"
+grep -q "lessons" "$ROOT/agents/planner.md" && grep -q "lessons" "$ROOT/agents/builder.md" && ok "planner and builder read lessons" || bad "planner and builder read lessons"
+grep -q "Facts only" "$ROOT/agents/retro.md" && grep -q "30 lines" "$ROOT/agents/retro.md" && grep -q "scenarios" "$ROOT/agents/retro.md" && ok "retro: facts only, bounded, never leaks scenarios into lessons" || bad "retro: facts only, bounded, never leaks scenarios into lessons"
 
 finish

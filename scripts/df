@@ -21,7 +21,7 @@ conf_set() {
       case "$3" in ''|*[!0-9]*) die "conf-set: $2 must be an integer";; esac ;;
     status=active|status=waiting_permission|status=paused|status=done|status=unresolved|status=aborted) ;;
     status=*) die "conf-set: invalid status '$3'";;
-    stage=intake|stage=route|stage=refine|stage=plan|stage=preflight|stage=signoff|stage=slice|stage=loop|stage=integrate|stage=review|stage=qa|stage=e2e|stage=done) ;; # integrate: v0.1 name for review
+    stage=intake|stage=route|stage=refine|stage=plan|stage=preflight|stage=signoff|stage=slice|stage=loop|stage=integrate|stage=review|stage=qa|stage=e2e|stage=retro|stage=done) ;; # integrate: v0.1 name for review
     stage=*) die "conf-set: invalid stage '$3'";;
     track=unrouted|track=bugfix|track=feature|track=build) ;;
     track=*) die "conf-set: invalid track '$3'";;
@@ -108,7 +108,7 @@ cmd_validate() { # df validate <run-id>
     [ -n "$(conf_get "$c" $k)" ] || die "$c: missing $k"
   done
   case "$(conf_get "$c" track)" in unrouted|bugfix|feature|build) ;; *) die "$c: bad track";; esac
-  case "$(conf_get "$c" stage)" in intake|route|refine|plan|preflight|signoff|slice|loop|integrate|review|qa|e2e|done) ;; *) die "$c: bad stage";; esac
+  case "$(conf_get "$c" stage)" in intake|route|refine|plan|preflight|signoff|slice|loop|integrate|review|qa|e2e|retro|done) ;; *) die "$c: bad stage";; esac
   case "$(conf_get "$c" status)" in active|waiting_permission|paused|done|unresolved|aborted) ;; *) die "$c: bad status";; esac
   git cat-file -e "$(conf_get "$c" root_base_sha)^{commit}" 2>/dev/null || die "$c: root_base_sha not found"
   for f in "$rd"/chunks/*.md; do
@@ -277,7 +277,7 @@ cmd_finish() { # df finish <run-id> [session]: end state is written together, th
   rd=$(run_dir "$1"); c="$rd/run.conf"
   [ -f "$c" ] || die "no such run: $1"
   # Only a run that came through QA clean may finish; anything else pauses and stays resumable.
-  case "$(conf_get "$c" stage)" in qa|e2e|integrate|done) ;; *) die "finish: run has not completed QA (stage $(conf_get "$c" stage))";; esac
+  case "$(conf_get "$c" stage)" in qa|e2e|retro|integrate|done) ;; *) die "finish: run has not completed QA (stage $(conf_get "$c" stage))";; esac
   case "$(conf_get "$c" status)" in active|done|unresolved) ;; *) die "finish: run is $(conf_get "$c" status): $(conf_get "$c" waiting_on)";; esac
   for f in "$rd"/chunks/*.md; do
     [ -e "$f" ] || continue
@@ -298,6 +298,34 @@ cmd_finish() { # df finish <run-id> [session]: end state is written together, th
   conf_set "$c" stage done
   conf_set "$c" status "$st"
   cmd_lock "$1" release "${2:-}"
+}
+
+cmd_lessons_set() { # df lessons-set <run-id>: install the retro's lessons (max 30 lines), append its proposals once
+  local rd sr n
+  rd=$(run_dir "$1"); sr=$(state_root)
+  [ -f "$rd/lessons-new.md" ] || die "lessons-set: $rd/lessons-new.md not found"
+  n=$(grep -c '' "$rd/lessons-new.md" || true)
+  [ "$n" -le 30 ] || die "lessons-set: $n lines; at most 30 (old lessons kept)"
+  ! grep -Eq "$SECRET_RE" "$rd/lessons-new.md" || die "lessons-set: lessons look like they hold a secret (old lessons kept)"
+  atomic "$sr/lessons.md" < "$rd/lessons-new.md"
+  if [ -s "$rd/proposals-new.md" ] && ! grep -qxF "## $1" "$sr/proposals.md" 2>/dev/null; then
+    { cat "$sr/proposals.md" 2>/dev/null || true; printf '## %s\n' "$1"; cat "$rd/proposals-new.md"; } | atomic "$sr/proposals.md"
+  fi
+}
+
+cmd_metrics() { # df metrics <run-id>: one row per run in <state-root>/metrics.tsv, replaced on re-run
+  local rd c m f chunks=0 att=0 a row
+  rd=$(run_dir "$1"); c="$rd/run.conf"; m="$(state_root)/metrics.tsv"
+  [ -f "$c" ] || die "no such run: $1"
+  for f in "$rd"/chunks/*.md; do
+    [ -e "$f" ] || continue
+    chunks=$((chunks + 1)); a=$(fm_get "$f" attempts); case "$a" in ''|*[!0-9]*) a=0;; esac; att=$((att + a))
+  done
+  row=$(printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' "$1" "$(conf_get "$c" track)" "$chunks" "$att" \
+    "$(conf_get "$c" review_round)" "$(conf_get "$c" qa_round)" "$(( $(date +%s) - $(conf_get "$c" started) ))" "$(conf_get "$c" status)")
+  { printf 'run\ttrack\tchunks\tattempts\treview_rounds\tqa_rounds\tseconds\toutcome\n'
+    [ -f "$m" ] && tail -n +2 "$m" | grep -v "^$1	" || true
+    printf '%s\n' "$row"; } | atomic "$m"
 }
 
 cmd_status() { # df status <run-id>: regenerate and print progress.md
@@ -363,11 +391,13 @@ case "$cmd" in
   list) cmd_list;;
   clean) cmd_clean "$@";;
   finish) cmd_finish "$@";;
+  lessons-set) cmd_lessons_set "$@";;
+  metrics) cmd_metrics "$@";;
   run-dir) run_dir "$@";;
   conf-get) conf_get "$@";;
   conf-set) conf_set "$@";;
   fm-get) fm_get "$@";;
   fm-set) fm_set "$@";;
   write) atomic "$@";;
-  *) die "usage: df {start|validate|verdict|gate|lock|snapshot|check-diff|canary-scan|srchash|commit|scrub|status|list|clean|finish|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
+  *) die "usage: df {start|validate|verdict|gate|lock|snapshot|check-diff|canary-scan|srchash|commit|scrub|status|list|clean|finish|lessons-set|metrics|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
 esac

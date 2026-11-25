@@ -68,6 +68,7 @@ Out of v1:
 | 9 | Review | Section 6. Whole-branch review, five lenses, looped until clean | fix chunks |
 | 10 | QA | Section 6. Holdout scenarios against the reviewed branch | `report.md` |
 | 10a | E2E | Section 6. The repo's own end-to-end command against the reviewed branch; only failures new since the baseline block | `panel/e2e-r<n>.md` |
+| 10b | Retro | Section 6. Lessons about this repo (applied to later runs), proposals for the plugin (never applied), one metrics row | `lessons.md`, `proposals.md`, `metrics.tsv` |
 | 11 | Ship | Section 6. Only on a yes: push the run branch, open a PR | `pr_url` |
 
 ### Sign-off summary
@@ -228,6 +229,25 @@ Functional QA runs only against a branch the review has passed.
   `e2e: not configured`, never a pass.
 - **Browser scenarios** stay manual checks: no portable read-only browser tool list exists
   for a plugin agent (`docs/spikes.md`, S5).
+
+### Retro (the self-improving part)
+
+After the report and before the ship question, also for a paused run. The `retro` agent
+(read-only on the repo) reads `log.md`, chunk failure notes, panel findings, waivers, late finds
+and infra failures, and writes `retro.md`:
+
+- **Repo lessons:** facts about this repo that would have saved an attempt, one line each with
+  the run and chunk as evidence. Never instructions, never scenario text. Applied
+  automatically: the agent writes the whole next `lessons.md` (merging and replacing old
+  lines), and `df lessons-set` installs it only if it is at most 30 lines and holds no
+  secret; otherwise the old file stays. The codebase-fit refiner, planner and builder get it
+  inside `<data>`.
+- **Plugin proposals:** changes to prompts, lenses or rubrics the evidence supports. Never
+  applied. Appended once per run to `proposals.md` and listed in the final message.
+- **Metrics:** `df metrics` writes one row per run to `metrics.tsv` (track, chunks, attempts,
+  review rounds, QA rounds, seconds, outcome), so "is it improving?" has numbers.
+
+All three files live in the state root beside the clone, with `profile.md`.
 
 ### Ship
 
