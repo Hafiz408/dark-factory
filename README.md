@@ -38,9 +38,13 @@ state is on disk.
 - **Review before QA.** Four read-only review lenses per chunk (quality, over-engineering,
   security, impact), then a whole-branch review that also checks the goal was met. Medium or
   above blocks. Hidden QA scenarios run only once that review is clean.
+- **End-to-end check.** Each repo gets a profile beside the clone (`../.df-<repo>/profile.md`,
+  never committed) naming its e2e command and how to start the app. After QA the run checks
+  that nothing which passed before now fails. Without one, the report says "e2e: not
+  configured".
 - **A run that cannot get clean pauses.** It tells you what is open and never reports a pass.
 - **Resume** after a crash, closed laptop or expired login, losing at most one attempt.
-- **A PR on request.** A run that came through QA asks "Push and open a PR?"; only "yes"
+- **A PR on request.** A run that came through QA and e2e asks "Push and open a PR?"; only "yes"
   does it (needs `gh`, signed in). `sweep` offers to remove the worktree and local branch once
   that PR is merged. It never merges, never force-pushes, and never deletes a remote branch.
 
@@ -57,7 +61,9 @@ flowchart LR
     L --> I[Review<br/>whole branch, until clean]
     I --> QA[QA<br/>hidden scenarios]
     QA -->|fails| I
-    QA --> SH{{Push + PR?}}
+    QA --> E[E2E<br/>repo's own suite vs baseline]
+    E -->|new failure| I
+    E --> SH{{Push + PR?}}
     SH --> O([Branch + report, PR on yes])
 
     classDef you fill:#fde68a,stroke:#b45309,color:#000
