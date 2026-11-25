@@ -217,12 +217,14 @@ Functional QA runs only against a branch the review has passed.
   A `---` block of `e2e_cmd`, `e2e_needs_app`, `start_cmd`, `ready_url`, `stop_cmd` (with
   `<WORKTREE>` and `<PORT>` placeholders), then `## How to start` and
   `## Signing in for tests`. Preflight drafts it on a repo's first run; later runs reuse it.
-- **Trust:** its commands are shown at every sign-off. `df validate` refuses a `ready_url`
-  that is not localhost or 127.0.0.1 (or carries user info), and a profile that holds a
-  secret instead of naming an environment variable. Its free text reaches QA as owner-
-  confirmed run instructions, outside `<data>`.
-- **Baseline:** preflight runs `e2e_cmd` at `root_base_sha`, so failures already there are
-  `pre-existing`.
+- **Trust:** the whole profile is shown verbatim at every sign-off, and nothing in it runs
+  before then. `df profile-pin` records its hash at sign-off and `df validate` (run again at
+  QA and E2E entry) refuses if it changed. `df validate` also refuses unknown, duplicated or
+  oddly spelled keys, a `ready_url` that is not a plain http(s) URL on localhost or
+  127.0.0.1, and a profile that holds a secret instead of naming an environment variable.
+  Its free text reaches QA inside `<data>`, because a first-run draft comes from the repo.
+- **Baseline:** right after sign-off, `e2e_cmd` runs once at `root_base_sha`, so failures
+  already there are `pre-existing`.
 - **Stage `e2e`**, after QA: start the app if needed, run `e2e_cmd`, stop the app. A test that
   passed at baseline and fails now is `high`; it becomes a fix chunk and goes back through
   review, QA and e2e under `max_qa_rounds`. No `e2e_cmd`: the report says
@@ -256,8 +258,11 @@ and infra failures, and writes `retro.md`:
 - **Repo lessons:** facts about this repo that would have saved an attempt, one line each with
   the run and chunk as evidence. Never instructions, never scenario text. Applied
   automatically: the agent writes the whole next `lessons.md` (merging and replacing old
-  lines), and `df lessons-set` installs it only if it is at most 30 lines and holds no
-  secret; otherwise the old file stays. The codebase-fit refiner, planner and builder get it
+  lines), and `df lessons-set` installs it only if it is at most 30 lines of at most 200
+  characters and holds no secret and no holdout-scenario canary; otherwise the old file
+  stays. The retro never reads `scenarios/` or the QA outputs, and `df state-hash` checks it
+  wrote nothing outside its three output files. A paused run's retro keeps the stage it
+  stopped at, so it cannot be finished from there. The codebase-fit refiner, planner and builder get it
   inside `<data>`.
 - **Plugin proposals:** changes to prompts, lenses or rubrics the evidence supports. Never
   applied. Appended once per run to `proposals.md` and listed in the final message.

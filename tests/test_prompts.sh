@@ -208,7 +208,11 @@ grep -q "sweep" "$ROOT/README.md" && grep -q "never merges" "$ROOT/README.md" &&
 # v2 slice 4: repo profile and the e2e stage
 grep -q "{PROFILE}" "$SK" && grep -q "profile.md" "$SK" && ok "SKILL.md: names the profile path" || bad "SKILL.md: names the profile path"
 PF=$(sed -n '/^### preflight/,/^### signoff/p' "$SK")
-echo "$PF" | grep -q "draft" && echo "$PF" | grep -q "e2e-baseline.md" && ok "SKILL.md: preflight drafts the profile and records an e2e baseline" || bad "SKILL.md: preflight drafts the profile and records an e2e baseline"
+echo "$PF" | grep -q "draft" && ok "SKILL.md: preflight drafts the profile" || bad "SKILL.md: preflight drafts the profile"
+echo "$PF" | grep -q "e2e_cmd" && ! echo "$PF" | grep -q "e2e-baseline.md" && sed -n '/^### slice/,/^## The loop/p' "$SK" | grep -q "e2e-baseline.md" && ok "SKILL.md: nothing from the profile runs before sign-off" || bad "SKILL.md: nothing from the profile runs before sign-off"
+sed -n '/^### signoff/,/^### slice/p' "$SK" | grep -q "{DF} profile-pin <id>" && sed -n '/^### signoff/,/^### slice/p' "$SK" | grep -q "verbatim" && ok "SKILL.md: sign-off shows the profile verbatim and pins it" || bad "SKILL.md: sign-off shows the profile verbatim and pins it"
+sed -n '/^## E2E/,/^## Report/p' "$SK" | grep -q "{DF} validate <id>" && sed -n '/^## QA/,/^## E2E/p' "$SK" | grep -q "{DF} validate <id>" && ok "SKILL.md: the pinned profile is checked before QA and E2E" || bad "SKILL.md: the pinned profile is checked before QA and E2E"
+sed -n '/^## Resume/,$p' "$SK" | grep -q "stop_cmd" && ok "SKILL.md: resume stops a left-over app before redoing E2E" || bad "SKILL.md: resume stops a left-over app before redoing E2E"
 sed -n '/^### signoff/,/^### slice/p' "$SK" | grep -q "every run" && ok "SKILL.md: profile commands are shown at every sign-off" || bad "SKILL.md: profile commands are shown at every sign-off"
 grep -q "^## E2E" "$SK" && ok "SKILL.md: has an e2e stage" || bad "SKILL.md: has an e2e stage"
 q=$(grep -n "^## QA" "$SK" | cut -d: -f1); e=$(grep -n "^## E2E" "$SK" | cut -d: -f1); r=$(grep -n "^## Report, ship" "$SK" | cut -d: -f1)
@@ -217,7 +221,7 @@ E=$(sed -n '/^## E2E/,/^## Report/p' "$SK")
 echo "$E" | grep -q "e2e: not configured" && echo "$E" | grep -q "never a pass" && ok "SKILL.md: unconfigured e2e is never reported as a pass" || bad "SKILL.md: unconfigured e2e is never reported as a pass"
 echo "$E" | grep -q "passed at baseline" && echo "$E" | grep -q "high" && ok "SKILL.md: only new e2e failures block" || bad "SKILL.md: only new e2e failures block"
 echo "$E" | grep -q "stop_cmd" && echo "$E" | grep -q "max_qa_rounds" && ok "SKILL.md: e2e stops the app and shares the QA cap" || bad "SKILL.md: e2e stops the app and shares the QA cap"
-grep -q "Signing in for tests" "$SK" && grep -q "outside .<data>." "$SK" && ok "SKILL.md: profile free text reaches QA as run instructions" || bad "SKILL.md: profile free text reaches QA as run instructions"
+grep -q "Signing in for tests" "$SK" && sed -n '/^## QA/,/^## E2E/p' "$SK" | grep -q "wrapped in .<data>." && ! grep -q "outside .<data>." "$SK" && ok "SKILL.md: profile free text reaches QA as run instructions" || bad "SKILL.md: profile free text reaches QA as run instructions"
 grep -q "browser" "$ROOT/agents/qa-author.md" && ok "qa-author: browser-only scenarios are manual checks" || bad "qa-author: browser-only scenarios are manual checks"
 grep -q "| S5 |" "$ROOT/docs/spikes.md" && ok "spikes: browser tool names recorded" || bad "spikes: browser tool names recorded"
 grep -q "source: .*e2e" "$ROOT/skills/dark-factory/rules.md" && ok "rules: e2e is a finding source" || bad "rules: e2e is a finding source"
@@ -225,7 +229,7 @@ grep -q "source: .*e2e" "$ROOT/skills/dark-factory/rules.md" && ok "rules: e2e i
 # v2 slice 5: retro and lessons
 RT=$(sed -n '/\*\*Retro (stage/,/\*\*Ship (stage/p' "$SK")
 [ -n "$RT" ] && ok "SKILL.md: has a retro stage before ship" || bad "SKILL.md: has a retro stage before ship"
-echo "$RT" | grep -q "{DF} lessons-set <id>" && echo "$RT" | grep -q "{DF} metrics <id>" && ok "SKILL.md: retro installs lessons and records metrics" || bad "SKILL.md: retro installs lessons and records metrics"
+echo "$RT" | grep -q "{DF} lessons-set <id>" && sed -n '/{DF} finish <id> <session-id>. (sets/,/^## Resume/p' "$SK" | grep -q "{DF} metrics <id>" && sed -n '/^### Pausing/,/^## QA/p' "$SK" | grep -q "{DF} metrics <id>" && ok "SKILL.md: retro installs lessons and records metrics" || bad "SKILL.md: retro installs lessons and records metrics"
 echo "$RT" | grep -q "never applied" && ok "SKILL.md: plugin proposals are never applied" || bad "SKILL.md: plugin proposals are never applied"
 grep -q "lessons.md" "$SK" && grep -q "refiner" "$SK" && sed -n '/^### refine/,/^### plan/p' "$SK" | grep -q "lessons" && ok "SKILL.md: lessons reach the refiner" || bad "SKILL.md: lessons reach the refiner"
 grep -q "lessons" "$ROOT/agents/planner.md" && grep -q "lessons" "$ROOT/agents/builder.md" && ok "planner and builder read lessons" || bad "planner and builder read lessons"
@@ -240,5 +244,11 @@ echo "$LP" | grep -q "in id order" && echo "$LP" | grep -q "interrupt, not an at
 echo "$LP" | grep -q "full suite" && echo "$LP" | grep -q "serially" && ok "SKILL.md: a red suite after a wave reruns it serially" || bad "SKILL.md: a red suite after a wave reruns it serially"
 echo "$LP" | grep -q "install.commands" && echo "$LP" | grep -q "_c<NN>" && ok "SKILL.md: each sub-worktree gets installs, its own port and database" || bad "SKILL.md: each sub-worktree gets installs, its own port and database"
 sed -n '/^### preflight/,/^### signoff/p' "$SK" | grep -q "install.commands" && ok "SKILL.md: preflight records install commands" || bad "SKILL.md: preflight records install commands"
+# slice 5 branch review
+echo "$RT" | grep -q "unless the run is pausing" && ok "SKILL.md: a paused run's retro leaves its stage alone" || bad "SKILL.md: a paused run's retro leaves its stage alone"
+echo "$RT" | grep -q "{DF} state-hash" && ok "SKILL.md: the retro's writes are checked" || bad "SKILL.md: the retro's writes are checked"
+grep -q "qa-r" "$ROOT/agents/retro.md" && ok "retro: never reads QA outputs" || bad "retro: never reads QA outputs"
+sed -n '/^## Resume/,$p' "$SK" | grep -q "At .retro." && ok "SKILL.md: resume reruns an interrupted retro" || bad "SKILL.md: resume reruns an interrupted retro"
+sed -n '/\*\*Ship (stage/,/^## Resume/p' "$SK" | grep -q "skip to step 3" && bad "SKILL.md: ship step points at finish" || ok "SKILL.md: ship step points at finish"
 
 finish
