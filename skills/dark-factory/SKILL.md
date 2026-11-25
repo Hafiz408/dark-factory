@@ -263,7 +263,7 @@ The run does not enter QA, and is never finished, while something is open. To pa
 write the report (below) with `PAUSED: <what is open>` as its first line; run the retro
 (Report, ship and finish, step 2); run
 `{DF} conf-set {RD}/run.conf waiting_on "<what is open>"` (one line) and
-`{DF} conf-set {RD}/run.conf status paused`; leave `stage` where it is; run
+`{DF} conf-set {RD}/run.conf status paused`; run `{DF} metrics <id>`; leave `stage` where it is; run
 `{DF} lock <id> release <session-id>`; print the `[df <run-id>] <stage>: paused, <what is open>`
 line; and tell the user what is open and how to continue:
 - a cap was reached: raise it with `{DF} conf-set {RD}/run.conf max_review_rounds <n>` (or
@@ -330,20 +330,24 @@ Proves nothing else changed. Run `{DF} conf-set {RD}/run.conf stage e2e`, then
    finish` prints `NOT FIXED` (the branch changes no source), the report's first line is
    `NOT FIXED: <why>`, above both sections, and your first sentence to the user says the
    reported problem is still present and what a human must decide.
-2. **Retro (stage `retro`).** Run `{DF} conf-set {RD}/run.conf stage retro`. Spawn `retro`
-   with the run directory, the current `lessons.md` beside `{PROFILE}` (if any), and the output
-   paths `{RD}/retro.md`, `{RD}/lessons-new.md`, `{RD}/proposals-new.md`. Then run
-   `{DF} lessons-set <id>` (it installs the new lessons, at most 30 lines and no secret, or
-   refuses and keeps the old ones; relay a refusal in one line) and `{DF} metrics <id>`.
-   Repo lessons are applied automatically to later runs. Plugin proposals are never applied:
-   they are collected in `proposals.md` beside `{PROFILE}` and listed in the final message for
-   the user to decide on. A paused run also gets a retro (it is where the most is learned),
-   then stops without the ship step.
+2. **Retro (stage `retro`).** Run `{DF} conf-set {RD}/run.conf stage retro`
+   unless the run is pausing: a paused run keeps the stage it stopped at, so it can never be finished from
+   here. Run `{DF} state-hash` and `{DF} snapshot {WT}` and keep both in `log.md`. Spawn
+   `retro` with the run directory, the current `lessons.md` beside `{PROFILE}` (if any), and
+   the output paths `{RD}/retro.md`, `{RD}/lessons-new.md`, `{RD}/proposals-new.md`. Run both
+   commands again: if either changed, the retro wrote where it must not; say so, log it as a
+   `critical` integrity finding, and skip `lessons-set`. Otherwise run `{DF} lessons-set <id>`
+   (it installs the new lessons only when they are at most 30 lines of at most 200
+   characters, hold no secret and no holdout canary; otherwise it keeps the old ones; relay a
+   refusal in one line). Repo lessons are applied automatically to later runs. Plugin
+   proposals are never applied: they are collected in `proposals.md` beside `{PROFILE}` and
+   listed in the final message for the user to decide on. A paused run also gets a retro (it
+   is where the most is learned), then stops without the ship step.
 3. **Ship (stage `ship`).** Only a run that came through QA and E2E is offered a push. A paused run is never offered
    a push, and neither is a bugfix
-   run that fixed nothing: run `{DF} fixed <id>`; if it exits non-zero, skip to step 3. Ask
+   run that fixed nothing: run `{DF} fixed <id>`; if it exits non-zero, skip to step 4. Ask
    only when `git -C {WT} remote get-url origin` and `gh auth status` both succeed; otherwise
-   skip to step 3 and say in the final message that the branch was not pushed and why.
+   skip to step 4 and say in the final message that the branch was not pushed and why.
    The target is `ship_base` from `run.conf` if set, else `base_ref` without a leading
    `<remote>/`. If `base_ref` is `detached`, ask which branch the PR should go into and record
    it with `{DF} conf-set {RD}/run.conf ship_base <name>`.
@@ -353,11 +357,12 @@ Proves nothing else changed. Run `{DF} conf-set {RD}/run.conf stage e2e`, then
    `{DF} conf-set {RD}/run.conf stage ship`; write the report's two sections to
    `{RD}/pr-body.md`; run `{DF} ship <id> "<title>" {RD}/pr-body.md`, where the title is the
    goal in under 70 characters. It prints the PR URL. Print a milestone line for the push
-   and one for the PR. If it refuses, relay the reason in one line and go on to step 3; the
+   and one for the PR. If it refuses, relay the reason in one line and go on to step 4; the
    branch stays local. `{DF} ship` is the only way anything is pushed. Never push by hand,
    never force, never merge.
 4. `{DF} finish <id> <session-id>` (sets stage to done and status to done, or to `unresolved` when a bugfix branch changes no source, and releases the lock).
    If it prints `NOT FIXED`, put the `NOT FIXED: <why>` line at the top of `report.md` now.
+   Then run `{DF} metrics <id>`, so the row records how the run ended.
    Your final message to the user is, in this order: the NOT FIXED sentence when it applies,
    the two sections, the one plain sentence stating whether the branch is green, the PR URL
    when one was opened, this run's plugin proposals (one line each, or none), and one line with the branch name and the worktree path.
@@ -390,6 +395,7 @@ Proves nothing else changed. Run `{DF} conf-set {RD}/run.conf stage e2e`, then
 8. At `e2e`: if `e2e_needs_app` is yes, run `stop_cmd` first (an app may still be running from
    the interrupted pass), then redo the E2E stage from step 1. A run paused at E2E continues
    from E2E step 6, like the other caps.
-9. Before sign-off: re-ask only unanswered questions. In the loop: reset a dirty tree to the
+9. At `retro`: run the retro step again from its start.
+10. Before sign-off: re-ask only unanswered questions. In the loop: reset a dirty tree to the
    chunk's `base_sha`, count the interrupted attempt in `interrupts` (cap 3), and restart at the
    first role without a valid recorded verdict.

@@ -8,8 +8,10 @@ model: sonnet
 Read the rules file you were given first. You are read-only on the repo. Write only the three
 output files named below, all inside the run directory you were given.
 
-Inputs: the run directory (`log.md`, `chunks/*.md` with their failure notes, `panel/*.md`,
-`report.md`), the current lessons file (may be absent) and the three output paths.
+Inputs: the run directory (`log.md`, `chunks/*.md` with their failure notes, `panel/*.md`
+except `panel/qa-r*.md`, `report.md`), the current lessons file (may be absent) and the three
+output paths. You must not read `scenarios/` or `panel/qa-r*.md`: they describe the holdout
+scenarios.
 
 Look for attempts that were wasted and why: a command that needed a flag, a file the builder
 did not know existed, a convention a reviewer kept flagging, an infra failure, a waiver, a
@@ -22,9 +24,9 @@ late find, a stall.
      they must not learn the holdout scenarios).
    - `## Plugin proposals`: changes to the plugin's prompts, lenses or rubrics that this
      run's evidence supports, each with its evidence.
-2. `lessons-new.md`: the whole next lessons file. Start from the current one; merge or replace
-   lines this run proves wrong or out of date; add this run's lessons. At most 30 lines, one
-   fact per line. If nothing was learned, copy the current file unchanged (or write an empty
+2. `lessons-new.md`: the whole next lessons file (an empty file clears the lessons). Start from the current one; merge or replace
+   lines this run proves wrong or out of date; add this run's lessons. At most 30 lines of at most 200
+   characters, one fact per line. If nothing was learned, copy the current file unchanged (or write an empty
    file when there is none).
 3. `proposals-new.md`: the plugin proposals as `- ` bullets, or an empty file.
 

@@ -241,8 +241,11 @@ and infra failures, and writes `retro.md`:
 - **Repo lessons:** facts about this repo that would have saved an attempt, one line each with
   the run and chunk as evidence. Never instructions, never scenario text. Applied
   automatically: the agent writes the whole next `lessons.md` (merging and replacing old
-  lines), and `df lessons-set` installs it only if it is at most 30 lines and holds no
-  secret; otherwise the old file stays. The codebase-fit refiner, planner and builder get it
+  lines), and `df lessons-set` installs it only if it is at most 30 lines of at most 200
+  characters and holds no secret and no holdout-scenario canary; otherwise the old file
+  stays. The retro never reads `scenarios/` or the QA outputs, and `df state-hash` checks it
+  wrote nothing outside its three output files. A paused run's retro keeps the stage it
+  stopped at, so it cannot be finished from there. The codebase-fit refiner, planner and builder get it
   inside `<data>`.
 - **Plugin proposals:** changes to prompts, lenses or rubrics the evidence supports. Never
   applied. Appended once per run to `proposals.md` and listed in the final message.

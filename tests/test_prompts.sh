@@ -229,10 +229,17 @@ grep -q "source: .*e2e" "$ROOT/skills/dark-factory/rules.md" && ok "rules: e2e i
 # v2 slice 5: retro and lessons
 RT=$(sed -n '/\*\*Retro (stage/,/\*\*Ship (stage/p' "$SK")
 [ -n "$RT" ] && ok "SKILL.md: has a retro stage before ship" || bad "SKILL.md: has a retro stage before ship"
-echo "$RT" | grep -q "{DF} lessons-set <id>" && echo "$RT" | grep -q "{DF} metrics <id>" && ok "SKILL.md: retro installs lessons and records metrics" || bad "SKILL.md: retro installs lessons and records metrics"
+echo "$RT" | grep -q "{DF} lessons-set <id>" && sed -n '/{DF} finish <id> <session-id>. (sets/,/^## Resume/p' "$SK" | grep -q "{DF} metrics <id>" && sed -n '/^### Pausing/,/^## QA/p' "$SK" | grep -q "{DF} metrics <id>" && ok "SKILL.md: retro installs lessons and records metrics" || bad "SKILL.md: retro installs lessons and records metrics"
 echo "$RT" | grep -q "never applied" && ok "SKILL.md: plugin proposals are never applied" || bad "SKILL.md: plugin proposals are never applied"
 grep -q "lessons.md" "$SK" && grep -q "refiner" "$SK" && sed -n '/^### refine/,/^### plan/p' "$SK" | grep -q "lessons" && ok "SKILL.md: lessons reach the refiner" || bad "SKILL.md: lessons reach the refiner"
 grep -q "lessons" "$ROOT/agents/planner.md" && grep -q "lessons" "$ROOT/agents/builder.md" && ok "planner and builder read lessons" || bad "planner and builder read lessons"
 grep -q "Facts only" "$ROOT/agents/retro.md" && grep -q "30 lines" "$ROOT/agents/retro.md" && grep -q "scenarios" "$ROOT/agents/retro.md" && ok "retro: facts only, bounded, never leaks scenarios into lessons" || bad "retro: facts only, bounded, never leaks scenarios into lessons"
+
+# slice 5 branch review
+echo "$RT" | grep -q "unless the run is pausing" && ok "SKILL.md: a paused run's retro leaves its stage alone" || bad "SKILL.md: a paused run's retro leaves its stage alone"
+echo "$RT" | grep -q "{DF} state-hash" && ok "SKILL.md: the retro's writes are checked" || bad "SKILL.md: the retro's writes are checked"
+grep -q "qa-r" "$ROOT/agents/retro.md" && ok "retro: never reads QA outputs" || bad "retro: never reads QA outputs"
+sed -n '/^## Resume/,$p' "$SK" | grep -q "At .retro." && ok "SKILL.md: resume reruns an interrupted retro" || bad "SKILL.md: resume reruns an interrupted retro"
+sed -n '/\*\*Ship (stage/,/^## Resume/p' "$SK" | grep -q "skip to step 3" && bad "SKILL.md: ship step points at finish" || ok "SKILL.md: ship step points at finish"
 
 finish
