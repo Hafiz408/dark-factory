@@ -323,22 +323,25 @@ Proves nothing else changed. Run `{DF} conf-set {RD}/run.conf stage e2e`, then
    Then: outcome per chunk (PASS, BLOCKED, SKIPPED), what was built, findings left
    with severity, waivers with reasons, assumptions, `UNVERIFIABLE` manual checks, baseline
    failures that were pre-existing, `late-find` and low findings (the "what to delete" list),
-   budget used, and one plain sentence stating whether the final branch is green. If `{DF}
-   finish` prints `NOT FIXED` (the branch changes no source), the report's first line is
-   `NOT FIXED: <why>`, above both sections, and your first sentence to the user says the
+   budget used, and one plain sentence stating whether the final branch is green.
+   If `{DF} fixed <id>` exits non-zero (a bugfix branch that changes no source), the report's first
+   line is `NOT FIXED: <why>`, above both sections, and your first sentence to the user says the
    reported problem is still present and what a human must decide.
 2. **Ship (stage `ship`).** Only a run that came through QA and E2E is offered a push. A paused run is never offered
    a push, and neither is a bugfix
    run that fixed nothing: run `{DF} fixed <id>`; if it exits non-zero, skip to step 3. Ask
    only when `git -C {WT} remote get-url origin` and `gh auth status` both succeed; otherwise
    skip to step 3 and say in the final message that the branch was not pushed and why.
-   The target is `ship_base` from `run.conf` if set, else `base_ref` without a leading
-   `<remote>/`. If `base_ref` is `detached`, ask which branch the PR should go into and record
-   it with `{DF} conf-set {RD}/run.conf ship_base <name>`.
+   Settle the target before asking: `ship_base` from `run.conf` if set; else `base_ref` when
+   it is a plain branch name or `origin/<branch>` (without the `origin/`). Anything else (a
+   detached `HEAD`, a sha, `HEAD~1`, another remote's branch): ask which branch on `origin` the
+   PR should go into and record it with `{DF} conf-set {RD}/run.conf ship_base <name>` before
+   asking the ship question.
    Ask: "Push `<branch>` and open a PR into `<target>`? (yes / no)".
    Only the word "yes" is a yes; "ok", "approve", an empty answer and anything else are no.
-   On yes, in this order: `{DF} conf-set {RD}/run.conf ship_confirmed yes`;
-   `{DF} conf-set {RD}/run.conf stage ship`; write the report's two sections to
+   On no, run `{DF} conf-set {RD}/run.conf ship_confirmed no` and go to step 3.
+   On yes, in this order: `{DF} conf-set {RD}/run.conf stage ship`;
+   `{DF} conf-set {RD}/run.conf ship_confirmed yes`; write the report's two sections to
    `{RD}/pr-body.md`; run `{DF} ship <id> "<title>" {RD}/pr-body.md`, where the title is the
    goal in under 70 characters. It prints the PR URL. Print a milestone line for the push
    and one for the PR. If it refuses, relay the reason in one line and go on to step 3; the
@@ -378,6 +381,10 @@ Proves nothing else changed. Run `{DF} conf-set {RD}/run.conf stage e2e`, then
 8. At `e2e`: if `e2e_needs_app` is yes, run `stop_cmd` first (an app may still be running from
    the interrupted pass), then redo the E2E stage from step 1. A run paused at E2E continues
    from E2E step 6, like the other caps.
-9. Before sign-off: re-ask only unanswered questions. In the loop: reset a dirty tree to the
+9. At `ship`: the user already answered. If `ship_confirmed` is yes, run
+   `{DF} ship <id> "<title>" {RD}/pr-body.md` again (it is safe to repeat: it re-pushes the
+   same head and reuses an open PR at it, or just prints a recorded `pr_url`); then
+   `{DF} finish`. Do not ask the ship question again.
+10. Before sign-off: re-ask only unanswered questions. In the loop: reset a dirty tree to the
    chunk's `base_sha`, count the interrupted attempt in `interrupts` (cap 3), and restart at the
    first role without a valid recorded verdict.
