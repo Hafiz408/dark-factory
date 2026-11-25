@@ -48,7 +48,7 @@ state is on disk.
   keeps one row per run so you can see whether attempts go down.
 - **A run that cannot get clean pauses.** It tells you what is open and never reports a pass.
 - **Resume** after a crash, closed laptop or expired login, losing at most one attempt.
-- **A PR on request.** A run that came through QA asks "Push and open a PR?"; only "yes"
+- **A PR on request.** A run that came through QA and e2e asks "Push and open a PR?"; only "yes"
   does it (needs `gh`, signed in). `sweep` offers to remove the worktree and local branch once
   that PR is merged. It never merges, never force-pushes, and never deletes a remote branch.
 
