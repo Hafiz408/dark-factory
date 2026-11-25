@@ -2,6 +2,8 @@
 # Tiny assertion helpers. Source from a test file, call finish at the end.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DF="$ROOT/scripts/df"
+# Tests run git; never let a failed helper turn that into a commit in this repo.
+cd "$(mktemp -d)" || exit 1
 FAILS=0
 ok()  { echo "  ok   $1"; }
 bad() { echo "  FAIL $1"; FAILS=$((FAILS + 1)); }
