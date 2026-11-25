@@ -225,6 +225,16 @@ grep -q "Signing in for tests" "$SK" && sed -n '/^## QA/,/^## E2E/p' "$SK" | gre
 grep -q "browser" "$ROOT/agents/qa-author.md" && ok "qa-author: browser-only scenarios are manual checks" || bad "qa-author: browser-only scenarios are manual checks"
 grep -q "| S5 |" "$ROOT/docs/spikes.md" && ok "spikes: browser tool names recorded" || bad "spikes: browser tool names recorded"
 grep -q "source: .*e2e" "$ROOT/skills/dark-factory/rules.md" && ok "rules: e2e is a finding source" || bad "rules: e2e is a finding source"
+# slice 3 branch review
+SH2=$(sed -n '/^## Report, ship and finish/,/^## Resume/p' "$SK")
+echo "$SH2" | grep -q "ship_confirmed no" && ok "SKILL.md: a no is recorded, so a stale yes cannot linger" || bad "SKILL.md: a no is recorded, so a stale yes cannot linger"
+a=$(echo "$SH2" | grep -n "stage ship\`;" | head -1 | cut -d: -f1); b=$(echo "$SH2" | grep -n "ship_confirmed yes" | head -1 | cut -d: -f1)
+[ -n "$a" ] && [ -n "$b" ] && [ "$a" -le "$b" ] && ok "SKILL.md: stage ship is set before the yes is recorded" || bad "SKILL.md: stage ship is set before the yes is recorded"
+echo "$SH2" | grep -q "before asking" && echo "$SH2" | grep -q "ship_base" && ok "SKILL.md: the PR target is settled before asking" || bad "SKILL.md: the PR target is settled before asking"
+echo "$SH2" | sed -n '1,/Ship (stage/p' | grep -q "{DF} fixed <id>" && ok "SKILL.md: the report uses df fixed, not finish's later output" || bad "SKILL.md: the report uses df fixed, not finish's later output"
+sed -n '/^## Resume/,$p' "$SK" | grep -q "At .ship." && ok "SKILL.md: resume finishes an interrupted ship without asking again" || bad "SKILL.md: resume finishes an interrupted ship without asking again"
+grep -q "No push, merge, deploy or external write in v1" "$ROOT/docs/design.md" && bad "design.md: safety section matches ship" || ok "design.md: safety section matches ship"
+sed -n '/^## Start a run/,/^1\. /p' "$SK" | grep -q "Sweep" && ok "SKILL.md: sweep runs at the start of a new run" || bad "SKILL.md: sweep runs at the start of a new run"
 
 # v2 slice 5: retro and lessons
 RT=$(sed -n '/\*\*Retro (stage/,/\*\*Ship (stage/p' "$SK")
