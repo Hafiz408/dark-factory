@@ -48,7 +48,7 @@ cmd_start() { # df start <input-file> [--base <ref>] [--branch <name>]   (DF_ALL
   shift
   while [ $# -gt 0 ]; do
     [ $# -ge 2 ] || die "$usage"
-    case $2 in -*) die "$usage" ;; esac
+    case $2 in ""|-*|*[[:cntrl:]]*) die "$usage" ;; esac
     case $1 in
       --base) [ -z "$hb" ] || die "$usage"; hb=1; bref=$2 ;;
       --branch) [ -z "$hr" ] || die "$usage"; hr=1; branch=$2 ;;

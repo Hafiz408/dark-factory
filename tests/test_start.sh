@@ -36,6 +36,7 @@ assert_eq "$H1" "$(git -C "$w1" rev-parse HEAD)" "worktree at main HEAD"
 assert_eq "df/$s1" "$(cf "$s1" branch)" "run.conf branch default"
 assert_eq "$H1" "$(cf "$s1" root_base_sha)" "run.conf root_base_sha is HEAD"
 assert_eq "$(git -C "$B" symbolic-ref --short HEAD)" "$(cf "$s1" base_ref)" "base_ref is current branch"
+assert_eq "1" "$(grep -c '^stage=' "$(cd "$B" && "$DF" run-dir "$s1")/run.conf")" "run.conf has exactly one stage line"
 sed -i.bak '/^base_ref=/d' "$(cd "$B" && "$DF" run-dir "$s1")/run.conf"
 assert_ok "validate passes without base_ref" bash -c "cd '$B' && '$DF' validate '$s1'"
 D=$(mkrepo); git -C "$D" checkout -q --detach
@@ -78,6 +79,12 @@ refuse "usage: no input" "$U"
 refuse "usage: input starts with -" "$U" -x
 refuse "usage: flag without value" "$U" "$X/in.txt" --base
 refuse "usage: value starts with -" "$U" "$X/in.txt" --branch -x
+refuse "usage: empty --base" "$U" "$X/in.txt" --base ""
+refuse "usage: empty --branch" "$U" "$X/in.txt" --branch ""
+git -C "$X" commit -q --allow-empty -m "$(printf 'x\nstage=done')"
+refuse "usage: control char in --base (forged line would resolve)" "$U" "$X/in.txt" --base "HEAD^{/x
+stage=done}"
+refuse "usage: tab in --base" "$U" "$X/in.txt" --base "$(printf 'a\tb')"
 refuse "usage: unknown flag" "$U" "$X/in.txt" --bogus v
 refuse "usage: repeated flag" "$U" "$X/in.txt" --base HEAD --base HEAD
 refuse "usage: extra positional" "$U" "$X/in.txt" extra
