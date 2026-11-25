@@ -35,7 +35,7 @@ while IFS= read -r seg; do
     case "$t" in -*) continue;; esac
     case "$t" in
       /*) ok=0
-          for w in $worktrees; do case "$t" in "$w"|"$w"/*) ok=1;; esac; done
+          for w in $worktrees; do case "$t" in "$w"|"$w"/*|"$w"-c[0-9A-Z]*) ok=1;; esac; done
           [ "$ok" = 1 ] || deny "recursive delete outside the worktree";;
       '~'*|'$HOME'*|..|../*|*/..|*/../*|'*') deny "recursive delete outside the worktree";;
     esac

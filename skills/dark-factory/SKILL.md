@@ -99,7 +99,9 @@ below 0.7, or `mixed: yes`, carry it into Refine as a question. Load `{PLUGIN}/t
 
 ### preflight
 1. Detect the stack (per package in a monorepo): package manifests, lockfiles, Makefile,
-   pyproject, go.mod, and so on. Install dependencies inside the worktree.
+   pyproject, go.mod, and so on. Install dependencies inside the worktree. Write the install
+   commands, one per line, to `{RD}/install.commands`, so they can be replayed in a
+   sub-worktree.
 2. Find the build, test, lint and typecheck commands. Write them one per line to
    `{RD}/env.commands`. Run each once. This is when permission approvals happen, so the user is
    present. If a command is denied or fails for environmental reasons, record it.
@@ -224,6 +226,31 @@ Details you must follow:
   message; entering the `done` stage is not announced separately. Every line has both parts
   and nothing after the event. Print nothing else between sign-off and the final message,
   except a stop that needs the user (a permission denial, an exhausted budget).
+
+### Parallel waves (only when `parallel=on` in `run.conf`)
+
+Off by default. With `parallel=off`, or when a wave has one chunk, run chunks one at a time as
+above.
+
+1. Run `{DF} wave <id>`. It prints up to 3 pending chunks whose dependencies all passed and
+   whose scopes cannot overlap.
+2. For each chunk NN in the wave: `{DF} sub-add <id> NN` prints its sub-worktree. Run every
+   line of `{RD}/install.commands` there. That chunk uses the sub-worktree as its `{WT}`, port
+   base `DF_PORT_BASE + 10 x <its position in the wave>`, and database suffix
+   `df_<run-id>_c<NN>`.
+3. Run each chunk's loop as above in its sub-worktree. Spawn the same role for every chunk of
+   the wave that is ready for it in ONE message. Chunks advance independently: a chunk on
+   attempt 2 does not hold back one that passed, and a reset touches only its own
+   sub-worktree.
+4. Join when every chunk of the wave has finished (PASS or BLOCKED). Record the run branch head
+   in `log.md` as the wave base. Join the PASS chunks in id order: for each, run `{DF} sub-join <id> NN`.
+   If it refuses (a conflict), run `{DF} sub-drop <id> NN`, set that chunk back to `pending`,
+   add 1 to its `interrupts` (an interrupt, not an attempt), and it runs serially on the
+   updated run branch. For each BLOCKED chunk run `{DF} sub-drop <id> NN`.
+5. Run the full suite once in the run worktree. If it is red, reset the run worktree to the
+   wave base, set the wave's joined chunks back to `pending` (attempts unchanged, interrupts
+   +1), and run them serially.
+6. Back to step 1 until no chunk is pending.
 
 ## Review (stage `review`)
 

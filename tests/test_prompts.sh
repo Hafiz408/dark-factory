@@ -231,4 +231,14 @@ grep -q "lessons.md" "$SK" && grep -q "refiner" "$SK" && sed -n '/^### refine/,/
 grep -q "lessons" "$ROOT/agents/planner.md" && grep -q "lessons" "$ROOT/agents/builder.md" && ok "planner and builder read lessons" || bad "planner and builder read lessons"
 grep -q "Facts only" "$ROOT/agents/retro.md" && grep -q "30 lines" "$ROOT/agents/retro.md" && grep -q "scenarios" "$ROOT/agents/retro.md" && ok "retro: facts only, bounded, never leaks scenarios into lessons" || bad "retro: facts only, bounded, never leaks scenarios into lessons"
 
+# v2 slice 6: parallel builders
+LP=$(sed -n '/^### Parallel waves/,/^## Review/p' "$SK")
+[ -n "$LP" ] && ok "SKILL.md: has a parallel waves section" || bad "SKILL.md: has a parallel waves section"
+echo "$LP" | grep -q "parallel=on" && ok "SKILL.md: waves only when parallel is on" || bad "SKILL.md: waves only when parallel is on"
+echo "$LP" | grep -q "{DF} wave <id>" && echo "$LP" | grep -q "{DF} sub-add" && echo "$LP" | grep -q "{DF} sub-join" && echo "$LP" | grep -q "{DF} sub-drop" && ok "SKILL.md: waves go through the df helpers" || bad "SKILL.md: waves go through the df helpers"
+echo "$LP" | grep -q "in id order" && echo "$LP" | grep -q "interrupt, not an attempt" && ok "SKILL.md: join in id order; a conflict reruns serially as an interrupt" || bad "SKILL.md: join in id order; a conflict reruns serially as an interrupt"
+echo "$LP" | grep -q "full suite" && echo "$LP" | grep -q "serially" && ok "SKILL.md: a red suite after a wave reruns it serially" || bad "SKILL.md: a red suite after a wave reruns it serially"
+echo "$LP" | grep -q "install.commands" && echo "$LP" | grep -q "_c<NN>" && ok "SKILL.md: each sub-worktree gets installs, its own port and database" || bad "SKILL.md: each sub-worktree gets installs, its own port and database"
+sed -n '/^### preflight/,/^### signoff/p' "$SK" | grep -q "install.commands" && ok "SKILL.md: preflight records install commands" || bad "SKILL.md: preflight records install commands"
+
 finish

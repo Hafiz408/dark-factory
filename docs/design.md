@@ -230,6 +230,23 @@ Functional QA runs only against a branch the review has passed.
 - **Browser scenarios** stay manual checks: no portable read-only browser tool list exists
   for a plugin agent (`docs/spikes.md`, S5).
 
+### Parallel builders (off by default)
+
+`parallel=on` in `run.conf` turns it on. `df wave` picks up to 3 pending chunks whose
+dependencies passed and whose write globs (`scope` plus `touches_tests`) cannot overlap; the
+check is conservative (one glob's literal prefix being a prefix of the other's counts as
+overlap). Each gets a sub-worktree `<worktree>-c<NN>` on `<branch>-c<NN>` from the run branch
+head (`df sub-add`), the recorded install commands, its own port offset and database suffix
+`df_<run-id>_c<NN>`, and its own chunk loop. The guard hook treats sub-worktrees as inside the
+run. Join: passing chunks are cherry-picked onto the run branch in id order (`df sub-join`);
+a conflict drops that chunk's result and reruns it serially (an interrupt, not an attempt);
+then the full suite runs once, and if it is red the wave's chunks are rerun serially.
+`df clean` removes leftover sub-worktrees.
+
+Go/no-go (2026-11-25): a fresh dependency install for a real UI repo (`npm ci`, 708 MB) took 7
+seconds cold and 6 warm, against chunks that take about ten minutes, so install cost does not
+eat the time saved. It stays off by default until a live evaluation passes with it on.
+
 ### Retro (the self-improving part)
 
 After the report and before the ship question, also for a paused run. The `retro` agent
@@ -310,7 +327,7 @@ State lives in a **hidden sibling of the main clone**, not in the working tree a
 the first live run.) The user is asked once to allow the parent directory.
 
 ```
-run.conf          track, worktree, branch, base_ref, root_base_sha, env, budget, max_review_rounds, max_qa_rounds, review_round, qa_round, ship_confirmed, ship_base, pushed_sha, pr_url, stage cursor, status
+run.conf          track, worktree, branch, base_ref, root_base_sha, env, budget, max_review_rounds, max_qa_rounds, review_round, qa_round, parallel, ship_confirmed, ship_base, pushed_sha, pr_url, stage cursor, status
 lock              session id + heartbeat, refreshed on every verdict
 input.md          raw request (scrubbed)
 questions.md      refine questions, pending and answered

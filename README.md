@@ -42,6 +42,8 @@ state is on disk.
   never committed) naming its e2e command and how to start the app. After QA the run checks
   that nothing which passed before now fails. Without one, the report says "e2e: not
   configured".
+- **Parallel builders, opt-in.** With `parallel=on`, chunks that touch disjoint files build at
+  the same time in their own sub-worktrees and are cherry-picked back in order. Off by default.
 - **It learns per repo.** After each run a retro writes facts about the repo that would have
   saved an attempt (`../.df-<repo>/lessons.md`, at most 30 lines, fed to later runs) and
   suggestions for the plugin itself (`proposals.md`, never applied for you). `metrics.tsv`

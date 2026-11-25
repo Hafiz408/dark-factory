@@ -17,6 +17,8 @@ conf_get() { tr -d '\r' < "$1" | sed -n "s/^$2=//p" | head -1; }
 conf_set() {
   case "$3" in *[[:cntrl:]]*) die "conf-set: $2 must be a single line";; esac
   case "$2=$3" in
+    parallel=on|parallel=off) ;;
+    parallel=*) die "conf-set: parallel must be on or off";;
     max_review_rounds=*|max_qa_rounds=*|review_round=*|qa_round=*)
       case "$3" in ''|*[!0-9]*) die "conf-set: $2 must be an integer";; esac ;;
     status=active|status=waiting_permission|status=paused|status=done|status=unresolved|status=aborted) ;;
@@ -96,7 +98,7 @@ cmd_start() { # df start <input-file> [--base <ref>] [--branch <name>]   (DF_ALL
   cp "$input" "$rd/input.md"
   { echo "track=unrouted"; echo "worktree=$wt"; echo "branch=$branch"; echo "root_base_sha=$base"; echo "base_ref=$baseref"
     echo "stage=intake"; echo "status=active"
-    echo "started=$(date +%s)"; echo "budget_seconds=${DF_BUDGET_SECONDS:-14400}"; echo "max_attempts=3"; echo "max_review_rounds=3"; echo "max_qa_rounds=2"; echo "review_round=0"; echo "qa_round=0"; } | atomic "$rd/run.conf"
+    echo "started=$(date +%s)"; echo "budget_seconds=${DF_BUDGET_SECONDS:-14400}"; echo "max_attempts=3"; echo "max_review_rounds=3"; echo "max_qa_rounds=2"; echo "review_round=0"; echo "qa_round=0"; echo "parallel=off"; } | atomic "$rd/run.conf"
   echo "$id"
 }
 
@@ -328,6 +330,72 @@ cmd_metrics() { # df metrics <run-id>: one row per run in <state-root>/metrics.t
     printf '%s\n' "$row"; } | atomic "$m"
 }
 
+# Parallel builders (off by default). A wave is the pending chunks whose dependencies all
+# passed and whose write globs (scope + touches_tests) are pairwise disjoint, at most 3.
+# ponytail: overlap is "one glob's literal prefix is a prefix of the other's"; conservative,
+# so it can serialise chunks that would not really collide.
+globs_of() { { fm_get "$1" scope; fm_get "$1" touches_tests; } | tr -d '[]' | tr ',' '\n' | sed 's/^ *//; s/ *$//' | grep -v '^$' | sed 's/[][*?].*//'; }
+overlaps() { # overlaps "<prefixes a>" "<prefixes b>"
+  local p q
+  for p in $1; do for q in $2; do
+    case "$q" in "$p"*) return 0;; esac
+    case "$p" in "$q"*) return 0;; esac
+  done; done
+  [ -z "$1" ] || [ -z "$2" ]
+}
+cmd_wave() { # df wave <run-id>: chunk ids that may run in parallel, one per line
+  local rd f d ok n=0 taken="" mine st
+  rd=$(run_dir "$1")
+  for f in "$rd"/chunks/*.md; do
+    [ -e "$f" ] || continue
+    [ "$(fm_get "$f" status)" = pending ] || continue
+    ok=1
+    for d in $(fm_get "$f" depends_on | tr -d '[]' | tr ',' ' '); do
+      st=$(fm_get "$rd/chunks/$d.md" status 2>/dev/null || true)
+      [ "$st" = PASS ] || ok=0
+    done
+    [ $ok = 1 ] || continue
+    mine=$(globs_of "$f" | tr '\n' ' ')
+    if [ $n -gt 0 ] && overlaps "$taken" "$mine"; then continue; fi
+    fm_get "$f" id; taken="$taken $mine"; n=$((n + 1))
+    [ $n -lt 3 ] || break
+  done
+}
+sub_paths() { # sets wt, sb, sw, ch for <run-id> <chunk-id>
+  local c; c="$(run_dir "$1")/run.conf"; ch="$(run_dir "$1")/chunks/$2.md"
+  [ -f "$ch" ] || die "no chunk $2 in run $1"
+  wt=$(conf_get "$c" worktree); sb="$(conf_get "$c" branch)-c$2"; sw="$wt-c$2"
+}
+cmd_sub_add() { # df sub-add <run-id> <chunk-id>: a worktree for one chunk of a wave, from the run branch head
+  local wt sb sw ch
+  sub_paths "$1" "$2"
+  git worktree add -q -b "$sb" "$sw" "$(git -C "$wt" rev-parse HEAD)" || die "sub-add: could not create $sw"
+  fm_set "$ch" sub_worktree "$sw"
+  echo "$sw"
+}
+cmd_sub_drop() { # df sub-drop <run-id> <chunk-id>: remove a chunk's sub-worktree and sub-branch
+  local wt sb sw ch
+  sub_paths "$1" "$2"
+  [ ! -d "$sw" ] || git worktree remove --force "$sw"
+  ! git show-ref --verify -q "refs/heads/$sb" || git branch -q -D "$sb"
+  git worktree prune
+  fm_set "$ch" sub_worktree null
+}
+cmd_sub_join() { # df sub-join <run-id> <chunk-id>: cherry-pick the chunk's commits onto the run branch, then drop it
+  local wt sb sw ch mb id=""
+  sub_paths "$1" "$2"
+  [ -z "$(git -C "$wt" status --porcelain)" ] || die "sub-join: run worktree has uncommitted changes"
+  mb=$(git -C "$wt" merge-base HEAD "$sb") || die "sub-join: no sub-branch for chunk $2"
+  [ -n "$(git -C "$wt" config user.email)" ] || id="-c user.name=dark-factory -c user.email=df@localhost"
+  if [ "$mb" != "$(git -C "$wt" rev-parse "$sb")" ]; then
+    if ! git -C "$wt" $id cherry-pick "$mb..$sb" >/dev/null 2>&1; then
+      git -C "$wt" cherry-pick --abort >/dev/null 2>&1 || true
+      die "sub-join: chunk $2 conflicts with the run branch; drop it and rerun it serially"
+    fi
+  fi
+  cmd_sub_drop "$1" "$2"
+}
+
 cmd_status() { # df status <run-id>: regenerate and print progress.md
   local rd c out f
   rd=$(run_dir "$1"); c="$rd/run.conf"
@@ -364,6 +432,9 @@ cmd_clean() { # df clean <run-id> [--force]: removes worktree and state, keeps t
   [ -f "$c" ] || die "no such run: $1"
   if [ "${2:-}" != --force ] && [ "$(cmd_lock "$1" check)" = live ]; then die "run is live; use --force"; fi
   wt=$(conf_get "$c" worktree)
+  git worktree list --porcelain | sed -n 's/^worktree //p' | while IFS= read -r w; do
+    case "$w" in "$wt"-c*) git worktree remove --force "$w";; esac
+  done
   if [ -d "$wt" ]; then
     if [ "${2:-}" != --force ] && [ -n "$(git -C "$wt" status --porcelain)" ]; then
       die "worktree has uncommitted changes; use --force"
@@ -392,6 +463,10 @@ case "$cmd" in
   clean) cmd_clean "$@";;
   finish) cmd_finish "$@";;
   lessons-set) cmd_lessons_set "$@";;
+  wave) cmd_wave "$@";;
+  sub-add) cmd_sub_add "$@";;
+  sub-join) cmd_sub_join "$@";;
+  sub-drop) cmd_sub_drop "$@";;
   metrics) cmd_metrics "$@";;
   run-dir) run_dir "$@";;
   conf-get) conf_get "$@";;
@@ -399,5 +474,5 @@ case "$cmd" in
   fm-get) fm_get "$@";;
   fm-set) fm_set "$@";;
   write) atomic "$@";;
-  *) die "usage: df {start|validate|verdict|gate|lock|snapshot|check-diff|canary-scan|srchash|commit|scrub|status|list|clean|finish|lessons-set|metrics|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
+  *) die "usage: df {start|validate|verdict|gate|lock|snapshot|check-diff|canary-scan|srchash|commit|scrub|status|list|clean|finish|lessons-set|metrics|wave|sub-add|sub-join|sub-drop|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
 esac
