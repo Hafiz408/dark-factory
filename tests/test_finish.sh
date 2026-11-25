@@ -88,7 +88,7 @@ assert_fail "finish refuses a run with a BLOCKED chunk" bash -c "cd '$R' && '$DF
 assert_ok "finish accepts a clean run past QA" bash -c "cd '$R' && '$DF' finish '$id' s1"
 set -- $(mk feature); R=$1 id=$2 wt=$3 rd=$4
 (cd "$R" && "$DF" conf-set "$rd/run.conf" stage integrate)
-assert_ok "finish accepts the v0.1 stage integrate" bash -c "cd '$R' && '$DF' finish '$id' s1"
+assert_fail "finish refuses a v0.1 run still at integrate (it goes through review, QA and e2e first)" bash -c "cd '$R' && '$DF' finish '$id' s1"
 
 # release review: a run still in QA has not passed it
 set -- $(mk feature); R=$1 id=$2 wt=$3 rd=$4

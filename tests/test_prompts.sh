@@ -168,7 +168,7 @@ grep -q "^## Review" "$SK" && grep -q "^## QA" "$SK" && ! grep -q "^## Integrate
 r=$(grep -n "^## Review" "$SK" | head -1 | cut -d: -f1); q=$(grep -n "^## QA" "$SK" | head -1 | cut -d: -f1)
 [ -n "$r" ] && [ -n "$q" ] && [ "$r" -lt "$q" ] && ok "SKILL.md: review comes before QA" || bad "SKILL.md: review comes before QA"
 grep -q "max_review_rounds" "$SK" && grep -q "max_qa_rounds" "$SK" && ok "SKILL.md: both loops have a cap in run.conf" || bad "SKILL.md: both loops have a cap in run.conf"
-grep -q "does not enter QA" "$SK" && grep -q "status paused" "$SK" && grep -q 'waiting_on "<what is open>"' "$SK" && ok "SKILL.md: an unclean review pauses before QA" || bad "SKILL.md: an unclean review pauses before QA"
+grep -q "does not enter QA" "$SK" && grep -q "{DF} pause <id> \"<what is open>\"" "$SK" && ok "SKILL.md: an unclean review pauses before QA" || bad "SKILL.md: an unclean review pauses before QA"
 grep -q "reviewer(goal)" "$SK" && grep -q "chunk files" "$SK" && ok "SKILL.md: consolidated review adds the goal lens with the chunk files" || bad "SKILL.md: consolidated review adds the goal lens with the chunk files"
 G="$ROOT/lenses/goal.md"
 grep -q "Done when" "$G" && grep -q "file:line" "$G" && grep -q "not met" "$G" && ok "goal lens: every criterion met or not met, with evidence" || bad "goal lens: every criterion met or not met, with evidence"
@@ -266,5 +266,13 @@ echo "$LP" | grep -q "serial yes" && ok "SKILL.md: a requeued chunk is kept out 
 echo "$LP" | grep -q "log.md" && echo "$LP" | grep -q "joined commit" && ok "SKILL.md: joined commits are logged for resume" || bad "SKILL.md: joined commits are logged for resume"
 echo "$LP" | grep -q "after its join" && ok "SKILL.md: a chunk's PASS line is printed after its join" || bad "SKILL.md: a chunk's PASS line is printed after its join"
 sed -n '/^## Resume/,$p' "$SK" | grep -q "sub_worktree" && ok "SKILL.md: resume cleans up an interrupted wave" || bad "SKILL.md: resume cleans up an interrupted wave"
+
+# third review of #10
+sed -n '/^### Pausing/,/^## QA/p' "$SK" | grep -q "{DF} pause <id>" && ok "SKILL.md: pausing stops the clock through df pause" || bad "SKILL.md: pausing stops the clock through df pause"
+sed -n '/^## Resume/,$p' "$SK" | grep -q "{DF} unpause <id>" && ok "SKILL.md: resume credits paused time through df unpause" || bad "SKILL.md: resume credits paused time through df unpause"
+sed -n '/^## Resume/,$p' "$SK" | grep -q "when it is" && sed -n '/^## Resume/,$p' "$SK" | grep -q "0 the round never started" && ok "SKILL.md: resume never sets a round counter below 0" || bad "SKILL.md: resume never sets a round counter below 0"
+RT3=$(sed -n '/\*\*Retro (stage/,/\*\*Ship (stage/p' "$SK")
+echo "$RT3" | grep -q "{DF} repo-lock <id> acquire" && echo "$RT3" | grep -q "{DF} repo-lock <id> release" && ok "SKILL.md: the retro holds the repo lock across its write check" || bad "SKILL.md: the retro holds the repo lock across its write check"
+grep -q "status paused\`; run" "$SK" && bad "SKILL.md: no hand-set paused status left" || ok "SKILL.md: no hand-set paused status left"
 
 finish
