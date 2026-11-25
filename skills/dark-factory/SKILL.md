@@ -36,14 +36,20 @@ evaluate it and will hold the command for approval, which stalls an unattended r
    have. If you cannot read it, stop and ask the user to paste the content. Never invent it.
 2. Write the input to a temp file, run `{DF} scrub` on it. If it exits 3, tell the user which
    kinds of secret were redacted and ask them to confirm before continuing.
-3. Run `DF_ALLOW_INIT=1 {DF} start <scrubbed-file>` only if the directory is empty and the
-   request looks like a new application; otherwise run it without the variable. If it refuses,
-   relay the reason in one line and stop.
-4. Pick a session id once for this run (for example `s` followed by the current epoch time) and
+3. Base branch. If the directory is a git repo with at least one commit, state the default in
+   one line and ask:
+   "Branch from `<current branch>` at `<short sha>`? (ok, or give a base ref, and optionally a branch name)".
+   "ok" or an empty answer keeps the defaults. Skip the question for an empty directory.
+4. Run `DF_ALLOW_INIT=1 {DF} start <scrubbed-file>` only if the directory is empty and the
+   request looks like a new application; otherwise run it without the variable. Append
+   `--base <ref>` and `--branch <name>` only when the user gave them. If it refuses, relay the
+   reason in one line and stop.
+5. Pick a session id once for this run (for example `s` followed by the current epoch time) and
    pass it explicitly to every lock command: `{DF} lock <id> acquire <session-id>`. Refresh with
    the same id after every verdict. Do not rely on the default, it changes per command.
-5. Report the run id, branch and worktree path to the user, and that the working tree has
-   uncommitted files that will not be included if `dirty.txt` is non-empty.
+6. Report the run id, the base (`base_ref` from `run.conf`), branch and worktree path to the
+   user, and that the working tree has uncommitted files that will not be included if
+   `dirty.txt` is non-empty.
 
 ## Stages
 
@@ -90,8 +96,12 @@ below 0.7, or `mixed: yes`, carry it into Refine as a question. Load `{PLUGIN}/t
 ### signoff (the only gate)
 Show one screen:
 - Treated as: track (override: bugfix | feature | build); goal in your own words.
+- Base: `base_ref` at the short `root_base_sha`, onto the run's branch (all from `run.conf`).
+  To change the base, abort and start again; say so on the screen.
 - In scope, out of scope, assumptions (each with its source).
-- Chunks with sizes. Scenario titles only, never steps. Manual-only scenarios.
+- Approach and trade-offs: from `plan.md`'s `## Approach`, `## Alternatives considered` and
+  `## Trade-offs`, at most ten lines in total.
+- To-do list: the chunks with sizes. Scenario titles only, never steps. Manual-only scenarios.
 - Commands the run will execute (from `env.commands`) and any new dependencies it will install.
 - Uncommitted files not included. Unmet needs from preflight. Queued follow-up runs for mixed
   input.

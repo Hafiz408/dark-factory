@@ -135,4 +135,13 @@ grep -q "status to done, or to .unresolved." "$SK" && ok "SKILL.md: finish may s
 grep -q "| Typical size | 1 to 3 | 3 to 8 | 3 to 8 |" "$ROOT/docs/design.md" && ok "design.md matches the build track size" || bad "design.md matches the build track size"
 grep -q "eight real codebases" "$ROOT/README.md" && ok "README evidence counts real issues and builds separately" || bad "README evidence counts real issues and builds separately"
 
+# v2 slice 1: base question, approach and trade-offs at sign-off
+grep -q "Branch from" "$SK" && grep -q "(ok, or give a base ref, and optionally a branch name)" "$SK" && ok "SKILL.md: asks the base branch with an ok default" || bad "SKILL.md: asks the base branch with an ok default"
+grep -q -- "--base <ref>" "$SK" && grep -q -- "--branch <name>" "$SK" && ok "SKILL.md: passes --base and --branch to df start" || bad "SKILL.md: passes --base and --branch to df start"
+grep -q "base_ref" "$SK" && grep -q "abort and start again" "$SK" && ok "SKILL.md: sign-off shows the base and how to change it" || bad "SKILL.md: sign-off shows the base and how to change it"
+grep -q "at most ten lines" "$SK" && grep -q "To-do list" "$SK" && ok "SKILL.md: sign-off shows approach above the to-do list" || bad "SKILL.md: sign-off shows approach above the to-do list"
+for h in "## Approach" "## Alternatives considered" "## Trade-offs"; do
+  grep -q "$h" "$ROOT/agents/planner.md" && ok "planner: plan.md has $h" || bad "planner: plan.md has $h"
+done
+
 finish
