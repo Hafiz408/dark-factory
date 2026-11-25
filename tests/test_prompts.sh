@@ -154,4 +154,6 @@ grep -q "not confirmed" "$SK" && ok "SKILL.md: an unconfirmed criterion is repor
 
 grep -q "base_ref. is absent or .detached." "$SK" && ok "SKILL.md: resume drift is measured against the run's base" || bad "SKILL.md: resume drift is measured against the run's base"
 
+grep -qF '[df <run-id>] done: ' "$SK" && grep -q "nothing after the event" "$SK" && ok "SKILL.md: the closing milestone line keeps the format (slice 1 live run)" || bad "SKILL.md: the closing milestone line keeps the format (slice 1 live run)"
+
 finish

@@ -71,3 +71,17 @@ and a variable read before it was set). Both were caught only because each fix t
 required to fail first.
 
 Eight Minor findings are deferred and listed in the plan ledger. They are not claimed fixed.
+
+## v2 slice 1 (sign-off and reporting), 2026-11-25
+
+Same driver and throwaway setup as above, run once each.
+
+| Run | Result | What it showed |
+|---|---|---|
+| `fixtures/feature` on the slice branch | **pass** | 1 chunk, 1 attempt, about 14 minutes, `expect.sh` 0 (run 3 above: 1 chunk, pass). The base question was asked once and "ok" kept the default; `run.conf` recorded `base_ref=main`. Sign-off showed the base, the approach with alternatives and trade-offs, and a to-do list. `report.md` and the final message opened with functional changes, then technical changes. |
+| `df start --base --branch`, built by the v0.1 plugin on this repo | **pass** | 4 chunks plus 1 fix chunk, 6 attempts, about 46 minutes, 18 scenarios. Survived a session cut-off mid-chunk and resumed with `--force`. Its reviewers found and fixed an option injection into `git fetch`, forged `run.conf` keys through a newline, and an accepted empty `--base`. |
+
+Defect found: seven of the eight milestone lines matched `[df <run-id>] <stage>: <event>`; the
+closing line was `[df <run-id>] done`, with no event, and two lines carried commentary after
+the event. The prompt now gives the closing line's form and forbids trailing text. That fix
+is covered by a structural test only; it has not been re-run live.

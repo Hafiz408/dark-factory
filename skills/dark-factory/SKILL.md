@@ -185,7 +185,8 @@ Details you must follow:
   `[df r261125-101500-123] loop: chunk 02 PASS (2/4), attempt 1` and
   `[df r261125-101500-123] integrate: round 2, 1 blocking (security)`. The milestones are: a
   stage is entered; a chunk reaches PASS, is retried, or is BLOCKED; each Integrate review
-  round; the QA result. Print nothing else between sign-off and the final message, except a
+  round; the QA result; and the end of the run, as `[df <run-id>] done: <green or not green>`.
+  Every line has both parts and nothing after the event. Print nothing else between sign-off and the final message, except a
   stop that needs the user (a permission denial, an exhausted budget).
 
 ## Integrate
