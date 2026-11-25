@@ -1,6 +1,6 @@
 {
   "name": "dark-factory",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Spec in, tested software out. Refine with the user, sign off once, then a routed team of subagents builds, tests and QAs in a loop.",
   "author": { "name": "Hafiz408" },
   "license": "MIT"
