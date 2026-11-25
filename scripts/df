@@ -296,16 +296,28 @@ cmd_ship() { # df ship <run-id> <title> <body-file>: push the run branch and ope
   wt=$(conf_get "$c" worktree); branch=$(conf_get "$c" branch)
   [ -d "$wt" ] || die "ship: worktree is missing"
   [ -z "$(git -C "$wt" status --porcelain)" ] || die "ship: worktree has uncommitted changes"
+  git remote | grep -qxF -- origin || die "ship: no remote named origin"
+  command -v gh >/dev/null 2>&1 || die "ship: gh is not on PATH"
+  gh auth status >/dev/null 2>&1 || die "ship: gh is not authenticated"
+  [ "$(git check-ref-format --branch "$branch" 2>/dev/null)" = "$branch" ] || die "ship: invalid branch name '$branch'"
+  case $2 in ""|-*|*[[:cntrl:]]*) die "ship: title must be one non-empty line not starting with '-'";; esac
+  case $3 in -*) die "ship: body file path must not start with '-'";; esac
+  [ -f "$3" ] || die "ship: body file not found: $3"
+  [ "$(printf '%s\n' "$2" | grep -Ec "$SECRET_RE" || true)" -eq 0 ] && [ "$(grep -Ec "$SECRET_RE" "$3" || true)" -eq 0 ] || die "ship: title or body looks like it contains a secret"
   target=$(conf_get "$c" ship_base)
   if [ -z "$target" ]; then
     target=$(conf_get "$c" base_ref)
     case $target in ""|detached) die "ship: no base branch; set ship_base";; esac
-    target=${target#origin/}
+    case $target in
+      origin/*) target=${target#origin/} ;;
+      */*) ! git remote | grep -qxF -- "${target%%/*}" || die "ship: base_ref '$target' is on another remote; set ship_base" ;;
+    esac
   fi
-  case $3 in -*) die "ship: body file path must not start with '-'";; esac
-  [ -f "$3" ] || die "ship: body file not found: $3"
+  case $target in -*) die "ship: base branch must not start with '-'";; esac
+  [ "$(git check-ref-format --branch "$target" 2>/dev/null)" = "$target" ] || die "ship: invalid base branch '$target'"
+  GIT_TERMINAL_PROMPT=0 git ls-remote --exit-code --heads origin "refs/heads/$target" >/dev/null 2>&1 || die "ship: base branch '$target' not found on origin"
   body=$(cd "$(dirname "$3")" && pwd)/$(basename "$3")
-  sha=$(git rev-parse --verify "refs/heads/$branch") || die "ship: branch '$branch' not found"
+  sha=$(git -C "$wt" rev-parse --verify "refs/heads/$branch") || die "ship: branch '$branch' not found"
   GIT_TERMINAL_PROMPT=0 git -C "$wt" push -u origin "refs/heads/$branch:refs/heads/$branch" >&2 || die "ship: push failed"
   conf_set "$c" pushed_sha "$sha"
   url=$(cd "$wt" && GH_PROMPT_DISABLED=1 gh pr create --base "$target" --head "$branch" --title "$2" --body-file "$body") || die "ship: could not open PR"

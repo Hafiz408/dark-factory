@@ -97,6 +97,7 @@ assert_eq "" "$(df conf-get "$RC4" pushed_sha)" "missing body: pushed_sha unset"
 assert_eq "" "$(git -C "$ORIGIN" for-each-ref "refs/heads/$(df conf-get "$RC4" branch)")" "missing body: nothing pushed"
 err=$(cd "$T" && df ship "$R4" t "-body.md" 2>&1 >/dev/null); rc=$?
 assert_eq "1" "$rc" "dash body: exit 1"
+assert_eq "df: ship: body file path must not start with '-'" "$err" "dash body: message"
 assert_eq "" "$(df conf-get "$RC4" pushed_sha)" "dash body: pushed_sha unset"
 
 # gh prints a non-URL last line: not recorded
@@ -105,5 +106,55 @@ assert_eq "1" "$rc" "bad gh output: exit 1"
 case $(cat "$T/e") in *"df: ship:"*) ok "bad gh output: message";; *) bad "bad gh output: message";; esac
 assert_eq "" "$(df conf-get "$RC4" pr_url)" "bad gh output: pr_url unset"
 assert_eq "$(git -C "$(df conf-get "$RC4" worktree)" rev-parse HEAD)" "$(df conf-get "$RC4" pushed_sha)" "bad gh output: pushed_sha kept"
+
+# refusals: each exits 1 with "df: ship:", and nothing is pushed, recorded or sent to gh pr
+refuse() { # refuse <desc> <run> <title> <body> [VAR=val ...]
+  local d=$1 r=$2 t=$3 b=$4 e rc br; shift 4
+  : > "$GH_LOG"
+  e=$( cd "$C" && env "$@" "$DF" ship "$r" "$t" "$b" 2>&1 >/dev/null ); rc=$?
+  br=$(df conf-get "$SC/$r/run.conf" branch)
+  assert_eq "1" "$rc" "refuse $d: exit 1"
+  case $e in "df: ship:"*) ok "refuse $d: message";; *) bad "refuse $d: message '$e'";; esac
+  assert_eq "" "$(git -C "$ORIGIN" for-each-ref "refs/heads/$br")" "refuse $d: nothing pushed"
+  assert_eq "" "$(df conf-get "$SC/$r/run.conf" pushed_sha)$(df conf-get "$SC/$r/run.conf" pr_url)" "refuse $d: nothing recorded"
+  case $(cat "$GH_LOG") in *pr*) bad "refuse $d: gh pr called";; *) ok "refuse $d: no gh pr call";; esac
+}
+S=$(newrun); SCF="$SC/$S/run.conf"; swt=$(df conf-get "$SCF" worktree); df conf-set "$SCF" base_ref main
+df conf-set "$SCF" ship_confirmed no;   refuse "confirmed no" "$S" t "$T/body.md"
+df conf-set "$SCF" ship_confirmed yes
+df conf-set "$SCF" stage qa;            refuse "stage qa" "$S" t "$T/body.md"
+df conf-set "$SCF" stage ship
+df conf-set "$SCF" status paused;       refuse "status paused" "$S" t "$T/body.md"
+df conf-set "$SCF" status active
+echo x > "$swt/dirty.txt";              refuse "dirty worktree" "$S" t "$T/body.md"
+rm "$swt/dirty.txt"
+refuse "no gh" "$S" t "$T/body.md" "PATH=$(nogh_path)"
+refuse "gh auth fails" "$S" t "$T/body.md" GH_AUTH_RC=1
+refuse "empty title" "$S" "" "$T/body.md"
+refuse "multi-line title" "$S" "$(printf 'a\nb')" "$T/body.md"
+refuse "dash title" "$S" "-t" "$T/body.md"
+refuse "missing body" "$S" t "$T/nope.md"
+echo "password: hunter2" > "$T/secret.md"
+refuse "secret in body" "$S" t "$T/secret.md"
+refuse "secret in title" "$S" "token=abc123" "$T/body.md"
+df conf-set "$SCF" base_ref detached;  refuse "detached" "$S" t "$T/body.md"
+df conf-set "$SCF" base_ref "";        refuse "base_ref absent" "$S" t "$T/body.md"
+git -C "$C" remote add upstream "$ORIGIN"
+df conf-set "$SCF" base_ref upstream/main; refuse "other remote" "$S" t "$T/body.md"
+df conf-set "$SCF" base_ref main
+df conf-set "$SCF" ship_base nosuch;   refuse "ship_base missing on origin" "$S" t "$T/body.md"
+df conf-set "$SCF" ship_base -main;    refuse "ship_base dash" "$S" t "$T/body.md"
+df conf-set "$SCF" ship_base ""
+git -C "$ORIGIN" config receive.denyDeleteCurrent ignore
+git -C "$M" push -q origin main:refs/heads/x/main; git -C "$M" push -q origin :refs/heads/main
+df conf-set "$SCF" base_ref main;      refuse "only x/main on origin" "$S" t "$T/body.md"
+git -C "$M" push -q origin main:refs/heads/main
+git -C "$C" remote remove origin;      refuse "no origin" "$S" t "$T/body.md"
+git -C "$C" remote add origin "$ORIGIN"
+
+# base_ref=main alone gives --base main
+S2=$(newrun); df conf-set "$SC/$S2/run.conf" base_ref main
+: > "$GH_LOG"; df ship "$S2" t "$T/body.md" >/dev/null 2>&1
+assert_contains "$(printf -- '--base\nmain\n')" "$(cat "$GH_LOG")" "base_ref=main gives --base main"
 
 finish
