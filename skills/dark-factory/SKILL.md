@@ -178,8 +178,15 @@ Details you must follow:
   included), or when the current epoch time (read in its own command) minus `started` exceeds `budget_seconds` (both in `run.conf`).
   On exhaustion stop gracefully and write the report; the run stays resumable after the user
   raises the budget with `{DF} conf-set`.
-- Before every role spawn and after every verdict: `{DF} lock <id> refresh <session-id>`, append one line to `log.md`, run
-  `{DF} status <id>`, and print one line to the user.
+- Before every role spawn and after every verdict: `{DF} lock <id> refresh <session-id>`, append one line to `log.md`, and run
+  `{DF} status <id>`.
+- **Milestone lines.** The user sees one line per milestone, not per role spawn, in the form
+  `[df <run-id>] <stage>: <event>`, where `<stage>` is the `stage` value in `run.conf`. Examples:
+  `[df r261125-101500-123] loop: chunk 02 PASS (2/4), attempt 1` and
+  `[df r261125-101500-123] integrate: round 2, 1 blocking (security)`. The milestones are: a
+  stage is entered; a chunk reaches PASS, is retried, or is BLOCKED; each Integrate review
+  round; the QA result. Print nothing else between sign-off and the final message, except a
+  stop that needs the user (a permission denial, an exhausted budget).
 
 ## Integrate
 
@@ -191,14 +198,23 @@ Details you must follow:
    and list any existing test or test helper among them in `touches_tests`; otherwise the
    integrity check rejects the attempt. A fix chunk changes only what its findings name: no new
    test files, README or other prose unless a finding is about them.
-4. Write `report.md`: outcome per chunk (PASS, BLOCKED, SKIPPED), what was built, findings left
+4. Write `report.md`. It starts with two sections:
+   - `## Functional changes`: bullets of user-visible behaviour, one per acceptance criterion
+     in `spec.md` that QA confirmed. A criterion QA did not confirm is listed last, marked
+     "not confirmed", with the reason.
+   - `## Technical changes`: high level only: modules touched, new dependencies, schema,
+     config, migrations. No per-file list.
+
+   Then: outcome per chunk (PASS, BLOCKED, SKIPPED), what was built, findings left
    with severity, waivers with reasons, assumptions, `UNVERIFIABLE` manual checks, baseline
    failures that were pre-existing, `late-find` and low findings (the "what to delete" list),
    budget used, and one plain sentence stating whether the final branch is green. If `{DF}
    finish` prints `NOT FIXED` (the branch changes no source), the report's first line is
-   `NOT FIXED: <why>`, and your first sentence to the user says the reported problem is still
-   present and what a human must decide.
-5. `{DF} finish <id> <session-id>` (sets stage to done and status to done, or to `unresolved` when a bugfix branch changes no source, and releases the lock). Tell the user the branch name and the worktree path. Never push,
+   `NOT FIXED: <why>`, above both sections, and your first sentence to the user says the
+   reported problem is still present and what a human must decide.
+5. `{DF} finish <id> <session-id>` (sets stage to done and status to done, or to `unresolved` when a bugfix branch changes no source, and releases the lock).
+   Your final message to the user is the two sections, the one plain sentence stating whether
+   the branch is green, and one line with the branch name and the worktree path. Never push,
    merge or open a PR.
 
 ## Resume

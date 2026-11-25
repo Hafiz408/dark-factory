@@ -61,7 +61,7 @@ Out of v1:
 | 3 | Refine | Three `refiner` lenses in parallel (requirements, codebase fit, risk). Merge, resolve what the repo can answer, ask one batched round. Max 2 rounds per cycle. Codebase-fit lens reads by sampling entry points and the areas the input names, and states what it did not read. | `questions.md`, `spec.md` |
 | 4 | Plan | In parallel: `planner` (plan, chunk list with size budget and path scope) and `qa-author` (checklist and holdout scenarios, from the spec alone). `reviewer` (plan-coverage lens) checks both against every spec requirement and validates the chunk dependency graph. | `plan.md`, `scenarios/` |
 | 5 | Preflight | Detect stack (per package in a monorepo), install dependencies in the worktree, find test, lint and typecheck commands, run each once, run the suite and scanners at `root_base_sha` as the **baseline**, list required services and credentials. Anything unmet is shown at sign-off, not discovered later. | `run.conf.env`, baseline |
-| 6 | Sign-off | The only gate. One-screen summary. approve, amend, or abort. | `log.md` |
+| 6 | Sign-off | The only gate. One-screen summary: the base, the approach with alternatives and trade-offs (at most ten lines, from `plan.md`), and the chunks as a to-do list. approve, amend, or abort. | `log.md` |
 | 7 | Slice | One file per chunk | `chunks/NN.md` |
 | 8 | Loop | Section 6 | commits on `df/<run-id>` |
 | 9 | Integrate | Section 6 | `report.md` |
@@ -188,6 +188,14 @@ resumable with a raised budget.
    fix rounds, then remaining findings go in the report. If a fix chunk regresses an
    earlier scenario the regression is a finding like any other; the report states plainly
    whether the final branch is green.
+4. `report.md` opens with `## Functional changes` (user-visible behaviour, one bullet per
+   acceptance criterion QA confirmed; an unconfirmed one is marked as such) and
+   `## Technical changes` (high level: modules, dependencies, schema, config, migrations).
+   The final message to the user is those two sections plus the green sentence.
+
+Progress to the user is one line per milestone, not per role spawn:
+`[df <run-id>] <stage>: <event>` (stage entered; chunk PASS, retry or BLOCKED; each Integrate
+review round; the QA result).
 
 ### Parallelism
 
@@ -227,7 +235,7 @@ chunks/NN.md      frontmatter + failure notes
 panel/NN-aK.md    findings per chunk and attempt
 log.md            one line per verdict and decision
 progress.md       DERIVED view, regenerated after every verdict, never read for decisions
-report.md         final
+report.md         final; opens with functional changes, then technical changes
 ```
 
 Source of truth: `run.conf`, `chunks/*.md`, and role output files. Every state file is
