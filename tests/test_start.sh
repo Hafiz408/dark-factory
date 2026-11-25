@@ -22,6 +22,38 @@ assert_eq "" "$(cd "$R" && git status --porcelain | grep -v untracked.txt | grep
 assert_ok "validate passes on fresh run" bash -c "cd '$R' && '$DF' validate '$id'"
 assert_contains "$id" "$(cd "$R" && "$DF" list)" "list shows run"
 
+# --base / --branch / base_ref (AC-1..AC-5)
+B=$(mkrepo); echo "x" > "$B/in.txt"
+git -C "$B" tag v1
+git -C "$B" commit -q --allow-empty -m second
+H1=$(git -C "$B" rev-parse HEAD); T1=$(git -C "$B" rev-parse "v1^{commit}")
+cf() { (cd "$B" && "$DF" conf-get "$(cd "$B" && "$DF" run-dir "$1")/run.conf" "$2"); }
+s1=$(cd "$B" && "$DF" start "$B/in.txt")
+case $s1 in r*[0-9]) assert_eq "1" "$(printf '%s\n' "$s1" | wc -l | tr -d ' ')" "no flags prints only the run id";; *) bad "no flags prints only the run id";; esac
+w1=$(cf "$s1" worktree)
+assert_eq "df/$s1" "$(git -C "$w1" rev-parse --abbrev-ref HEAD)" "default branch df/<id>"
+assert_eq "$H1" "$(git -C "$w1" rev-parse HEAD)" "worktree at main HEAD"
+assert_eq "df/$s1" "$(cf "$s1" branch)" "run.conf branch default"
+assert_eq "$H1" "$(cf "$s1" root_base_sha)" "run.conf root_base_sha is HEAD"
+assert_eq "$(git -C "$B" symbolic-ref --short HEAD)" "$(cf "$s1" base_ref)" "base_ref is current branch"
+sed -i.bak '/^base_ref=/d' "$(cd "$B" && "$DF" run-dir "$s1")/run.conf"
+assert_ok "validate passes without base_ref" bash -c "cd '$B' && '$DF' validate '$s1'"
+D=$(mkrepo); git -C "$D" checkout -q --detach
+sd=$(cd "$D" && "$DF" start "$B/in.txt")
+assert_eq "detached" "$(cd "$D" && "$DF" conf-get "$("$DF" run-dir "$sd")/run.conf" base_ref)" "base_ref detached"
+for order in "--base v1 --branch feat-a" "--branch feat-b --base v1"; do
+  case $order in "--base"*) nm=feat-a;; *) nm=feat-b;; esac
+  out=$(cd "$B" && "$DF" start "$B/in.txt" $order)
+  assert_eq "$out" "$(printf '%s' "$out" | head -1)" "flags '$order': single-line output"
+  case $out in r*) ok "flags '$order': prints run id";; *) bad "flags '$order': prints run id";; esac
+  wf=$(cf "$out" worktree)
+  assert_eq "$nm" "$(git -C "$wf" rev-parse --abbrev-ref HEAD)" "flags '$order': worktree on branch"
+  assert_eq "$T1" "$(git -C "$wf" rev-parse HEAD)" "flags '$order': worktree at base"
+  assert_eq "$nm" "$(cf "$out" branch)" "flags '$order': branch in conf"
+  assert_eq "v1" "$(cf "$out" base_ref)" "flags '$order': base_ref verbatim"
+  assert_eq "$T1" "$(cf "$out" root_base_sha)" "flags '$order': root_base_sha"
+done
+
 # not a git repo
 N=$(mktemp -d); echo x > "$N/in.txt"
 assert_fail "non-git dir refused" bash -c "cd '$N' && '$DF' start '$N/in.txt'"
