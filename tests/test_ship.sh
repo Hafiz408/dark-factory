@@ -12,7 +12,11 @@ cat > "$T/bin/gh" <<'GH'
 case "$1 $2" in
   "auth status") exit "${GH_AUTH_RC:-0}";;
   "pr create") [ "${GH_CREATE_RC:-0}" -eq 0 ] || exit 1; echo "noise"; echo "${GH_URL:-https://example.test/pr/1}";;
-  "pr view") case "$*" in *"--json state"*) case "$3" in *fail*) exit 1;; *merged*) echo MERGED;; *) echo OPEN;; esac; exit 0;; esac; [ "${GH_VIEW_RC:-1}" -eq 0 ] || exit 1; echo "${GH_URL:-https://example.test/pr/1}";;
+  "pr view") case "$*" in
+    *"--json url,state,headRefOid"*) [ "${GH_VIEW_RC:-1}" -eq 0 ] || exit 1; echo "${GH_URL:-https://example.test/pr/1} ${GH_STATE:-OPEN} ${GH_OID:-$(git rev-parse HEAD 2>/dev/null)}"; exit 0;;
+    *"--json state,headRefOid"*) echo "${GH_STATE:-MERGED} ${GH_OID:-none}"; exit 0;;
+    esac
+    case "$*" in *"--json state"*) case "$3" in *fail*) exit 1;; *merged*) echo MERGED;; *) echo OPEN;; esac; exit 0;; esac; [ "${GH_VIEW_RC:-1}" -eq 0 ] || exit 1; echo "${GH_URL:-https://example.test/pr/1}";;
 esac
 GH
 chmod +x "$T/bin/gh"
@@ -171,7 +175,7 @@ for v in "view fails:GH_VIEW_RC=1" "view non-https:GH_VIEW_RC=0 GH_URL=warning:n
   e=$(cd "$C" && env GH_CREATE_RC=1 $ev "$DF" ship "$F" t "$T/body.md" 2>&1 >/dev/null); rc=$?
   assert_eq "1" "$rc" "$d: exit 1"
   assert_contains "df: ship: could not open PR" "$e" "$d: message"
-  assert_contains "$(printf 'pr\nview\n%s\n--json\nurl\n--jq\n.url\n' "$(df conf-get "$FC" branch)")" "$(cat "$GH_LOG")" "$d: gh pr view called"
+  assert_contains "$(printf 'pr\nview\n%s\n--json\nurl,state,headRefOid\n' "$(df conf-get "$FC" branch)")" "$(cat "$GH_LOG")" "$d: gh pr view called"
   assert_eq "$(git -C "$(df conf-get "$FC" worktree)" rev-parse HEAD)" "$(df conf-get "$FC" pushed_sha)" "$d: pushed_sha kept"
   assert_eq "" "$(df conf-get "$FC" pr_url)" "$d: pr_url unset"
 done
@@ -287,5 +291,39 @@ assert_fail "plain clean: worktree gone" test -e "$kw"; assert_fail "plain clean
 assert_ok "plain clean: branch kept" git -C "$C" show-ref --verify --quiet "refs/heads/$kb"
 
 grep -q "^  fixed)" "$DF" && ok "df dispatches fixed" || bad "df dispatches fixed"
+
+# slice 3 branch review
+# H1: ship pushes only the branch checked out in the run's worktree, never the target
+H=$(newrun); HC="$SC/$H/run.conf"; df conf-set "$HC" base_ref main
+( cd "$C" && git checkout -q main && echo local > local.txt && git add local.txt && git commit -qm "unreviewed local main commit" )
+before=$(git -C "$ORIGIN" rev-parse refs/heads/main)
+df conf-set "$HC" branch main
+e=$(df ship "$H" t "$T/body.md" 2>&1 >/dev/null); rc=$?
+assert_eq "1" "$rc" "ship refuses a branch that is not the worktree's branch"
+assert_contains "not the branch checked out" "$e" "and says why"
+assert_eq "$before" "$(git -C "$ORIGIN" rev-parse refs/heads/main)" "origin main untouched"
+# H2: the pushed commits are scanned for secrets
+H2=$(newrun); H2C="$SC/$H2/run.conf"; df conf-set "$H2C" base_ref main; w2=$(df conf-get "$H2C" worktree)
+echo "AWS_KEY=AKIAABCDEFGHIJKLMNOP" > "$w2/.env"; git -C "$w2" add .env; git -C "$w2" commit -qm env
+refuse "a secret in the pushed commits" "$H2" t "$T/body.md"
+# ordinary code that mentions a password is not a secret in the pushed commits
+H3=$(newrun); H3C="$SC/$H3/run.conf"; df conf-set "$H3C" base_ref main; w3=$(df conf-get "$H3C" worktree)
+echo 'password = request.form["password"]' > "$w3/login.py"; git -C "$w3" add login.py; git -C "$w3" commit -qm login
+assert_ok "code that reads a password field ships" df ship "$H3" "Login form" "$T/body.md"
+# M4: the fallback accepts only an OPEN PR whose head is this push
+for v in "closed:GH_STATE=CLOSED" "merged:GH_STATE=MERGED" "other head:GH_OID=0000000000000000000000000000000000000000"; do
+  d=${v%%:*}; ev=${v#*:}; F=$(newrun); FC="$SC/$F/run.conf"; df conf-set "$FC" base_ref main
+  e=$(cd "$C" && env GH_CREATE_RC=1 GH_VIEW_RC=0 $ev "$DF" ship "$F" t "$T/body.md" 2>&1 >/dev/null); rc=$?
+  assert_eq "1" "$rc" "fallback refuses a $d PR"; assert_eq "" "$(df conf-get "$FC" pr_url)" "fallback $d: no pr_url"
+done
+# M3: clean --branch needs the head on origin, or a merged PR at that head
+N=$(newrun); NC="$SC/$N/run.conf"; nb=$(df conf-get "$NC" branch); nw=$(df conf-get "$NC" worktree)
+df conf-set "$NC" pushed_sha "$(git -C "$nw" rev-parse HEAD)"
+assert_fail "clean --branch refuses a branch that was never pushed" df clean "$N" --branch
+assert_ok "the never-pushed branch is kept" git -C "$C" rev-parse --verify -q "refs/heads/$nb"
+D=$(shipped); DC="$SC/$D/run.conf"; db=$(df conf-get "$DC" branch); dh=$(git -C "$C" rev-parse "refs/heads/$db")
+git -C "$ORIGIN" branch -q -D "$db"; df conf-set "$DC" pr_url https://example.test/pr/merged
+GH_OID=$dh assert_ok "clean --branch accepts a merged PR at that head after the host deleted the branch" df clean "$D" --branch
+assert_fail "its local branch is gone" git -C "$C" rev-parse --verify -q "refs/heads/$db"
 
 finish
