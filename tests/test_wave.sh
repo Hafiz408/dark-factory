@@ -75,4 +75,27 @@ assert_ok "the uncommitted sub-worktree work is still there" test -f "$s7/work.t
 (cd "$R" && "$DF" clean "$id" --force)
 assert_fail "clean removes leftover sub-worktrees" test -d "$s7"
 assert_fail "clean removes sub-branches" git -C "$R" rev-parse --verify -q "df/$id-c05"
+# release review: clean deletes only real chunk sub-branches, refuses before deleting anything,
+# and sub-join never drops uncommitted work
+R2=$(mkrepo); echo x > "$R2/in.txt"
+i2=$(cd "$R2" && "$DF" start "$R2/in.txt" --branch feat); [ -n "$i2" ] || { bad "start --branch feat"; finish; }
+rd2=$(cd "$R2" && "$DF" run-dir "$i2"); wt2=$(cd "$R2" && "$DF" conf-get "$rd2/run.conf" worktree)
+git -C "$R2" branch feat-cleanup; git -C "$R2" branch feat-cwork
+printf -- '---\nid: 01\ntitle: c\ndepends_on: []\nstatus: pending\nattempts: 0\nbase_sha: null\nscope: [a/**]\n---\n' > "$rd2/chunks/01.md"
+s1=$(cd "$R2" && "$DF" sub-add "$i2" 01); [ -n "$s1" ] || { bad "sub-add printed a path"; finish; }
+echo w > "$s1/w.txt"; $G -C "$s1" add -A; $G -C "$s1" commit -qm "unjoined work"
+echo dirty > "$wt2/dirty.txt"
+assert_fail "clean refuses when the run worktree is dirty" bash -c "cd '$R2' && '$DF' clean '$i2'"
+assert_ok "and the sub-worktree is still there" test -d "$s1"
+assert_ok "and its sub-branch is still there" git -C "$R2" rev-parse --verify -q "feat-c01"
+rm -f "$wt2/dirty.txt"
+echo half > "$s1/half.txt"
+assert_fail "sub-join refuses a sub-worktree with uncommitted changes" bash -c "cd '$R2' && '$DF' sub-join '$i2' 01"
+assert_ok "the uncommitted change is kept" test -f "$s1/half.txt"
+rm -f "$s1/half.txt"
+(cd "$R2" && "$DF" clean "$i2" --force)
+assert_fail "clean removes the chunk sub-branch" git -C "$R2" rev-parse --verify -q "feat-c01"
+assert_ok "clean keeps the user's feat-cleanup branch" git -C "$R2" rev-parse --verify -q "feat-cleanup"
+assert_ok "clean keeps the user's feat-cwork branch" git -C "$R2" rev-parse --verify -q "feat-cwork"
+
 finish
