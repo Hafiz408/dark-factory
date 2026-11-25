@@ -78,7 +78,9 @@ below 0.7, or `mixed: yes`, carry it into Refine as a question. Load `{PLUGIN}/t
 
 ### refine (you talk to the user here)
 1. Spawn three `refiner` agents in ONE message, mode `lens`, with lens files
-   `requirements`, `codebase-fit`, `risk`. Output to `{RD}/gaps-<lens>.md`.
+   `requirements`, `codebase-fit`, `risk`. Output to `{RD}/gaps-<lens>.md`. If `lessons.md`
+   exists beside `{PROFILE}`, pass it to the codebase-fit refiner (and later to the planner and
+   every builder) wrapped in `<data>`: facts from earlier runs on this repo.
 2. Spawn one `refiner` in mode `merge`. It writes `questions.md`.
 3. Show the user the questions (at most 8, each with a proposed default). Wait for answers.
    Append them to `questions.md`. Run merge again. At most 2 rounds per cycle. A risk-lens gap
@@ -219,7 +221,7 @@ Details you must follow:
   `[df r261125-101500-123] loop: chunk 02 PASS (2/4), attempt 1` and
   `[df r261125-101500-123] review: round 2, 1 blocking (security)`. The milestones are: a
   stage is entered; a chunk reaches PASS, is retried, or is BLOCKED; each review round; each
-  QA round's result; the e2e result; a pause; each ship step; and the end of the run, as `[df <run-id>] done: <green or not green>`.
+  QA round's result; the e2e result; the retro; a pause; each ship step; and the end of the run, as `[df <run-id>] done: <green or not green>`.
   That closing line is printed once, after `{DF} finish`, as the last line before the final
   message; entering the `done` stage is not announced separately. Every line has both parts
   and nothing after the event. Print nothing else between sign-off and the final message,
@@ -258,9 +260,10 @@ your head.
 ### Pausing
 
 The run does not enter QA, and is never finished, while something is open. To pause:
-write the report (below) with `PAUSED: <what is open>` as its first line; run
+write the report (below) with `PAUSED: <what is open>` as its first line; run the retro
+(Report, ship and finish, step 2); run
 `{DF} conf-set {RD}/run.conf waiting_on "<what is open>"` (one line) and
-`{DF} conf-set {RD}/run.conf status paused`; leave `stage` where it is; run
+`{DF} conf-set {RD}/run.conf status paused`; run `{DF} metrics <id>`; leave `stage` where it is; run
 `{DF} lock <id> release <session-id>`; print the `[df <run-id>] <stage>: paused, <what is open>`
 line; and tell the user what is open and how to continue:
 - a cap was reached: raise it with `{DF} conf-set {RD}/run.conf max_review_rounds <n>` (or
@@ -327,11 +330,24 @@ Proves nothing else changed. Run `{DF} conf-set {RD}/run.conf stage e2e`, then
    If `{DF} fixed <id>` exits non-zero (a bugfix branch that changes no source), the report's first
    line is `NOT FIXED: <why>`, above both sections, and your first sentence to the user says the
    reported problem is still present and what a human must decide.
-2. **Ship (stage `ship`).** Only a run that came through QA and E2E is offered a push. A paused run is never offered
+2. **Retro (stage `retro`).** Run `{DF} conf-set {RD}/run.conf stage retro`
+   unless the run is pausing: a paused run keeps the stage it stopped at, so it can never be finished from
+   here. Run `{DF} state-hash` and `{DF} snapshot {WT}` and keep both in `log.md`. Spawn
+   `retro` with the run directory, the current `lessons.md` beside `{PROFILE}` (if any), and
+   the output paths `{RD}/retro.md`, `{RD}/lessons-new.md`, `{RD}/proposals-new.md`. Run both
+   commands again: if either changed, the retro wrote where it must not; say so, log it as a
+   `critical` integrity finding, and skip `lessons-set`. Otherwise run `{DF} lessons-set <id>`
+   (it installs the new lessons only when they are at most 30 lines of at most 200
+   characters, hold no secret and no holdout canary; otherwise it keeps the old ones; relay a
+   refusal in one line). Repo lessons are applied automatically to later runs. Plugin
+   proposals are never applied: they are collected in `proposals.md` beside `{PROFILE}` and
+   listed in the final message for the user to decide on. A paused run also gets a retro (it
+   is where the most is learned), then stops without the ship step.
+3. **Ship (stage `ship`).** Only a run that came through QA and E2E is offered a push. A paused run is never offered
    a push, and neither is a bugfix
-   run that fixed nothing: run `{DF} fixed <id>`; if it exits non-zero, skip to step 3. Ask
+   run that fixed nothing: run `{DF} fixed <id>`; if it exits non-zero, skip to step 4. Ask
    only when `git -C {WT} remote get-url origin` and `gh auth status` both succeed; otherwise
-   skip to step 3 and say in the final message that the branch was not pushed and why.
+   skip to step 4 and say in the final message that the branch was not pushed and why.
    Settle the target before asking: `ship_base` from `run.conf` if set; else `base_ref` when
    it is a plain branch name or `origin/<branch>` (without the `origin/`). Anything else (a
    detached `HEAD`, a sha, `HEAD~1`, another remote's branch): ask which branch on `origin` the
@@ -339,19 +355,20 @@ Proves nothing else changed. Run `{DF} conf-set {RD}/run.conf stage e2e`, then
    asking the ship question.
    Ask: "Push `<branch>` and open a PR into `<target>`? (yes / no)".
    Only the word "yes" is a yes; "ok", "approve", an empty answer and anything else are no.
-   On no, run `{DF} conf-set {RD}/run.conf ship_confirmed no` and go to step 3.
+   On no, run `{DF} conf-set {RD}/run.conf ship_confirmed no` and go to step 4.
    On yes, in this order: `{DF} conf-set {RD}/run.conf stage ship`;
    `{DF} conf-set {RD}/run.conf ship_confirmed yes`; write the report's two sections to
    `{RD}/pr-body.md`; run `{DF} ship <id> "<title>" {RD}/pr-body.md`, where the title is the
    goal in under 70 characters. It prints the PR URL. Print a milestone line for the push
-   and one for the PR. If it refuses, relay the reason in one line and go on to step 3; the
+   and one for the PR. If it refuses, relay the reason in one line and go on to step 4; the
    branch stays local. `{DF} ship` is the only way anything is pushed. Never push by hand,
    never force, never merge.
-3. `{DF} finish <id> <session-id>` (sets stage to done and status to done, or to `unresolved` when a bugfix branch changes no source, and releases the lock).
+4. `{DF} finish <id> <session-id>` (sets stage to done and status to done, or to `unresolved` when a bugfix branch changes no source, and releases the lock).
    If it prints `NOT FIXED`, put the `NOT FIXED: <why>` line at the top of `report.md` now.
+   Then run `{DF} metrics <id>`, so the row records how the run ended.
    Your final message to the user is, in this order: the NOT FIXED sentence when it applies,
    the two sections, the one plain sentence stating whether the branch is green, the PR URL
-   when one was opened, and one line with the branch name and the worktree path.
+   when one was opened, this run's plugin proposals (one line each, or none), and one line with the branch name and the worktree path.
 
 ## Resume
 
@@ -381,10 +398,11 @@ Proves nothing else changed. Run `{DF} conf-set {RD}/run.conf stage e2e`, then
 8. At `e2e`: if `e2e_needs_app` is yes, run `stop_cmd` first (an app may still be running from
    the interrupted pass), then redo the E2E stage from step 1. A run paused at E2E continues
    from E2E step 6, like the other caps.
-9. At `ship`: the user already answered. If `ship_confirmed` is yes, run
+9. At `retro`: run the retro step again from its start.
+10. At `ship`: the user already answered. If `ship_confirmed` is yes, run
    `{DF} ship <id> "<title>" {RD}/pr-body.md` again (it is safe to repeat: it re-pushes the
    same head and reuses an open PR at it, or just prints a recorded `pr_url`); then
    `{DF} finish`. Do not ask the ship question again.
-10. Before sign-off: re-ask only unanswered questions. In the loop: reset a dirty tree to the
+11. Before sign-off: re-ask only unanswered questions. In the loop: reset a dirty tree to the
    chunk's `base_sha`, count the interrupted attempt in `interrupts` (cap 3), and restart at the
    first role without a valid recorded verdict.

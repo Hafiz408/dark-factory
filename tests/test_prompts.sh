@@ -4,7 +4,7 @@
 
 fm() { awk '/^---$/{n++; next} n==1' "$1" | sed -n "s/^$2: *//p" | head -1; }
 
-AGENTS="router refiner planner qa-author builder tester qa-functional reviewer"
+AGENTS="router refiner planner qa-author builder tester qa-functional reviewer retro"
 LENSES="requirements codebase-fit risk quality ponytail goal security impact plan-coverage adjudicate"
 TRACKS="bugfix feature build"
 
@@ -20,8 +20,9 @@ for a in $AGENTS; do
 done
 
 # read-only roles must not have Write or Edit
-for a in qa-functional reviewer; do
+for a in qa-functional reviewer retro; do
   t="$(fm "$ROOT/agents/$a.md" tools)"
+  [ "$a" = retro ] && t=$(echo "$t" | sed 's/Write//')
   case "$t" in *Edit*|*Write*|*MultiEdit*) bad "agent $a: read-only tools";; *) ok "agent $a: read-only tools";; esac
 done
 # builder and tester are not given scenario access by instruction
@@ -234,5 +235,21 @@ echo "$SH2" | sed -n '1,/Ship (stage/p' | grep -q "{DF} fixed <id>" && ok "SKILL
 sed -n '/^## Resume/,$p' "$SK" | grep -q "At .ship." && ok "SKILL.md: resume finishes an interrupted ship without asking again" || bad "SKILL.md: resume finishes an interrupted ship without asking again"
 grep -q "No push, merge, deploy or external write in v1" "$ROOT/docs/design.md" && bad "design.md: safety section matches ship" || ok "design.md: safety section matches ship"
 sed -n '/^## Start a run/,/^1\. /p' "$SK" | grep -q "Sweep" && ok "SKILL.md: sweep runs at the start of a new run" || bad "SKILL.md: sweep runs at the start of a new run"
+
+# v2 slice 5: retro and lessons
+RT=$(sed -n '/\*\*Retro (stage/,/\*\*Ship (stage/p' "$SK")
+[ -n "$RT" ] && ok "SKILL.md: has a retro stage before ship" || bad "SKILL.md: has a retro stage before ship"
+echo "$RT" | grep -q "{DF} lessons-set <id>" && sed -n '/{DF} finish <id> <session-id>. (sets/,/^## Resume/p' "$SK" | grep -q "{DF} metrics <id>" && sed -n '/^### Pausing/,/^## QA/p' "$SK" | grep -q "{DF} metrics <id>" && ok "SKILL.md: retro installs lessons and records metrics" || bad "SKILL.md: retro installs lessons and records metrics"
+echo "$RT" | grep -q "never applied" && ok "SKILL.md: plugin proposals are never applied" || bad "SKILL.md: plugin proposals are never applied"
+grep -q "lessons.md" "$SK" && grep -q "refiner" "$SK" && sed -n '/^### refine/,/^### plan/p' "$SK" | grep -q "lessons" && ok "SKILL.md: lessons reach the refiner" || bad "SKILL.md: lessons reach the refiner"
+grep -q "lessons" "$ROOT/agents/planner.md" && grep -q "lessons" "$ROOT/agents/builder.md" && ok "planner and builder read lessons" || bad "planner and builder read lessons"
+grep -q "Facts only" "$ROOT/agents/retro.md" && grep -q "30 lines" "$ROOT/agents/retro.md" && grep -q "scenarios" "$ROOT/agents/retro.md" && ok "retro: facts only, bounded, never leaks scenarios into lessons" || bad "retro: facts only, bounded, never leaks scenarios into lessons"
+
+# slice 5 branch review
+echo "$RT" | grep -q "unless the run is pausing" && ok "SKILL.md: a paused run's retro leaves its stage alone" || bad "SKILL.md: a paused run's retro leaves its stage alone"
+echo "$RT" | grep -q "{DF} state-hash" && ok "SKILL.md: the retro's writes are checked" || bad "SKILL.md: the retro's writes are checked"
+grep -q "qa-r" "$ROOT/agents/retro.md" && ok "retro: never reads QA outputs" || bad "retro: never reads QA outputs"
+sed -n '/^## Resume/,$p' "$SK" | grep -q "At .retro." && ok "SKILL.md: resume reruns an interrupted retro" || bad "SKILL.md: resume reruns an interrupted retro"
+sed -n '/\*\*Ship (stage/,/^## Resume/p' "$SK" | grep -q "skip to step 3" && bad "SKILL.md: ship step points at finish" || ok "SKILL.md: ship step points at finish"
 
 finish
