@@ -39,11 +39,15 @@ evaluate it and will hold the command for approval, which stalls an unattended r
 3. Base branch. If the directory is a git repo with at least one commit, state the default in
    one line and ask:
    "Branch from `<current branch>` at `<short sha>`? (ok, or give a base ref, and optionally a branch name)".
-   "ok" or an empty answer keeps the defaults. Skip the question for an empty directory.
+   "ok", "yes" or an empty answer keeps the defaults. On a detached `HEAD`, say "detached HEAD"
+   in place of the branch name. Skip the question when there is nothing to branch from: an
+   empty directory, a directory that is not a git repo, or a repo with no commits. Only a
+   base written as `<remote>/<branch>` is fetched; any other spelling uses the local copy.
 4. Run `DF_ALLOW_INIT=1 {DF} start <scrubbed-file>` only if the directory is empty and the
    request looks like a new application; otherwise run it without the variable. Append
    `--base <ref>` and `--branch <name>` only when the user gave them. If it refuses, relay the
-   reason in one line and stop.
+   reason in one line and stop. If it prints `could not fetch`, tell the user the base may be
+   out of date, and repeat that on the sign-off screen's Base line.
 5. Pick a session id once for this run (for example `s` followed by the current epoch time) and
    pass it explicitly to every lock command: `{DF} lock <id> acquire <session-id>`. Refresh with
    the same id after every verdict. Do not rely on the default, it changes per command.
@@ -186,8 +190,10 @@ Details you must follow:
   `[df r261125-101500-123] integrate: round 2, 1 blocking (security)`. The milestones are: a
   stage is entered; a chunk reaches PASS, is retried, or is BLOCKED; each Integrate review
   round; the QA result; and the end of the run, as `[df <run-id>] done: <green or not green>`.
-  Every line has both parts and nothing after the event. Print nothing else between sign-off and the final message, except a
-  stop that needs the user (a permission denial, an exhausted budget).
+  That closing line is printed once, after `{DF} finish`, as the last line before the final
+  message; entering the `done` stage is not announced separately. Every line has both parts
+  and nothing after the event. Print nothing else between sign-off and the final message,
+  except a stop that needs the user (a permission denial, an exhausted budget).
 
 ## Integrate
 
@@ -214,9 +220,10 @@ Details you must follow:
    `NOT FIXED: <why>`, above both sections, and your first sentence to the user says the
    reported problem is still present and what a human must decide.
 5. `{DF} finish <id> <session-id>` (sets stage to done and status to done, or to `unresolved` when a bugfix branch changes no source, and releases the lock).
-   Your final message to the user is the two sections, the one plain sentence stating whether
-   the branch is green, and one line with the branch name and the worktree path. Never push,
-   merge or open a PR.
+   If it prints `NOT FIXED`, put the `NOT FIXED: <why>` line at the top of `report.md` now.
+   Your final message to the user is, in this order: the NOT FIXED sentence when it applies,
+   the two sections, the one plain sentence stating whether the branch is green, and one line
+   with the branch name and the worktree path. Never push, merge or open a PR.
 
 ## Resume
 
@@ -229,7 +236,8 @@ Details you must follow:
    `log.md`. If not, offer to recreate from the last logged commit, or abort.
 5. If the base moved since `root_base_sha`, record the drift in `log.md` and say so in the
    report. Do not rebase. The base is the commit `base_ref` (from `run.conf`) now points to; when
-   `base_ref` is absent or `detached`, it is `HEAD` of the main clone.
+   `base_ref` is absent or `detached`, it is `HEAD` of the main clone. When `base_ref` is not a
+   branch name (a sha, `HEAD~1`), there is nothing to compare: skip the drift check.
 6. Before sign-off: re-ask only unanswered questions. In the loop: reset a dirty tree to the
    chunk's `base_sha`, count the interrupted attempt in `interrupts` (cap 3), and restart at the
    first role without a valid recorded verdict.

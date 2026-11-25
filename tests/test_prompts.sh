@@ -148,12 +148,15 @@ done
 grep -qF '[df <run-id>] <stage>: <event>' "$SK" && ok "SKILL.md: milestone line format" || bad "SKILL.md: milestone line format"
 grep -q "print one line to the user" "$SK" && bad "SKILL.md: no user line per verdict" || ok "SKILL.md: no user line per verdict"
 grep -q "not per role spawn" "$SK" && ok "SKILL.md: milestones, not role spawns" || bad "SKILL.md: milestones, not role spawns"
-a=$(grep -n "## Functional changes" "$SK" | head -1 | cut -d: -f1); b=$(grep -n "## Technical changes" "$SK" | head -1 | cut -d: -f1)
-[ -n "$a" ] && [ -n "$b" ] && [ "$a" -le "$b" ] && ok "SKILL.md: report leads with functional then technical changes" || bad "SKILL.md: report leads with functional then technical changes"
+a=$(sed -n '/^## Integrate/,$p' "$SK" | grep -n "## Functional changes" | head -1 | cut -d: -f1); b=$(sed -n '/^## Integrate/,$p' "$SK" | grep -n "## Technical changes" | head -1 | cut -d: -f1)
+[ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ] && ok "SKILL.md: report leads with functional then technical changes" || bad "SKILL.md: report leads with functional then technical changes"
 grep -q "not confirmed" "$SK" && ok "SKILL.md: an unconfirmed criterion is reported as such" || bad "SKILL.md: an unconfirmed criterion is reported as such"
 
 grep -q "base_ref. is absent or .detached." "$SK" && ok "SKILL.md: resume drift is measured against the run's base" || bad "SKILL.md: resume drift is measured against the run's base"
 
 grep -qF '[df <run-id>] done: ' "$SK" && grep -q "nothing after the event" "$SK" && ok "SKILL.md: the closing milestone line keeps the format (slice 1 live run)" || bad "SKILL.md: the closing milestone line keeps the format (slice 1 live run)"
+grep -q "could not fetch" "$SK" && ok "SKILL.md: a stale base is surfaced to the user" || bad "SKILL.md: a stale base is surfaced to the user"
+grep -q "last line before the final" "$SK" && ok "SKILL.md: the closing milestone line has one place" || bad "SKILL.md: the closing milestone line has one place"
+grep -q "NOT FIXED sentence when it applies" "$SK" && ok "SKILL.md: NOT FIXED opens the final message" || bad "SKILL.md: NOT FIXED opens the final message"
 
 finish

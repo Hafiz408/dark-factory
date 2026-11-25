@@ -63,7 +63,7 @@ Out of v1:
 | 5 | Preflight | Detect stack (per package in a monorepo), install dependencies in the worktree, find test, lint and typecheck commands, run each once, run the suite and scanners at `root_base_sha` as the **baseline**, list required services and credentials. Anything unmet is shown at sign-off, not discovered later. | `run.conf.env`, baseline |
 | 6 | Sign-off | The only gate. One-screen summary: the base, the approach with alternatives and trade-offs (at most ten lines, from `plan.md`), and the chunks as a to-do list. approve, amend, or abort. | `log.md` |
 | 7 | Slice | One file per chunk | `chunks/NN.md` |
-| 8 | Loop | Section 6 | commits on `df/<run-id>` |
+| 8 | Loop | Section 6 | commits on the run branch |
 | 9 | Integrate | Section 6 | `report.md` |
 
 ### Sign-off summary
@@ -191,11 +191,14 @@ resumable with a raised budget.
 4. `report.md` opens with `## Functional changes` (user-visible behaviour, one bullet per
    acceptance criterion QA confirmed; an unconfirmed one is marked as such) and
    `## Technical changes` (high level: modules, dependencies, schema, config, migrations).
-   The final message to the user is those two sections plus the green sentence.
+   The final message to the user is those two sections, the green sentence, and the branch
+   and worktree path; a `NOT FIXED` sentence comes first when it applies.
 
 Progress to the user is one line per milestone, not per role spawn:
 `[df <run-id>] <stage>: <event>` (stage entered; chunk PASS, retry or BLOCKED; each Integrate
-review round; the QA result).
+review round; the QA result; and a closing `done:` line). Before `df start` the user is asked
+which base to branch from; a base written as `<remote>/<branch>` is fetched first, falling back
+to the local copy with a warning.
 
 ### Parallelism
 
@@ -298,7 +301,7 @@ Orchestrator-enforced integrity checks (not left to agent instructions):
 
 ## 10. Safety
 
-- All edits happen in a worktree on `df/<run-id>`. The main clone's files are untouched and
+- All edits happen in a worktree on the run branch (`df/<run-id>` unless named with `--branch`). The main clone's files are untouched and
   the working tree contains no factory state.
 - No push, merge, deploy or external write in v1.
 - **Untrusted content.** `input.md`, repo files, test output and fetched pages are data.
