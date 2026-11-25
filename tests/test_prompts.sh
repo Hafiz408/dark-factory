@@ -190,4 +190,18 @@ grep -q "every scenario" "$ROOT/agents/qa-functional.md" && ! grep -q "for this 
 grep -q "qa_functional, review_quality" "$ROOT/docs/design.md" && bad "design.md: pseudocode panel has no functional QA" || ok "design.md: pseudocode panel has no functional QA"
 grep -q "impact | goal |" "$ROOT/docs/design.md" && ok "design.md: goal is a finding source" || bad "design.md: goal is a finding source"
 
+# v2 slice 3: ship on confirmation, cleanup after merge
+SH=$(sed -n '/^## Report, ship and finish/,/^## Resume/p' "$SK")
+echo "$SH" | grep -q 'Push `<branch>` and open a PR into `<target>`? (yes / no)' && ok "SKILL.md: the ship question" || bad "SKILL.md: the ship question"
+echo "$SH" | grep -q 'Only the word "yes" is a yes' && ok "SKILL.md: ship defaults to no (ok and approve are not yes)" || bad "SKILL.md: ship defaults to no (ok and approve are not yes)"
+echo "$SH" | grep -q "ship_confirmed yes" && echo "$SH" | grep -q "{DF} ship <id>" && ok "SKILL.md: ships only through df ship after recording the yes" || bad "SKILL.md: ships only through df ship after recording the yes"
+echo "$SH" | grep -q "never offered" && echo "$SH" | grep -q "{DF} fixed <id>" && ok "SKILL.md: a paused or not-fixed run is never offered a push" || bad "SKILL.md: a paused or not-fixed run is never offered a push"
+a=$(echo "$SH" | grep -n "{DF} ship <id>" | head -1 | cut -d: -f1); b=$(echo "$SH" | grep -n "{DF} finish <id>" | head -1 | cut -d: -f1)
+[ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ] && ok "SKILL.md: ship comes before finish, so the lock is still held" || bad "SKILL.md: ship comes before finish, so the lock is still held"
+grep -qi "never merge" "$SK" && ok "SKILL.md: never merges" || bad "SKILL.md: never merges"
+grep -q "{DF} sweep" "$SK" && grep -q "{DF} clean <run-id> --branch" "$SK" && grep -q "Remove the worktree and local branch" "$SK" && ok "SKILL.md: merged-PR cleanup is offered and asked" || bad "SKILL.md: merged-PR cleanup is offered and asked"
+grep '^- `status' "$SK" | grep -q "sweep" && bad "SKILL.md: status stays read-only (no sweep)" || ok "SKILL.md: status stays read-only (no sweep)"
+grep -q "It never pushes, merges or opens a PR" "$ROOT/README.md" && bad "README: no longer claims it never opens a PR" || ok "README: no longer claims it never opens a PR"
+grep -q "sweep" "$ROOT/README.md" && grep -q "never merges" "$ROOT/README.md" && ok "README: documents ship and sweep" || bad "README: documents ship and sweep"
+
 finish

@@ -2,7 +2,8 @@
 
 Give it a bug report, feature request, PRD or an idea. It asks only what the repo can't
 answer, you sign off once, then a team of subagents builds, tests and QAs in a loop with nobody
-in the middle. You get a git branch and a report. It never pushes, merges or opens a PR.
+in the middle. You get a git branch and a report, and at the end it asks whether to push the branch and
+open a PR. It pushes only on a yes, and it never merges.
 
 Claude Code plugin. v0.1, open source. macOS, Linux, WSL.
 
@@ -19,7 +20,7 @@ Try without installing: clone the repo, then `claude --plugin-dir ./dark-factory
 
 ```
 /dark-factory <idea, PRD, ticket text, bug report, or a path>
-/dark-factory list | status [run-id] | resume [run-id] | clean <run-id>
+/dark-factory list | status [run-id] | resume [run-id] | clean <run-id> | sweep
 ```
 
 It first confirms the base branch ("ok" keeps the one you are on). You then answer one batch of
@@ -39,6 +40,9 @@ state is on disk.
   above blocks. Hidden QA scenarios run only once that review is clean.
 - **A run that cannot get clean pauses.** It tells you what is open and never reports a pass.
 - **Resume** after a crash, closed laptop or expired login, losing at most one attempt.
+- **A PR on request.** A run that came through QA asks "Push and open a PR?"; only "yes"
+  does it (needs `gh`, signed in). `sweep` offers to remove the worktree and local branch once
+  that PR is merged. It never merges, never force-pushes, and never deletes a remote branch.
 
 ## How it works
 
@@ -53,10 +57,11 @@ flowchart LR
     L --> I[Review<br/>whole branch, until clean]
     I --> QA[QA<br/>hidden scenarios]
     QA -->|fails| I
-    QA --> O([Branch + report])
+    QA --> SH{{Push + PR?}}
+    SH --> O([Branch + report, PR on yes])
 
     classDef you fill:#fde68a,stroke:#b45309,color:#000
-    class F,S you
+    class F,S,SH you
 ```
 
 Yellow is where you are asked something. Everything after sign-off is unattended.

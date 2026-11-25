@@ -24,14 +24,25 @@ evaluate it and will hold the command for approval, which stalls an unattended r
 
 ## Subcommands
 
-- `list`: run `{DF} list`.
+- `list`: run `{DF} list`, then offer merged-PR cleanup (see Sweep).
+- `sweep`: see Sweep.
 - `status [run-id]`: run `{DF} status <id>` and show it. Read-only.
 - `resume [run-id]`: see Resume.
 - `clean <run-id>`: run `{DF} clean <id>`; report that the branch is kept.
 - anything else: the argument is the input (text, a file path, or a URL or ticket id). Start a run.
 
+## Sweep (cleanup after a merge)
+
+Run `{DF} sweep`. It prints one line per run whose PR has been merged:
+`<run-id> <pr_url> <branch>`. For each line ask:
+"PR <pr_url> merged. Remove the worktree and local branch `<branch>`? (yes / no)".
+Only the word "yes" is a yes. On yes run `{DF} clean <run-id> --branch`; if it refuses, relay
+the reason and leave everything in place. Remote branches are left to the git host.
+Sweep runs on `sweep`, on `list`, and at the start of a new run. Never on `status`.
+
 ## Start a run
 
+0. Offer merged-PR cleanup first (see Sweep); it prints nothing when there is none.
 1. If the input is a path, read it. If it is a URL or ticket id, fetch it with the tools you
    have. If you cannot read it, stop and ask the user to paste the content. Never invent it.
 2. Write the input to a temp file, run `{DF} scrub` on it. If it exits 3, tell the user which
@@ -114,7 +125,8 @@ Show one screen:
 - `Recommend abort: <reason>` if the risk lens found infeasibility or preflight found an unmet
   hard requirement.
 Ask: approve, amend `<what>` (re-run only the affected stages; at most 3 amend cycles), or
-abort. Record the approval in `log.md`. This is the last question before the report.
+abort. Record the approval in `log.md`. This is the last question before the report; the
+only one after it is whether to push and open a PR, and the screen says so.
 
 ### slice
 `mv` each file from `chunks-draft/` to `chunks/`. Run `{DF} validate <id>`.
@@ -164,7 +176,7 @@ Details you must follow:
   track the conservative default is the one that makes the reported input behave correctly:
   if the cause sits in a source file outside the chunk's `scope`, add that file to `scope`
   (log it) and fix it. A test-only outcome is acceptable only when the defect cannot be
-  reproduced at all, and then the report must say so first (see Report and finish).
+  reproduced at all, and then the report must say so first (see Report, ship and finish).
 - **Read-only violation.** If `{DF} snapshot` differs after a read-only role, that is a
   `critical` integrity finding. Reset and continue.
 - **Merging findings.** Feed the concatenated findings through `{DF} gate`. On contradictions,
@@ -190,7 +202,7 @@ Details you must follow:
   `[df r261125-101500-123] loop: chunk 02 PASS (2/4), attempt 1` and
   `[df r261125-101500-123] review: round 2, 1 blocking (security)`. The milestones are: a
   stage is entered; a chunk reaches PASS, is retried, or is BLOCKED; each review round; each
-  QA round's result; a pause; and the end of the run, as `[df <run-id>] done: <green or not green>`.
+  QA round's result; a pause; each ship step; and the end of the run, as `[df <run-id>] done: <green or not green>`.
   That closing line is printed once, after `{DF} finish`, as the last line before the final
   message; entering the `done` stage is not announced separately. Every line has both parts
   and nothing after the event. Print nothing else between sign-off and the final message,
@@ -248,7 +260,7 @@ Functional QA runs only against a branch the review passed. The QA round number 
 
 1. Add 1 to `qa_round`. Spawn `qa-functional` over every scenario against the reviewed branch,
    with a snapshot before and after. Write its output to `{RD}/panel/qa-r<n>.md`.
-2. All pass: go to Report and finish.
+2. All pass: go to Report, ship and finish.
 3. Otherwise, if `qa_round` has reached `max_qa_rounds` (default 2): pause (see Pausing).
 4. Otherwise each failure becomes a fix chunk. It carries symptoms only, never scenario text.
    QA findings name behaviour, not files, so take the fix chunk's `scope` and `touches_tests`
@@ -257,7 +269,7 @@ Functional QA runs only against a branch the review passed. The QA round number 
    `{DF} conf-set {RD}/run.conf stage review` and `{DF} conf-set {RD}/run.conf review_round 0`,
    run the fix chunks through the loop, and go through Review again before QA runs again.
 
-## Report and finish
+## Report, ship and finish
 
 1. Write `report.md`. It starts with two sections:
    - `## Functional changes`: bullets of user-visible behaviour, one per acceptance criterion
@@ -273,11 +285,27 @@ Functional QA runs only against a branch the review passed. The QA round number 
    finish` prints `NOT FIXED` (the branch changes no source), the report's first line is
    `NOT FIXED: <why>`, above both sections, and your first sentence to the user says the
    reported problem is still present and what a human must decide.
-2. For a run that completed QA: `{DF} finish <id> <session-id>` (sets stage to done and status to done, or to `unresolved` when a bugfix branch changes no source, and releases the lock).
+2. **Ship (stage `ship`).** A paused run is never offered a push, and neither is a bugfix
+   run that fixed nothing: run `{DF} fixed <id>`; if it exits non-zero, skip to step 3. Ask
+   only when `git -C {WT} remote get-url origin` and `gh auth status` both succeed; otherwise
+   skip to step 3 and say in the final message that the branch was not pushed and why.
+   The target is `ship_base` from `run.conf` if set, else `base_ref` without a leading
+   `<remote>/`. If `base_ref` is `detached`, ask which branch the PR should go into and record
+   it with `{DF} conf-set {RD}/run.conf ship_base <name>`.
+   Ask: "Push `<branch>` and open a PR into `<target>`? (yes / no)".
+   Only the word "yes" is a yes; "ok", "approve", an empty answer and anything else are no.
+   On yes, in this order: `{DF} conf-set {RD}/run.conf ship_confirmed yes`;
+   `{DF} conf-set {RD}/run.conf stage ship`; write the report's two sections to
+   `{RD}/pr-body.md`; run `{DF} ship <id> "<title>" {RD}/pr-body.md`, where the title is the
+   goal in under 70 characters. It prints the PR URL. Print a milestone line for the push
+   and one for the PR. If it refuses, relay the reason in one line and go on to step 3; the
+   branch stays local. `{DF} ship` is the only way anything is pushed. Never push by hand,
+   never force, never merge.
+3. `{DF} finish <id> <session-id>` (sets stage to done and status to done, or to `unresolved` when a bugfix branch changes no source, and releases the lock).
    If it prints `NOT FIXED`, put the `NOT FIXED: <why>` line at the top of `report.md` now.
    Your final message to the user is, in this order: the NOT FIXED sentence when it applies,
-   the two sections, the one plain sentence stating whether the branch is green, and one line
-   with the branch name and the worktree path. Never push, merge or open a PR.
+   the two sections, the one plain sentence stating whether the branch is green, the PR URL
+   when one was opened, and one line with the branch name and the worktree path.
 
 ## Resume
 
