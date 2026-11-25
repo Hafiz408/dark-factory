@@ -317,4 +317,16 @@ K2=$(shipped); kw2=$(df conf-get "$SC/$K2/run.conf" worktree); echo x > "$kw2/d.
 e=$(df clean "$K2" --branch 2>&1)
 assert_eq "df: worktree has uncommitted changes" "$e" "the --branch refusal message is clean"
 
+# third review: ordinary code is not a secret; real keys still are
+Q=$(newrun); QC="$SC/$Q/run.conf"; df conf-set "$QC" base_ref main; qw=$(df conf-get "$QC" worktree)
+printf 'cls = "risk-assessment-template-v2-final"\nDATABASE_URL = "postgres://postgres:postgres@localhost/test"\nURL2 = "postgres://app:$PGPASSWORD@db.example.com/x"\n' > "$qw/app.py"
+git -C "$qw" add app.py; git -C "$qw" commit -qm app
+assert_ok "kebab-case names and local fixture URLs ship" df ship "$Q" "Risk assessment" "$T/body.md"
+Q2=$(newrun); Q2C="$SC/$Q2/run.conf"; df conf-set "$Q2C" base_ref main; q2w=$(df conf-get "$Q2C" worktree)
+printf 'URL = "postgres://admin:hunter2pass@prod.example.com/db"\n' > "$q2w/cfg.py"; git -C "$q2w" add cfg.py; git -C "$q2w" commit -qm cfg
+refuse "a real credential URL in the commits" "$Q2" t "$T/body.md"
+Q3=$(newrun); Q3C="$SC/$Q3/run.conf"; df conf-set "$Q3C" base_ref main; q3w=$(df conf-get "$Q3C" worktree)
+echo 'OPENAI = "sk-abcdefghijklmnopqrstuvwx"' > "$q3w/k.py"; git -C "$q3w" add k.py; git -C "$q3w" commit -qm k
+refuse "an sk- key in the commits" "$Q3" t "$T/body.md"
+
 finish

@@ -292,9 +292,9 @@ your head.
 
 The run does not enter QA, and is never finished, while something is open. To pause:
 write the report (below) with `PAUSED: <what is open>` as its first line; run the retro
-(Report, ship and finish, step 2); run
-`{DF} conf-set {RD}/run.conf waiting_on "<what is open>"` (one line) and
-`{DF} conf-set {RD}/run.conf status paused`; run `{DF} metrics <id>`; leave `stage` where it is; run
+(Report, ship and finish, step 2); run `{DF} pause <id> "<what is open>"` (one line; it sets
+`waiting_on`, stops the run's clock and sets status `paused`); run `{DF} metrics <id>`; leave
+`stage` where it is; run
 `{DF} lock <id> release <session-id>`; print the `[df <run-id>] <stage>: paused, <what is open>`
 line; and tell the user what is open and how to continue:
 - a cap was reached: raise it with `{DF} conf-set {RD}/run.conf max_review_rounds <n>` (or
@@ -363,14 +363,17 @@ Proves nothing else changed. Run `{DF} conf-set {RD}/run.conf stage e2e`, then
    reported problem is still present and what a human must decide.
 2. **Retro (stage `retro`).** Run `{DF} conf-set {RD}/run.conf stage retro`
    unless the run is pausing: a paused run keeps the stage it stopped at, so it can never be finished from
-   here. Run `{DF} state-hash` and `{DF} snapshot {WT}` and keep both in `log.md`. Spawn
+   here. Run `{DF} repo-lock <id> acquire` (other runs in this repo then wait to write the shared
+   lessons, proposals and metrics), then `{DF} state-hash` and `{DF} snapshot {WT}`, and keep
+   both in `log.md`. Spawn
    `retro` with the run directory, the current `lessons.md` beside `{PROFILE}` (if any), and
    the output paths `{RD}/retro.md`, `{RD}/lessons-new.md`, `{RD}/proposals-new.md`. Run both
    commands again: if either changed, the retro wrote where it must not; say so, log it as a
    `critical` integrity finding, and skip `lessons-set`. Otherwise run `{DF} lessons-set <id>`
    (it installs the new lessons only when they are at most 30 lines of at most 200
    characters, hold no secret and no holdout canary; otherwise it keeps the old ones; relay a
-   refusal in one line). Repo lessons are applied automatically to later runs. Plugin
+   refusal in one line). Then run `{DF} repo-lock <id> release`, whatever happened above.
+   Repo lessons are applied automatically to later runs. Plugin
    proposals are never applied: they are collected in `proposals.md` beside `{PROFILE}` and
    listed in the final message for the user to decide on. A paused run also gets a retro (it
    is where the most is learned), then stops without the ship step.
@@ -415,7 +418,8 @@ Proves nothing else changed. Run `{DF} conf-set {RD}/run.conf stage e2e`, then
    `base_ref` is absent or `detached`, it is `HEAD` of the main clone. When `base_ref` is not a
    branch name (a sha, `HEAD~1`), there is nothing to compare: skip the drift check.
 6. A run with status `paused` (do this only now, after the lock is yours): show its
-   `waiting_on`; run `{DF} conf-set {RD}/run.conf status active`; set every BLOCKED and SKIPPED
+   `waiting_on`; run `{DF} unpause <id>` (it sets status `active` and credits the paused time to
+   the time budget, so idle time never counts); set every BLOCKED and SKIPPED
    chunk back to `status pending` and `attempts 0` with `{DF} fm-set`, log it, and run those
    chunks through the loop before anything else. A run paused at a cap continues from the
    step that paused it (Review step 3, QA step 3 or E2E step 6), using that round's findings on disk: if
@@ -423,9 +427,9 @@ Proves nothing else changed. Run `{DF} conf-set {RD}/run.conf stage e2e`, then
    raised, carry on to the next step.
 7. At `review` or `qa`, for a run that was interrupted rather than paused: first finish any
    chunk whose status is `running` or `pending` by the loop rules below. Then redo the
-   current round from its start, keeping its number: subtract 1 from the counter
-   (`review_round` or `qa_round`) so that step 1 of that stage brings it back, and ignore that
-   round's partial outputs.
+   current round from its start, keeping its number: when the counter (`review_round` or
+   `qa_round`) is above 0, subtract 1 so that step 1 of that stage brings it back; when it is
+   0 the round never started, so leave it. Ignore that round's partial outputs.
 8. At `e2e`: if `e2e_needs_app` is yes, run `stop_cmd` first (an app may still be running from
    the interrupted pass), then redo the E2E stage from step 1. A run paused at E2E continues
    from E2E step 6, like the other caps.

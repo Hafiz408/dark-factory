@@ -75,6 +75,12 @@ prof "ready_url: http://example.com/"; "$DF" conf-set "$rd/run.conf" status done
 assert_ok "a bad shared profile does not break a finished run" v
 "$DF" conf-set "$rd/run.conf" status active; rm -f "$P"
 
+# third review: prose that names the variable anywhere on the line is fine
+"$DF" conf-set "$rd/run.conf" profile_sha ""
+printf -- '---\ne2e_cmd: npm run e2e\n---\n## Signing in for tests\nPassword: read from the TEST_PASSWORD env var\ntoken: set GH_TOKEN first\n' > "$P"
+assert_ok "prose naming the credential variable validates" v
+rm -f "$P"
+
 # e2e stage
 T=$(mktemp -d); printf 'status=active\nstage=qa\n' > "$T/c"
 assert_ok "conf-set accepts stage e2e" "$DF" conf-set "$T/c" stage e2e

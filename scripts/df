@@ -19,7 +19,7 @@ conf_set() {
   case "$2=$3" in
     parallel=on|parallel=off) ;;
     parallel=*) die "conf-set: parallel must be on or off";;
-    max_review_rounds=*|max_qa_rounds=*|review_round=*|qa_round=*|started=*|budget_seconds=*|max_attempts=*)
+    max_review_rounds=*|max_qa_rounds=*|review_round=*|qa_round=*|started=*|budget_seconds=*|max_attempts=*|paused_at=*)
       case "$3" in ''|*[!0-9]*) die "conf-set: $2 must be an integer";; esac ;;
     status=active|status=waiting_permission|status=paused|status=done|status=unresolved|status=aborted) ;;
     status=*) die "conf-set: invalid status '$3'";;
@@ -42,13 +42,47 @@ fm_set() {
     { print }' "$1" | atomic "$1"
 }
 
+# strict_secret: stdin has a high-confidence secret. A credential URL whose password is an
+# environment variable, or whose host is this machine (a test fixture), does not count.
+strict_secret() { grep -Eo "$STRICT_SECRET_RE" | grep -Evq '://[^/@ :]+:\$|@(localhost|127\.0\.0\.1)([:/]|$)'; }
+
+# Per-repo lock for the files every run shares (lessons, proposals, metrics). Re-entrant for the
+# run that holds it; a lock older than an hour is stale. DF_REPO_LOCK_WAIT seconds (default 900).
+repo_lock() {
+  local l n=0 w=${DF_REPO_LOCK_WAIT:-900}; l="$(state_root)/.lock"; mkdir -p "$(state_root)"
+  [ "$(cat "$l/owner" 2>/dev/null)" != "$1" ] || return 0
+  until mkdir "$l" 2>/dev/null; do
+    if [ -n "$(find "$l" -maxdepth 0 -mmin +60 2>/dev/null)" ]; then rm -rf "$l"; continue; fi
+    n=$((n + 1)); [ $n -lt "$w" ] || die "repo lock held by run $(cat "$l/owner" 2>/dev/null)"
+    sleep 1
+  done
+  echo "$1" > "$l/owner"; REPO_LOCK_MINE=1
+}
+repo_unlock() { local l; l="$(state_root)/.lock"; [ "$(cat "$l/owner" 2>/dev/null)" != "$1" ] || rm -rf "$l"; }
+cmd_repo_lock() { # df repo-lock <run-id> acquire|release
+  case "${2:-}" in acquire) repo_lock "$1";; release) repo_unlock "$1";; *) die "usage: df repo-lock <run-id> acquire|release";; esac
+}
+
+cmd_pause() { # df pause <run-id> <what is open>: stop the run's clock and mark it paused
+  local c; c="$(run_dir "$1")/run.conf"; [ -f "$c" ] || die "no such run: $1"
+  conf_set "$c" waiting_on "${2:?df pause <run-id> <what is open>}"
+  conf_set "$c" paused_at "$(date +%s)"; conf_set "$c" status paused
+}
+cmd_unpause() { # df unpause <run-id>: resume the clock, crediting the time spent paused
+  local c p s; c="$(run_dir "$1")/run.conf"; [ -f "$c" ] || die "no such run: $1"
+  [ "$(conf_get "$c" status)" = paused ] || die "unpause: run is not paused"
+  p=$(conf_get "$c" paused_at); s=$(conf_get "$c" started)
+  case "$p$s" in *[!0-9]*|'') ;; *) [ ${#p} -gt 0 ] && [ ${#s} -gt 0 ] && conf_set "$c" started $((s + $(date +%s) - p));; esac
+  conf_set "$c" status active
+}
+
 finding() { printf -- '- severity: %s\n  source: %s\n  where: %s\n  what: %s\n' "$1" "$2" "$3" "$4"; }
 # Interpreter and tool artefacts are not changes made by a role.
 ARTEFACT_RE='(^|/)(__pycache__|\.pytest_cache|\.mypy_cache|node_modules)/|\.pyc$'
 TEST_RE='(^|/)(tests?|spec|__tests__)/|(_test|\.test|\.spec)\.[A-Za-z]+$|(^|/)test_[^/]*$'
 # High-confidence secret formats only: used on what leaves the machine (pushed commits, PR text), where a
 # keyword match such as 'password = request.form[...]' would block ordinary code.
-STRICT_SECRET_RE='AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|://[^/@ :]+:[^/@ ]+@'
+STRICT_SECRET_RE='AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|(^|[^A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|://[^/@ :]+:[^/@ ]+@[^/:" ]*'
 SECRET_RE='AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|([Pp]assword|[Pp]asswd|PASSWORD|[Ss]ecret|SECRET|[Tt]oken|TOKEN|[Aa]pi[_-]?[Kk]ey|API[_-]?KEY)[ ]*[=:][ ]*[^ ]+|[Ss]ecret[_A-Za-z]*[ ]*[=:][ ]*[^ ]+|[Bb]earer [A-Za-z0-9._~+/-]{10,}|://[^/@ :]+:[^/@ ]+@'
 
 cmd_start() { # df start <input-file> [--base <ref>] [--branch <name>]   (DF_ALLOW_INIT=1 permits git init, build track only)
@@ -158,8 +192,8 @@ profile_check() { # profile_check <profile.md>
   fi
   case "$(fm_get "$p" e2e_needs_app)" in ""|yes|no) ;; *) die "$p: e2e_needs_app must be yes or no";; esac
   # A value that names an environment variable ($NAME, or `$NAME` in prose) or says none is not a secret.
-  if grep -Eo "$SECRET_RE" "$p" | grep -Evq '[=:][ ]*`?\$[A-Za-z_{]|[=:][ ]*([Nn]one|N/A|n/a|-)[.,;]?$' ||
-     grep -Eo "$STRICT_SECRET_RE" "$p" | grep -Evq '://[^/@ :]+:\$'; then
+  if grep -E "$SECRET_RE" "$p" | grep -Ev '\$[A-Za-z_{]|[A-Z][A-Z0-9_]*(PASSWORD|PASSWD|TOKEN|SECRET|KEY)([^=A-Z0-9_]|$)|[=:][ ]*([Nn]one|N/A|n/a|-)([ .,;]|$)' | grep -q . ||
+     strict_secret < "$p"; then
     die "$p: looks like it holds a secret; name credentials by environment variable instead"
   fi
 }
@@ -321,8 +355,8 @@ cmd_finish() { # df finish <run-id> [session]: end state is written together, th
   rd=$(run_dir "$1"); c="$rd/run.conf"
   [ -f "$c" ] || die "no such run: $1"
   # Only a run that came through QA clean may finish; anything else pauses and stays resumable.
-  # QA must have passed: e2e or later. integrate is a v0.1 run, whose Integrate step included QA.
-  case "$(conf_get "$c" stage)" in e2e|retro|ship|done|integrate) ;; *) die "finish: run has not completed QA (stage $(conf_get "$c" stage))";; esac
+  # QA must have passed: e2e or later. (A v0.1 run at integrate goes through review, QA and e2e first.)
+  case "$(conf_get "$c" stage)" in e2e|retro|ship|done) ;; *) die "finish: run has not completed QA (stage $(conf_get "$c" stage))";; esac
   case "$(conf_get "$c" status)" in active|done|unresolved) ;; *) die "finish: run is $(conf_get "$c" status): $(conf_get "$c" waiting_on)";; esac
   for f in "$rd"/chunks/*.md; do
     [ -e "$f" ] || continue
@@ -341,6 +375,7 @@ cmd_lessons_set() { # df lessons-set <run-id>: install the retro's lessons (max 
   local rd sr n
   rd=$(run_dir "$1"); sr=$(state_root)
   [ -f "$rd/lessons-new.md" ] || die "lessons-set: $rd/lessons-new.md not found"
+  repo_lock "$1"
   n=$(grep -c '' "$rd/lessons-new.md" || true)
   [ "$n" -le 30 ] || die "lessons-set: $n lines; at most 30 (old lessons kept)"
   ! grep -Eq "$SECRET_RE" "$rd/lessons-new.md" || die "lessons-set: lessons look like they hold a secret (old lessons kept)"
@@ -357,6 +392,7 @@ cmd_lessons_set() { # df lessons-set <run-id>: install the retro's lessons (max 
   if [ -s "$rd/proposals-new.md" ] && ! grep -qxF "## $1" "$sr/proposals.md" 2>/dev/null; then
     { cat "$sr/proposals.md" 2>/dev/null || true; printf '## %s\n' "$1"; cat "$rd/proposals-new.md"; } | atomic "$sr/proposals.md"
   fi
+  [ -z "${REPO_LOCK_MINE:-}" ] || repo_unlock "$1"
 }
 
 cmd_state_hash() { # df state-hash: one hash over the shared per-repo files, to check a role did not write them
@@ -371,6 +407,7 @@ cmd_metrics() { # df metrics <run-id>: one row per run in <state-root>/metrics.t
   rd=$(run_dir "$1"); c="$rd/run.conf"; m="$(state_root)/metrics.tsv"
   [ -f "$c" ] || die "no such run: $1"
   case "$(conf_get "$c" started)" in ''|*[!0-9]*) die "metrics: started in $c is not a number";; esac
+  repo_lock "$1"
   for f in "$rd"/chunks/*.md; do
     [ -e "$f" ] || continue
     chunks=$((chunks + 1)); a=$(fm_get "$f" attempts); case "$a" in ''|*[!0-9]*) a=0;; esac; att=$((att + a))
@@ -380,6 +417,7 @@ cmd_metrics() { # df metrics <run-id>: one row per run in <state-root>/metrics.t
   { printf 'run\ttrack\tchunks\tattempts\treview_rounds\tqa_rounds\tseconds\toutcome\n'
     [ -f "$m" ] && tail -n +2 "$m" | grep -v "^$1	" || true
     printf '%s\n' "$row"; } | atomic "$m"
+  [ -z "${REPO_LOCK_MINE:-}" ] || repo_unlock "$1"
 }
 
 # Parallel builders (off by default). A wave is the pending chunks whose dependencies all
@@ -478,7 +516,7 @@ cmd_ship() { # df ship <run-id> <title> <body-file>: push the run branch and ope
   case $2 in ""|-*|*[[:cntrl:]]*) die "ship: title must be one non-empty line not starting with '-'";; esac
   case $3 in -*) die "ship: body file path must not start with '-'";; esac
   [ -f "$3" ] || die "ship: body file not found: $3"
-  [ "$(printf '%s\n' "$2" | grep -Ec "$STRICT_SECRET_RE" || true)" -eq 0 ] && [ "$(grep -Ec "$STRICT_SECRET_RE" "$3" || true)" -eq 0 ] || die "ship: title or body looks like it contains a secret"
+  ! { printf '%s\n' "$2"; cat "$3"; } | strict_secret || die "ship: title or body looks like it contains a secret"
   target=$(conf_get "$c" ship_base)
   if [ -z "$target" ]; then
     target=$(conf_get "$c" base_ref)
@@ -498,8 +536,8 @@ cmd_ship() { # df ship <run-id> <title> <body-file>: push the run branch and ope
     die "ship: '$branch' is not the branch checked out in the run's worktree"
   [ "$branch" != "$target" ] || die "ship: the run branch is the PR target"
   # Nothing has left the machine until now: refuse to push a secret in the run's commits.
-  if git -C "$wt" log --format=%B "$(conf_get "$c" root_base_sha)..$sha" | grep -Eq "$STRICT_SECRET_RE" ||
-     git -C "$wt" diff "$(conf_get "$c" root_base_sha)" "$sha" | grep '^+' | grep -Eq "$STRICT_SECRET_RE"; then
+  if { git -C "$wt" log --format=%B "$(conf_get "$c" root_base_sha)..$sha"
+       git -C "$wt" diff "$(conf_get "$c" root_base_sha)" "$sha" | grep '^+'; } | strict_secret; then
     die "ship: the run's commits look like they contain a secret; nothing pushed"
   fi
   pout=$(GIT_TERMINAL_PROMPT=0 git -C "$wt" push -u origin "refs/heads/$branch:refs/heads/$branch" 2>&1) || die "ship: push failed: $(printf '%s' "$pout" | tail -1 | sed "s,://[^/@ ]*@,://,g")"
@@ -659,6 +697,9 @@ case "$cmd" in
   sub-join) cmd_sub_join "$@";;
   sub-drop) cmd_sub_drop "$@";;
   metrics) cmd_metrics "$@";;
+  repo-lock) cmd_repo_lock "$@";;
+  pause) cmd_pause "$@";;
+  unpause) cmd_unpause "$@";;
   state-hash) cmd_state_hash;;
   run-dir) run_dir "$@";;
   conf-get) conf_get "$@";;
@@ -666,5 +707,5 @@ case "$cmd" in
   fm-get) fm_get "$@";;
   fm-set) fm_set "$@";;
   write) atomic "$@";;
-  *) die "usage: df {start|validate|profile-pin|verdict|gate|lock|snapshot|check-diff|canary-scan|srchash|commit|scrub|status|list|clean|fixed|finish|ship|sweep|lessons-set|metrics|state-hash|wave|sub-add|sub-join|sub-drop|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
+  *) die "usage: df {start|validate|profile-pin|verdict|gate|lock|snapshot|check-diff|canary-scan|srchash|commit|scrub|status|list|clean|fixed|finish|ship|sweep|lessons-set|metrics|state-hash|repo-lock|pause|unpause|wave|sub-add|sub-join|sub-drop|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
 esac

@@ -61,6 +61,24 @@ printf 'ok lesson\n' > "$rd/lessons-new.md"; printf -- '- quote API_KEY=sk-livex
 assert_fail "proposals holding a secret are refused" ls_
 : > "$rd/proposals-new.md"
 
+# third review: pause stops the clock; unpause credits the paused time
+"$DF" conf-set "$rd/run.conf" status active; now=$(date +%s); "$DF" conf-set "$rd/run.conf" started $((now - 100))
+bash -c "cd '$R' && '$DF' pause '$id' 'review cap reached'"
+assert_eq "paused" "$("$DF" conf-get "$rd/run.conf" status)" "pause sets status paused"
+assert_eq "review cap reached" "$("$DF" conf-get "$rd/run.conf" waiting_on)" "pause records what is open"
+"$DF" conf-set "$rd/run.conf" paused_at $((now - 5000))
+bash -c "cd '$R' && '$DF' unpause '$id'"
+st=$("$DF" conf-get "$rd/run.conf" started)
+[ $(( $(date +%s) - st )) -lt 1000 ] && ok "unpause credits the paused time to the budget" || bad "unpause credits the paused time to the budget"
+assert_eq "active" "$("$DF" conf-get "$rd/run.conf" status)" "unpause sets status active"
+assert_fail "unpause refuses a run that is not paused" bash -c "cd '$R' && '$DF' unpause '$id'"
+# third review: a per-repo lock, re-entrant for its owner, guards the shared files
+assert_ok "repo-lock acquire" bash -c "cd '$R' && '$DF' repo-lock '$id' acquire"
+assert_ok "metrics inside the owner's lock does not deadlock" bash -c "cd '$R' && '$DF' metrics '$id'"
+assert_fail "another run cannot take the lock while it is held" bash -c "cd '$R' && DF_REPO_LOCK_WAIT=1 '$DF' repo-lock other-run acquire"
+assert_ok "repo-lock release" bash -c "cd '$R' && '$DF' repo-lock '$id' release"
+assert_ok "another run can take it after release" bash -c "cd '$R' && DF_REPO_LOCK_WAIT=1 '$DF' repo-lock other-run acquire && '$DF' repo-lock other-run release"
+
 # retro stage
 T=$(mktemp -d); printf 'status=active\nstage=e2e\n' > "$T/c"
 assert_ok "conf-set accepts stage retro" "$DF" conf-set "$T/c" stage retro

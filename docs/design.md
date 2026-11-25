@@ -204,7 +204,8 @@ Functional QA runs only against a branch the review has passed.
    name suffix.)
 3a. **Stopping before QA.** When a cap is reached with blocking findings, or any chunk is
    BLOCKED or SKIPPED, the run writes its report, sets status `paused` with `waiting_on`, keeps
-   its stage and releases the lock. `resume` continues after the user raises the cap, or
+   its stage and releases the lock. `df pause` stops the run's clock and `df unpause` credits the
+   paused time, so idle time never counts against the time budget. `resume` continues after the user raises the cap, or
    reopens BLOCKED and SKIPPED chunks (attempts back to 0) after the user has had the chance
    to edit them. Round numbers live in `run.conf` (`review_round`, `qa_round`), so a cap
    holds across sessions. `df finish` refuses a run that is paused, has not passed QA (stage `e2e` or later), or
@@ -261,7 +262,8 @@ and infra failures, and writes `retro.md`:
   lines), and `df lessons-set` installs it only if it is at most 30 lines of at most 200
   characters and holds no secret and no holdout-scenario canary; otherwise the old file
   stays. The retro never reads `scenarios/` or the QA outputs, and `df state-hash` checks it
-  wrote nothing outside its three output files. A paused run's retro keeps the stage it
+  wrote nothing outside its three output files. A per-repo lock (`df repo-lock`) serialises
+  writes to the shared lessons, proposals and metrics, and the retro holds it across that check. A paused run's retro keeps the stage it
   stopped at, so it cannot be finished from there. The codebase-fit refiner, planner and builder get it
   inside `<data>`.
 - **Plugin proposals:** changes to prompts, lenses or rubrics the evidence supports. Never
