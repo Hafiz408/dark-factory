@@ -371,6 +371,21 @@ cmd_list() {
   done
 }
 
+cmd_sweep() { # df sweep: list runs whose PR is merged; always exit 0, never writes
+  local c u b id
+  git rev-parse --git-dir >/dev/null 2>&1 || return 0
+  command -v gh >/dev/null 2>&1 || return 0
+  for c in "$(state_root)"/*/run.conf; do
+    [ -e "$c" ] || continue
+    u=$(conf_get "$c" pr_url); b=$(conf_get "$c" branch)
+    case $u in https://*) ;; *) continue;; esac
+    git check-ref-format --branch "$b" >/dev/null 2>&1 || continue
+    id=$(basename "$(dirname "$c")")
+    [ "$(GH_PROMPT_DISABLED=1 gh pr view "$u" --json state --jq .state 2>/dev/null)" = MERGED ] && printf '%s %s %s\n' "$id" "$u" "$b"
+  done
+  return 0
+}
+
 cmd_clean() { # df clean <run-id> [--force]: removes worktree and state, keeps the branch
   local rd c wt
   [ -n "${1:-}" ] || die "clean: run id required"
@@ -405,6 +420,7 @@ case "$cmd" in
   list) cmd_list;;
   clean) cmd_clean "$@";;
   ship) cmd_ship "$@";;
+  sweep) cmd_sweep;;
   fixed) cmd_fixed "$@";;
   finish) cmd_finish "$@";;
   run-dir) run_dir "$@";;
@@ -413,5 +429,5 @@ case "$cmd" in
   fm-get) fm_get "$@";;
   fm-set) fm_set "$@";;
   write) atomic "$@";;
-  *) die "usage: df {start|validate|verdict|gate|lock|snapshot|check-diff|canary-scan|srchash|commit|scrub|status|list|clean|fixed|finish|ship|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
+  *) die "usage: df {start|validate|verdict|gate|lock|snapshot|check-diff|canary-scan|srchash|commit|scrub|status|list|clean|fixed|finish|ship|sweep|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
 esac

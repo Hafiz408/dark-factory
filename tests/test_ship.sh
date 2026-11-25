@@ -12,7 +12,7 @@ cat > "$T/bin/gh" <<'GH'
 case "$1 $2" in
   "auth status") exit "${GH_AUTH_RC:-0}";;
   "pr create") [ "${GH_CREATE_RC:-0}" -eq 0 ] || exit 1; echo "noise"; echo "${GH_URL:-https://example.test/pr/1}";;
-  "pr view") [ "${GH_VIEW_RC:-1}" -eq 0 ] || exit 1; echo "${GH_URL:-https://example.test/pr/1}";;
+  "pr view") case "$*" in *"--json state"*) case "$3" in *fail*) exit 1;; *merged*) echo MERGED;; *) echo OPEN;; esac; exit 0;; esac; [ "${GH_VIEW_RC:-1}" -eq 0 ] || exit 1; echo "${GH_URL:-https://example.test/pr/1}";;
 esac
 GH
 chmod +x "$T/bin/gh"
@@ -205,6 +205,23 @@ out=$(df fixed "$Y" 2>&1); rc=$?
 assert_eq "0" "$rc" "fixed: bugfix with source: exit 0"; assert_eq "" "$out" "fixed: bugfix with source: silent"
 out=$(df fixed nope-id 2>&1); rc=$?
 assert_eq "1" "$rc" "fixed: unknown run: exit 1"; assert_eq "df: no such run: nope-id" "$out" "fixed: unknown run: message"
+
+# df sweep: only the merged run is listed; skips bad urls and failed gh; silent without gh or outside git
+rm -rf "$SC"/*; : > "$T/ids"
+W1=$(newrun); W2=$(newrun); W3=$(newrun); W4=$(newrun)
+df conf-set "$SC/$W1/run.conf" pr_url https://example.test/merged/1
+df conf-set "$SC/$W2/run.conf" pr_url https://example.test/open/2
+df conf-set "$SC/$W3/run.conf" pr_url http://example.test/merged/3
+df conf-set "$SC/$W4/run.conf" pr_url https://example.test/fail/merged/4
+before=$(cat "$SC"/*/run.conf)
+out=$(df sweep 2>&1); rc=$?
+assert_eq "0" "$rc" "sweep: exit 0"
+assert_eq "$W1 https://example.test/merged/1 $(df conf-get "$SC/$W1/run.conf" branch)" "$out" "sweep: only the merged run"
+assert_eq "$before" "$(cat "$SC"/*/run.conf)" "sweep: run.conf untouched"
+out=$(PATH=$(nogh_path) df sweep 2>&1); rc=$?
+assert_eq "0" "$rc" "sweep no gh: exit 0"; assert_eq "" "$out" "sweep no gh: silent"
+N=$(mktemp -d); out=$(cd "$N" && "$DF" sweep 2>&1); rc=$?
+assert_eq "0" "$rc" "sweep outside git: exit 0"; assert_eq "" "$out" "sweep outside git: silent"
 
 grep -q "^  fixed)" "$DF" && ok "df dispatches fixed" || bad "df dispatches fixed"
 
