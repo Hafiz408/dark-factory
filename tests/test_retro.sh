@@ -84,6 +84,13 @@ assert_contains "second proposal" "$(cat "$SR/proposals.md")" "a later retro's p
 assert_eq "1" "$(grep -cx "## $id" "$SR/proposals.md")" "the run has one proposals section"
 : > "$rd/proposals-new.md"
 
+# fifth review: [REDACTED] (what the retro is told to write) is not a secret; pause refuses a finished run
+printf 'API key: [REDACTED] must be exported before tests\n' > "$rd/lessons-new.md"; : > "$rd/proposals-new.md"
+assert_ok "a redacted lesson is installed" ls_
+"$DF" conf-set "$rd/run.conf" status done
+assert_fail "pause refuses a finished run" bash -c "cd '$R' && '$DF' pause '$id' x"
+"$DF" conf-set "$rd/run.conf" status active
+
 # retro stage
 T=$(mktemp -d); printf 'status=active\nstage=e2e\n' > "$T/c"
 assert_ok "conf-set accepts stage retro" "$DF" conf-set "$T/c" stage retro

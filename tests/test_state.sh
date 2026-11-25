@@ -138,4 +138,8 @@ assert_fail "conf-set refuses a value with a newline" "$DF" conf-set "$T/st.conf
 assert_eq "0" "$("$DF" conf-get "$rd2/run.conf" review_round)" "start records review_round 0"
 assert_eq "0" "$("$DF" conf-get "$rd2/run.conf" qa_round)" "start records qa_round 0"
 
+# fifth review: the word Bearer is not a secret; a bearer token is
+printf 'Use Bearer authentication for the API\n' > "$T/b1"; assert_ok "the word Bearer is not redacted" "$DF" scrub "$T/b1"
+printf 'Authorization: Bearer abcdefghij0123456789xyz\n' > "$T/b2"; assert_fail "a bearer token is redacted" "$DF" scrub "$T/b2"
+
 finish
