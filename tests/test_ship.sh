@@ -157,4 +157,32 @@ S2=$(newrun); df conf-set "$SC/$S2/run.conf" base_ref main
 : > "$GH_LOG"; df ship "$S2" t "$T/body.md" >/dev/null 2>&1
 assert_contains "$(printf -- '--base\nmain\n')" "$(cat "$GH_LOG")" "base_ref=main gives --base main"
 
+# create fails, view gives a URL: reuse it
+F1=$(newrun); FC1="$SC/$F1/run.conf"; df conf-set "$FC1" base_ref main
+out=$(GH_CREATE_RC=1 GH_VIEW_RC=0 GH_URL=https://example.test/pr/9 df ship "$F1" t "$T/body.md" 2>/dev/null); rc=$?
+assert_eq "0" "$rc" "pr exists: exit 0"
+assert_eq "https://example.test/pr/9" "$out" "pr exists: prints view URL"
+assert_eq "https://example.test/pr/9" "$(df conf-get "$FC1" pr_url)" "pr exists: pr_url recorded"
+
+# create fails and view fails / prints a non-https line: could not open PR, view was tried
+for v in "view fails:GH_VIEW_RC=1" "view non-https:GH_VIEW_RC=0 GH_URL=warning:nope"; do
+  d=${v%%:*}; ev=${v#*:}
+  F=$(newrun); FC="$SC/$F/run.conf"; df conf-set "$FC" base_ref main; : > "$GH_LOG"
+  e=$(cd "$C" && env GH_CREATE_RC=1 $ev "$DF" ship "$F" t "$T/body.md" 2>&1 >/dev/null); rc=$?
+  assert_eq "1" "$rc" "$d: exit 1"
+  assert_contains "df: ship: could not open PR" "$e" "$d: message"
+  assert_contains "$(printf 'pr\nview\n%s\n--json\nurl\n--jq\n.url\n' "$(df conf-get "$FC" branch)")" "$(cat "$GH_LOG")" "$d: gh pr view called"
+  assert_eq "$(git -C "$(df conf-get "$FC" worktree)" rev-parse HEAD)" "$(df conf-get "$FC" pushed_sha)" "$d: pushed_sha kept"
+  assert_eq "" "$(df conf-get "$FC" pr_url)" "$d: pr_url unset"
+done
+
+# failed push: origin rejects via pre-receive hook; nothing recorded
+F3=$(newrun); FC3="$SC/$F3/run.conf"; df conf-set "$FC3" base_ref main
+mkdir -p "$ORIGIN/hooks"; printf '#!/bin/sh\nexit 1\n' > "$ORIGIN/hooks/pre-receive"; chmod +x "$ORIGIN/hooks/pre-receive"
+e=$(cd "$C" && "$DF" ship "$F3" t "$T/body.md" 2>&1 >/dev/null); rc=$?
+rm "$ORIGIN/hooks/pre-receive"
+assert_eq "1" "$rc" "failed push: exit 1"
+case $e in "df: ship:"*) ok "failed push: message";; *) bad "failed push: message '$e'";; esac
+assert_eq "" "$(df conf-get "$FC3" pushed_sha)$(df conf-get "$FC3" pr_url)" "failed push: nothing recorded"
+
 finish

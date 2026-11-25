@@ -282,7 +282,7 @@ cmd_finish() { # df finish <run-id> [session]: end state is written together, th
 }
 
 cmd_ship() { # df ship <run-id> <title> <body-file>: push the run branch and open a PR; prints the PR URL
-  local rd c wt branch target sha url body
+  local rd c wt branch target sha url body pout
   [ $# -eq 3 ] || die "usage: df ship <run-id> <title> <body-file>"
   rd=$(run_dir "$1"); c="$rd/run.conf"
   [ -f "$c" ] || die "no such run: $1"
@@ -318,9 +318,14 @@ cmd_ship() { # df ship <run-id> <title> <body-file>: push the run branch and ope
   GIT_TERMINAL_PROMPT=0 git ls-remote --exit-code --heads origin "refs/heads/$target" >/dev/null 2>&1 || die "ship: base branch '$target' not found on origin"
   body=$(cd "$(dirname "$3")" && pwd)/$(basename "$3")
   sha=$(git -C "$wt" rev-parse --verify "refs/heads/$branch") || die "ship: branch '$branch' not found"
-  GIT_TERMINAL_PROMPT=0 git -C "$wt" push -u origin "refs/heads/$branch:refs/heads/$branch" >&2 || die "ship: push failed"
+  pout=$(GIT_TERMINAL_PROMPT=0 git -C "$wt" push -u origin "refs/heads/$branch:refs/heads/$branch" 2>&1) || die "ship: push failed: $(printf '%s' "$pout" | tail -1 | sed "s,://[^/@ ]*@,://,g")"
   conf_set "$c" pushed_sha "$sha"
-  url=$(cd "$wt" && GH_PROMPT_DISABLED=1 gh pr create --base "$target" --head "$branch" --title "$2" --body-file "$body") || die "ship: could not open PR"
+  if ! url=$(cd "$wt" && GH_PROMPT_DISABLED=1 gh pr create --base "$target" --head "$branch" --title "$2" --body-file "$body"); then
+    # create failed (e.g. PR exists): reuse the PR for this branch if gh can name exactly one https URL
+    url=$(cd "$wt" && GH_PROMPT_DISABLED=1 gh pr view "$branch" --json url --jq .url) || url=
+    case $url in https://?*) ;; *) die "ship: could not open PR";; esac
+    [ "$(printf '%s\n' "$url" | grep -c .)" -eq 1 ] || die "ship: could not open PR"
+  fi
   url=$(printf '%s\n' "$url" | tail -1)
   case $url in https://?*) ;; *) die "ship: gh pr create did not print an https:// URL";; esac
   conf_set "$c" pr_url "$url"
