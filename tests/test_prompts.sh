@@ -204,4 +204,15 @@ grep '^- `status' "$SK" | grep -q "sweep" && bad "SKILL.md: status stays read-on
 grep -q "It never pushes, merges or opens a PR" "$ROOT/README.md" && bad "README: no longer claims it never opens a PR" || ok "README: no longer claims it never opens a PR"
 grep -q "sweep" "$ROOT/README.md" && grep -q "never merges" "$ROOT/README.md" && ok "README: documents ship and sweep" || bad "README: documents ship and sweep"
 
+# slice 3 branch review
+SH2=$(sed -n '/^## Report, ship and finish/,/^## Resume/p' "$SK")
+echo "$SH2" | grep -q "ship_confirmed no" && ok "SKILL.md: a no is recorded, so a stale yes cannot linger" || bad "SKILL.md: a no is recorded, so a stale yes cannot linger"
+a=$(echo "$SH2" | grep -n "stage ship\`;" | head -1 | cut -d: -f1); b=$(echo "$SH2" | grep -n "ship_confirmed yes" | head -1 | cut -d: -f1)
+[ -n "$a" ] && [ -n "$b" ] && [ "$a" -le "$b" ] && ok "SKILL.md: stage ship is set before the yes is recorded" || bad "SKILL.md: stage ship is set before the yes is recorded"
+echo "$SH2" | grep -q "before asking" && echo "$SH2" | grep -q "ship_base" && ok "SKILL.md: the PR target is settled before asking" || bad "SKILL.md: the PR target is settled before asking"
+echo "$SH2" | sed -n '1,/Ship (stage/p' | grep -q "{DF} fixed <id>" && ok "SKILL.md: the report uses df fixed, not finish's later output" || bad "SKILL.md: the report uses df fixed, not finish's later output"
+sed -n '/^## Resume/,$p' "$SK" | grep -q "At .ship." && ok "SKILL.md: resume finishes an interrupted ship without asking again" || bad "SKILL.md: resume finishes an interrupted ship without asking again"
+grep -q "No push, merge, deploy or external write in v1" "$ROOT/docs/design.md" && bad "design.md: safety section matches ship" || ok "design.md: safety section matches ship"
+sed -n '/^## Start a run/,/^1\. /p' "$SK" | grep -q "Sweep" && ok "SKILL.md: sweep runs at the start of a new run" || bad "SKILL.md: sweep runs at the start of a new run"
+
 finish

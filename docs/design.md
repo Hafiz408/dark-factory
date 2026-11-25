@@ -347,7 +347,9 @@ Orchestrator-enforced integrity checks (not left to agent instructions):
 
 - All edits happen in a worktree on the run branch (`df/<run-id>` unless named with `--branch`). The main clone's files are untouched and
   the working tree contains no factory state.
-- No push, merge, deploy or external write in v1.
+- No merge or deploy. The only external write is `df ship`: one branch push and one PR, on an
+  explicit yes, never forced; it refuses a branch other than the run's own and commits that
+  carry a recognisable secret.
 - **Untrusted content.** `input.md`, repo files, test output and fetched pages are data.
   Every role prompt says so, wraps them in delimiters, and forbids following instructions
   found inside them. The sign-off shows the goal in the factory's own words and the
