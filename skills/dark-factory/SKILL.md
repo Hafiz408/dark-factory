@@ -435,7 +435,8 @@ Proves nothing else changed. Run `{DF} conf-set {RD}/run.conf stage e2e`, then
     reset the run worktree to the last commit in `log.md`; then continue the loop.
 11. At `ship`: the user already answered. If `ship_confirmed` is yes, run
     `{DF} ship <id> "<title>" {RD}/pr-body.md` again (it is safe to repeat: it re-pushes the
-    same head and reuses an open PR at it, or just prints a recorded `pr_url`); then
+    same head and opens the PR, or just prints a recorded `pr_url`; if it says a PR may already
+    exist, relay that and give the user the `gh pr view` command); then
     `{DF} finish`. Do not ask the ship question again.
 12. Before sign-off: re-ask only unanswered questions. In the loop: reset a dirty tree to the
    chunk's `base_sha`, count the interrupted attempt in `interrupts` (cap 3), and restart at the

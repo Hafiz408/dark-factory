@@ -494,15 +494,9 @@ cmd_ship() { # df ship <run-id> <title> <body-file>: push the run branch and ope
   fi
   pout=$(GIT_TERMINAL_PROMPT=0 git -C "$wt" push -u origin "refs/heads/$branch:refs/heads/$branch" 2>&1) || die "ship: push failed: $(printf '%s' "$pout" | tail -1 | sed "s,://[^/@ ]*@,://,g")"
   conf_set "$c" pushed_sha "$sha"
-  if ! url=$(cd "$wt" && GH_PROMPT_DISABLED=1 gh pr create --base "$target" --head "$branch" --title "$2" --body-file "$body"); then
-    # create failed (e.g. a PR already exists): reuse it only if it is OPEN and its head is this push
-    pv=$(cd "$wt" && GH_PROMPT_DISABLED=1 gh pr view "$branch" --json url,state,headRefOid --jq '.url + " " + .state + " " + .headRefOid') || pv=
-    [ "$(printf '%s\n' "$pv" | grep -c .)" -eq 1 ] || die "ship: could not open PR"
-    set -- $pv
-    [ "${2:-}" = OPEN ] && [ "${3:-}" = "$sha" ] || die "ship: could not open PR (the existing PR for '$branch' is not open at this commit)"
-    url=$1
-    case $url in https://?*) ;; *) die "ship: could not open PR";; esac
-  fi
+  # ponytail: no "PR already exists" recovery; that needs a crash between create and recording pr_url.
+  url=$(cd "$wt" && GH_PROMPT_DISABLED=1 gh pr create --base "$target" --head "$branch" --title "$2" --body-file "$body") ||
+    die "ship: could not open PR (one may already exist: gh pr view $branch); the branch is pushed"
   url=$(printf '%s\n' "$url" | tail -1)
   case $url in https://?*) ;; *) die "ship: gh pr create did not print an https:// URL";; esac
   conf_set "$c" pr_url "$url"
@@ -558,7 +552,7 @@ physpath() { # physical path of a dir, or of a missing dir via its parent
 }
 
 cmd_clean() { # df clean <run-id> [--force] [--branch]: removes worktree and state; --branch also deletes the local branch
-  local rd c wt id=${1:-} force="" hb="" usage br ps own p line cur subs w lh u
+  local rd c wt id=${1:-} force="" hb="" usage br own p line cur subs w lh u
   usage="usage: df clean <run-id> [--force] [--branch]"
   case $id in ""|-*) die "clean: run id required; $usage" ;; esac
   shift
@@ -575,14 +569,9 @@ cmd_clean() { # df clean <run-id> [--force] [--branch]: removes worktree and sta
   if [ -z "$force" ] && [ "$(cmd_lock "$id" check)" = live ]; then die "run is live; use --force"; fi
   wt=$(conf_get "$c" worktree)
   if [ -n "$hb" ]; then
-    br=$(conf_get "$c" branch); ps=$(conf_get "$c" pushed_sha)
-    printf '%s' "$ps" | grep -Eq '^[0-9a-f]{40}$' || die "clean: --branch needs a recorded pushed_sha"
+    br=$(conf_get "$c" branch)
     git check-ref-format --branch "$br" >/dev/null 2>&1 || die "clean: bad branch name"
-    if [ -d "$wt" ] && [ -n "$(git -C "$wt" status --porcelain)" ]; then die "clean: worktree has uncommitted changes"; fi
-    if git show-ref --verify --quiet "refs/heads/$br" && [ "$(git rev-parse "refs/heads/$br")" != "$ps" ]; then
-      die "clean: branch head differs from pushed_sha"
-    fi
-    # pushed_sha is only a note in run.conf; the remote is the proof that nothing unpushed is lost:
+    # The remote is the proof that nothing unpushed is lost:
     # origin has this exact head, or (the host deleted the branch after merging) the PR merged at it.
     if git show-ref --verify --quiet "refs/heads/$br"; then
       lh=$(git rev-parse "refs/heads/$br")
@@ -602,9 +591,9 @@ cmd_clean() { # df clean <run-id> [--force] [--branch]: removes worktree and sta
       esac
     done < <(git worktree list --porcelain)
   fi
-  # Every refusal comes before anything is deleted.
-  if [ -d "$wt" ] && [ -z "$hb" ] && [ -z "$force" ] && [ -n "$(git -C "$wt" status --porcelain)" ]; then
-    die "worktree has uncommitted changes; use --force"
+  # Every refusal comes before anything is deleted. --force never lets --branch drop uncommitted work.
+  if [ -d "$wt" ] && [ -n "$(git -C "$wt" status --porcelain)" ] && { [ -n "$hb" ] || [ -z "$force" ]; }; then
+    die "worktree has uncommitted changes${hb:-; use --force}"
   fi
   # Sub-worktrees of a parallel wave (<worktree>-c<NN>): never discard uncommitted work unless forced.
   subs=$(git worktree list --porcelain | sed -n 's/^worktree //p' | P="$wt-c" awk 'index($0, ENVIRON["P"]) == 1')
