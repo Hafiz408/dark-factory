@@ -31,7 +31,7 @@ state is on disk.
 ## What you get
 
 - **Routed work.** `bugfix`, `feature` or `build` is picked for you and changes how it plans.
-- **A branch `df/<run-id>`** in a separate git worktree, one commit per passing chunk.
+- **A branch** (`df/<run-id>`, or the name you give) in a separate git worktree, one commit per passing chunk.
 - **`report.md`:** functional changes first, then high-level technical changes, then what was
   left (with severity), assumptions, and one plain line saying whether the branch is green. A bugfix that changed no source says **NOT FIXED**.
 - **Hands-off QA.** Four parallel read-only reviewers, medium-or-above findings block.
