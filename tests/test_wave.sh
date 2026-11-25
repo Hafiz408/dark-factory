@@ -98,4 +98,19 @@ assert_fail "clean removes the chunk sub-branch" git -C "$R2" rev-parse --verify
 assert_ok "clean keeps the user's feat-cleanup branch" git -C "$R2" rev-parse --verify -q "feat-cleanup"
 assert_ok "clean keeps the user's feat-cwork branch" git -C "$R2" rev-parse --verify -q "feat-cwork"
 
+# re-review: a chunk with no write globs overlaps everything; bracket classes are not list brackets
+R3=$(mkrepo); echo x > "$R3/in.txt"; i3=$(cd "$R3" && "$DF" start "$R3/in.txt"); rd3=$(cd "$R3" && "$DF" run-dir "$i3")
+w3() { (cd "$R3" && "$DF" wave "$i3" | tr '\n' ' ' | sed 's/ $//'); }
+printf -- '---\nid: 01\nstatus: pending\nattempts: 0\nscope: []\n---\n' > "$rd3/chunks/01.md"
+printf -- '---\nid: 02\nstatus: pending\nattempts: 0\nscope: [src/app.py]\n---\n' > "$rd3/chunks/02.md"
+assert_eq "01" "$(w3)" "a chunk with no scope never shares a wave"
+printf -- '---\nid: 01\nstatus: pending\nattempts: 0\nscope: [src/[ab]*.py]\n---\n' > "$rd3/chunks/01.md"
+printf -- '---\nid: 02\nstatus: pending\nattempts: 0\nscope: [src/a.py]\n---\n' > "$rd3/chunks/02.md"
+assert_eq "01" "$(w3)" "a bracket class in a glob still overlaps"
+# re-review: clean touches only real chunk sub-worktrees, and --branch never drops their uncommitted work
+s3=$(cd "$R3" && "$DF" sub-add "$i3" 01); [ -n "$s3" ] || { bad "sub-add printed a path"; finish; }
+w3t=$(cd "$R3" && "$DF" conf-get "$rd3/run.conf" worktree); git -C "$R3" worktree add -q "$w3t-copy" -b mycopy
+(cd "$R3" && "$DF" clean "$i3" --force)
+assert_ok "clean keeps a user worktree that only shares the prefix" test -d "$w3t-copy"
+
 finish

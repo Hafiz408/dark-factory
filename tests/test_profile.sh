@@ -63,6 +63,18 @@ assert_ok "a paused run can still be validated (the pin is checked when it runs 
 assert_fail "an active run still refuses a changed profile" v
 "$DF" conf-set "$rd/run.conf" profile_sha none
 
+# re-review: a run pinned as "no profile" refuses a profile that appears later; profile checks bind only
+# active runs; a database URL may name its password by environment variable
+rm -f "$P"; "$DF" conf-set "$rd/run.conf" status active; bash -c "cd '$R' && '$DF' profile-pin '$id'"
+prof "e2e_cmd: npm run e2e"
+assert_fail "a profile that appeared after a no-profile sign-off is refused" v
+"$DF" conf-set "$rd/run.conf" profile_sha ""
+prof 'e2e_cmd: DATABASE_URL=postgres://app:$PGPASSWORD@localhost/test npm run e2e'
+assert_ok "a database URL naming its password by environment variable is fine" v
+prof "ready_url: http://example.com/"; "$DF" conf-set "$rd/run.conf" status done
+assert_ok "a bad shared profile does not break a finished run" v
+"$DF" conf-set "$rd/run.conf" status active; rm -f "$P"
+
 # e2e stage
 T=$(mktemp -d); printf 'status=active\nstage=qa\n' > "$T/c"
 assert_ok "conf-set accepts stage e2e" "$DF" conf-set "$T/c" stage e2e

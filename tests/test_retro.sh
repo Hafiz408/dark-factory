@@ -56,6 +56,11 @@ assert_fail "metrics refuses a non-numeric start time" bash -c "cd '$R' && '$DF'
 assert_fail "a non-numeric start time is never evaluated" test -e "$SR/pwn"
 "$DF" conf-set "$rd/run.conf" started 1
 
+# re-review: proposals get the same secret and line checks as lessons
+printf 'ok lesson\n' > "$rd/lessons-new.md"; printf -- '- quote API_KEY=sk-livexxxxxxxxxxxxxxxxxxxxxx from the log\n' > "$rd/proposals-new.md"
+assert_fail "proposals holding a secret are refused" ls_
+: > "$rd/proposals-new.md"
+
 # retro stage
 T=$(mktemp -d); printf 'status=active\nstage=e2e\n' > "$T/c"
 assert_ok "conf-set accepts stage retro" "$DF" conf-set "$T/c" stage retro

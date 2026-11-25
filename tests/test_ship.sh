@@ -138,9 +138,9 @@ refuse "empty title" "$S" "" "$T/body.md"
 refuse "multi-line title" "$S" "$(printf 'a\nb')" "$T/body.md"
 refuse "dash title" "$S" "-t" "$T/body.md"
 refuse "missing body" "$S" t "$T/nope.md"
-echo "password: hunter2" > "$T/secret.md"
+echo "key AKIAABCDEFGHIJKLMNOP" > "$T/secret.md"
 refuse "secret in body" "$S" t "$T/secret.md"
-refuse "secret in title" "$S" "token=abc123" "$T/body.md"
+refuse "secret in title" "$S" "fix ghp_abcdefghijklmnopqrstuvwxyz0123456789" "$T/body.md"
 df conf-set "$SCF" base_ref detached;  refuse "detached" "$S" t "$T/body.md"
 df conf-set "$SCF" base_ref "";        refuse "base_ref absent" "$S" t "$T/body.md"
 git -C "$C" remote add upstream "$ORIGIN"
@@ -308,5 +308,13 @@ D=$(shipped); DC="$SC/$D/run.conf"; db=$(df conf-get "$DC" branch); dh=$(git -C 
 git -C "$ORIGIN" branch -q -D "$db"; df conf-set "$DC" pr_url https://example.test/pr/merged
 GH_OID=$dh assert_ok "clean --branch accepts a merged PR at that head after the host deleted the branch" df clean "$D" --branch
 assert_fail "its local branch is gone" git -C "$C" rev-parse --verify -q "refs/heads/$db"
+
+# re-review: an ordinary PR body about passwords ships; the dirty --branch message is clean
+P1=$(newrun); df conf-set "$SC/$P1/run.conf" base_ref main
+printf -- '- Password: reset now requires the old password\n- Token: expiry is now refreshed\n' > "$T/body3.md"
+assert_ok "a PR body that talks about passwords and tokens ships" df ship "$P1" "Password reset" "$T/body3.md"
+K2=$(shipped); kw2=$(df conf-get "$SC/$K2/run.conf" worktree); echo x > "$kw2/d.txt"
+e=$(df clean "$K2" --branch 2>&1)
+assert_eq "df: worktree has uncommitted changes" "$e" "the --branch refusal message is clean"
 
 finish
