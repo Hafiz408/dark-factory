@@ -161,24 +161,13 @@ S2=$(newrun); df conf-set "$SC/$S2/run.conf" base_ref main
 : > "$GH_LOG"; df ship "$S2" t "$T/body.md" >/dev/null 2>&1
 assert_contains "$(printf -- '--base\nmain\n')" "$(cat "$GH_LOG")" "base_ref=main gives --base main"
 
-# create fails, view gives a URL: reuse it
-F1=$(newrun); FC1="$SC/$F1/run.conf"; df conf-set "$FC1" base_ref main
-out=$(GH_CREATE_RC=1 GH_VIEW_RC=0 GH_URL=https://example.test/pr/9 df ship "$F1" t "$T/body.md" 2>/dev/null); rc=$?
-assert_eq "0" "$rc" "pr exists: exit 0"
-assert_eq "https://example.test/pr/9" "$out" "pr exists: prints view URL"
-assert_eq "https://example.test/pr/9" "$(df conf-get "$FC1" pr_url)" "pr exists: pr_url recorded"
-
-# create fails and view fails / prints a non-https line: could not open PR, view was tried
-for v in "view fails:GH_VIEW_RC=1" "view non-https:GH_VIEW_RC=0 GH_URL=warning:nope"; do
-  d=${v%%:*}; ev=${v#*:}
-  F=$(newrun); FC="$SC/$F/run.conf"; df conf-set "$FC" base_ref main; : > "$GH_LOG"
-  e=$(cd "$C" && env GH_CREATE_RC=1 $ev "$DF" ship "$F" t "$T/body.md" 2>&1 >/dev/null); rc=$?
-  assert_eq "1" "$rc" "$d: exit 1"
-  assert_contains "df: ship: could not open PR" "$e" "$d: message"
-  assert_contains "$(printf 'pr\nview\n%s\n--json\nurl,state,headRefOid\n' "$(df conf-get "$FC" branch)")" "$(cat "$GH_LOG")" "$d: gh pr view called"
-  assert_eq "$(git -C "$(df conf-get "$FC" worktree)" rev-parse HEAD)" "$(df conf-get "$FC" pushed_sha)" "$d: pushed_sha kept"
-  assert_eq "" "$(df conf-get "$FC" pr_url)" "$d: pr_url unset"
-done
+# create fails: refuse and say a PR may already exist; the push stays recorded
+F=$(newrun); FC="$SC/$F/run.conf"; df conf-set "$FC" base_ref main; : > "$GH_LOG"
+e=$(cd "$C" && env GH_CREATE_RC=1 "$DF" ship "$F" t "$T/body.md" 2>&1 >/dev/null); rc=$?
+assert_eq "1" "$rc" "create fails: exit 1"
+assert_contains "df: ship: could not open PR (one may already exist" "$e" "create fails: message"
+assert_eq "$(git -C "$(df conf-get "$FC" worktree)" rev-parse HEAD)" "$(df conf-get "$FC" pushed_sha)" "create fails: pushed_sha kept"
+assert_eq "" "$(df conf-get "$FC" pr_url)" "create fails: pr_url unset"
 
 # failed push: origin rejects via pre-receive hook; nothing recorded
 F3=$(newrun); FC3="$SC/$F3/run.conf"; df conf-set "$FC3" base_ref main
@@ -246,9 +235,9 @@ for fl in "--branch --force" "--force --branch"; do
   assert_ok "clean $fl: origin branch kept" git -C "$ORIGIN" show-ref --verify --quiet "refs/heads/$kb"
 done
 K=$(shipped); KC="$SC/$K/run.conf"; kw=$(df conf-get "$KC" worktree)
-df conf-set "$KC" pushed_sha ""
-e=$(df clean "$K" --branch 2>&1); rc=$?
-assert_eq "1" "$rc" "clean: pushed_sha missing: exit 1"; assert_contains "pushed_sha" "$e" "clean: pushed_sha missing: message"; intact "pushed_sha missing" "$K"
+kb2=$(df conf-get "$KC" branch); df conf-set "$KC" pushed_sha ""
+assert_ok "clean --branch needs no pushed_sha when origin has the head" df clean "$K" --branch
+assert_fail "and the local branch is gone" git -C "$C" show-ref --verify --quiet "refs/heads/$kb2"
 K=$(shipped); KC="$SC/$K/run.conf"; kw=$(df conf-get "$KC" worktree)
 echo x > "$kw/dirty.txt"
 for fl in "--branch" "--branch --force"; do
@@ -258,7 +247,7 @@ done
 K=$(shipped); KC="$SC/$K/run.conf"; kw=$(df conf-get "$KC" worktree)
 git -C "$kw" commit -q --allow-empty -m more
 e=$(df clean "$K" --branch 2>&1); rc=$?
-assert_eq "1" "$rc" "clean: head differs: exit 1"; assert_contains "pushed_sha" "$e" "clean: head differs: message"; intact "head differs" "$K"
+assert_eq "1" "$rc" "clean: head differs: exit 1"; assert_contains "not on origin" "$e" "clean: head differs: message"; intact "head differs" "$K"
 # checked out elsewhere: another worktree, and the main clone
 K=$(shipped); KC="$SC/$K/run.conf"; kb=$(df conf-get "$KC" branch); kw=$(df conf-get "$KC" worktree)
 git -C "$kw" checkout -q --detach; git -C "$C" worktree add -q "$T/other-wt" "$kb"
@@ -310,12 +299,6 @@ refuse "a secret in the pushed commits" "$H2" t "$T/body.md"
 H3=$(newrun); H3C="$SC/$H3/run.conf"; df conf-set "$H3C" base_ref main; w3=$(df conf-get "$H3C" worktree)
 echo 'password = request.form["password"]' > "$w3/login.py"; git -C "$w3" add login.py; git -C "$w3" commit -qm login
 assert_ok "code that reads a password field ships" df ship "$H3" "Login form" "$T/body.md"
-# M4: the fallback accepts only an OPEN PR whose head is this push
-for v in "closed:GH_STATE=CLOSED" "merged:GH_STATE=MERGED" "other head:GH_OID=0000000000000000000000000000000000000000"; do
-  d=${v%%:*}; ev=${v#*:}; F=$(newrun); FC="$SC/$F/run.conf"; df conf-set "$FC" base_ref main
-  e=$(cd "$C" && env GH_CREATE_RC=1 GH_VIEW_RC=0 $ev "$DF" ship "$F" t "$T/body.md" 2>&1 >/dev/null); rc=$?
-  assert_eq "1" "$rc" "fallback refuses a $d PR"; assert_eq "" "$(df conf-get "$FC" pr_url)" "fallback $d: no pr_url"
-done
 # M3: clean --branch needs the head on origin, or a merged PR at that head
 N=$(newrun); NC="$SC/$N/run.conf"; nb=$(df conf-get "$NC" branch); nw=$(df conf-get "$NC" worktree)
 df conf-set "$NC" pushed_sha "$(git -C "$nw" rev-parse HEAD)"
