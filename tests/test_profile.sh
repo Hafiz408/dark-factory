@@ -48,6 +48,21 @@ assert_eq "$(shasum < "$P" | cut -d' ' -f1)" "$("$DF" conf-get "$rd/run.conf" pr
 rm -f "$P"; bash -c "cd '$R' && '$DF' profile-pin '$id'"
 assert_eq "none" "$("$DF" conf-get "$rd/run.conf" profile_sha)" "profile-pin records none when there is no profile"
 
+# release review: prose that talks about credentials is fine; the pin binds only runs that are still going
+"$DF" conf-set "$rd/run.conf" profile_sha ""
+printf -- '---\ne2e_cmd: npm run e2e\n---\n## Signing in for tests\npassword: `$ADMIN_PASSWORD`\nSecrets: none needed.\n' > "$P"
+assert_ok "prose naming credentials by environment variable validates" v
+printf -- '---\ne2e_cmd: npm run e2e\n---\n## Signing in\nuse ghp_abcdefghijklmnopqrstuvwxyz0123456789\n' > "$P"
+assert_fail "a real token in the prose is still refused" v
+prof "e2e_cmd: npm run e2e"; bash -c "cd '$R' && '$DF' profile-pin '$id'"; echo "changed" >> "$P"
+"$DF" conf-set "$rd/run.conf" status done
+assert_ok "a finished run is not bound by its old pin" v
+"$DF" conf-set "$rd/run.conf" status paused
+assert_ok "a paused run can still be validated (the pin is checked when it runs again)" v
+"$DF" conf-set "$rd/run.conf" status active
+assert_fail "an active run still refuses a changed profile" v
+"$DF" conf-set "$rd/run.conf" profile_sha none
+
 # e2e stage
 T=$(mktemp -d); printf 'status=active\nstage=qa\n' > "$T/c"
 assert_ok "conf-set accepts stage e2e" "$DF" conf-set "$T/c" stage e2e

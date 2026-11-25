@@ -207,7 +207,7 @@ Functional QA runs only against a branch the review has passed.
    its stage and releases the lock. `resume` continues after the user raises the cap, or
    reopens BLOCKED and SKIPPED chunks (attempts back to 0) after the user has had the chance
    to edit them. Round numbers live in `run.conf` (`review_round`, `qa_round`), so a cap
-   holds across sessions. `df finish` refuses a run that is paused, has not reached `qa`, or
+   holds across sessions. `df finish` refuses a run that is paused, has not passed QA (stage `e2e` or later), or
    has a BLOCKED or SKIPPED chunk. `unresolved` keeps its v0.1 meaning.
 
 ### Repo profile and E2E

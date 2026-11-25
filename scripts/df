@@ -131,7 +131,8 @@ cmd_validate() { # df validate <run-id>
   [ ! -f "$(state_root)/profile.md" ] || profile_check "$(state_root)/profile.md"
   # Pinned at sign-off: the profile's commands run unattended later, so they must be the ones shown.
   pin=$(conf_get "$c" profile_sha)
-  if [ -n "$pin" ] && [ "$pin" != none ]; then
+  # The profile is shared by every run in the repo; a pin binds only a run that will still execute it.
+  if [ -n "$pin" ] && [ "$pin" != none ] && [ "$(conf_get "$c" status)" = active ]; then
     [ -f "$(state_root)/profile.md" ] || die "$(state_root)/profile.md was pinned at sign-off and is now missing"
     [ "$(sha < "$(state_root)/profile.md")" = "$pin" ] || die "$(state_root)/profile.md changed since sign-off; restore it, or abort and start again"
   fi
@@ -152,8 +153,9 @@ profile_check() { # profile_check <profile.md> <run.conf>
     die "$p: ready_url must be a plain http(s) URL on localhost or 127.0.0.1 (got $u)"
   fi
   case "$(fm_get "$p" e2e_needs_app)" in ""|yes|no) ;; *) die "$p: e2e_needs_app must be yes or no";; esac
-  # A value that is an environment variable reference ($NAME) is a name, not a secret.
-  if grep -Eo "$SECRET_RE" "$p" | grep -Evq '[=:][ ]*\$[A-Za-z_{]'; then
+  # A value that names an environment variable ($NAME, or `$NAME` in prose) or says none is not a secret.
+  if grep -Eo "$SECRET_RE" "$p" | grep -Evq '[=:][ ]*`?\$[A-Za-z_{]|[=:][ ]*([Nn]one|N/A|n/a|-)[.,;]?$' ||
+     grep -Eq "$STRICT_SECRET_RE" "$p"; then
     die "$p: looks like it holds a secret; name credentials by environment variable instead"
   fi
 }
@@ -315,7 +317,8 @@ cmd_finish() { # df finish <run-id> [session]: end state is written together, th
   rd=$(run_dir "$1"); c="$rd/run.conf"
   [ -f "$c" ] || die "no such run: $1"
   # Only a run that came through QA clean may finish; anything else pauses and stays resumable.
-  case "$(conf_get "$c" stage)" in qa|e2e|retro|integrate|ship|done) ;; *) die "finish: run has not completed QA (stage $(conf_get "$c" stage))";; esac
+  # QA must have passed: e2e or later. integrate is a v0.1 run, whose Integrate step included QA.
+  case "$(conf_get "$c" stage)" in e2e|retro|ship|done|integrate) ;; *) die "finish: run has not completed QA (stage $(conf_get "$c" stage))";; esac
   case "$(conf_get "$c" status)" in active|done|unresolved) ;; *) die "finish: run is $(conf_get "$c" status): $(conf_get "$c" waiting_on)";; esac
   for f in "$rd"/chunks/*.md; do
     [ -e "$f" ] || continue
@@ -430,6 +433,7 @@ cmd_sub_join() { # df sub-join <run-id> <chunk-id>: cherry-pick the chunk's comm
   local wt sb sw ch mb id=""
   sub_paths "$1" "$2"
   [ -z "$(git -C "$wt" status --porcelain)" ] || die "sub-join: run worktree has uncommitted changes"
+  [ ! -d "$sw" ] || [ -z "$(git -C "$sw" status --porcelain)" ] || die "sub-join: chunk $2's sub-worktree has uncommitted changes; commit or drop them first"
   mb=$(git -C "$wt" merge-base HEAD "$sb") || die "sub-join: no sub-branch for chunk $2"
   [ -n "$(git -C "$wt" config user.email)" ] || id="-c user.name=dark-factory -c user.email=df@localhost"
   if [ "$mb" != "$(git -C "$wt" rev-parse "$sb")" ]; then
@@ -598,6 +602,10 @@ cmd_clean() { # df clean <run-id> [--force] [--branch]: removes worktree and sta
       esac
     done < <(git worktree list --porcelain)
   fi
+  # Every refusal comes before anything is deleted.
+  if [ -d "$wt" ] && [ -z "$hb" ] && [ -z "$force" ] && [ -n "$(git -C "$wt" status --porcelain)" ]; then
+    die "worktree has uncommitted changes; use --force"
+  fi
   # Sub-worktrees of a parallel wave (<worktree>-c<NN>): never discard uncommitted work unless forced.
   subs=$(git worktree list --porcelain | sed -n 's/^worktree //p' | P="$wt-c" awk 'index($0, ENVIRON["P"]) == 1')
   if [ -z "$force" ] && [ -n "$subs" ]; then
@@ -612,11 +620,11 @@ EOF
 $subs
 EOF
   fi
-  git for-each-ref --format='%(refname:short)' "refs/heads/$(conf_get "$c" branch)-c*" | while IFS= read -r w; do git branch -q -D "$w"; done
+  # Only chunk sub-branches (<branch>-c<NN> or <branch>-cFX-<n>), never a user branch that shares the prefix.
+  git for-each-ref --format='%(refname:short)' "refs/heads/$(conf_get "$c" branch)-c*" |
+    P="$(conf_get "$c" branch)-c" awk 'index($0, ENVIRON["P"]) == 1 { r = substr($0, length(ENVIRON["P"]) + 1); if (r ~ /^([0-9][0-9]?[0-9]?|FX-[0-9]+)$/) print }' |
+    while IFS= read -r w; do git branch -q -D "$w"; done
   if [ -d "$wt" ]; then
-    if [ -z "$hb" ] && [ -z "$force" ] && [ -n "$(git -C "$wt" status --porcelain)" ]; then
-      die "worktree has uncommitted changes; use --force"
-    fi
     git worktree remove --force "$wt"
   fi
   rm -rf "$rd"
