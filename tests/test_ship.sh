@@ -185,4 +185,27 @@ assert_eq "1" "$rc" "failed push: exit 1"
 case $e in "df: ship:"*) ok "failed push: message";; *) bad "failed push: message '$e'";; esac
 assert_eq "" "$(df conf-get "$FC3" pushed_sha)$(df conf-get "$FC3" pr_url)" "failed push: nothing recorded"
 
+# df fixed: feature always 0; bugfix 0 with a source change, 1 with tests/docs only; finish agrees
+tonly() { # tonly <id>: replace the run's commit so only a test file changes
+  local wt; wt=$(df conf-get "$SC/$1/run.conf" worktree)
+  git -C "$wt" reset -q --hard HEAD~1; mkdir -p "$wt/tests"; echo t > "$wt/tests/test_a.py"
+  git -C "$wt" add -A; git -C "$wt" commit -qm t
+}
+X=$(newrun); XC="$SC/$X/run.conf"; tonly "$X"
+out=$(df fixed "$X" 2>&1); rc=$?
+assert_eq "0" "$rc" "fixed: feature, tests only: exit 0"; assert_eq "" "$out" "fixed: feature: silent"
+df conf-set "$XC" track bugfix
+out=$(df fixed "$X" 2>&1 >/dev/null); rc=$?
+assert_eq "1" "$rc" "fixed: bugfix tests only: exit 1"; assert_contains "no source file" "$out" "fixed: bugfix tests only: stderr"
+df fixed "$X" >/dev/null 2>&1; out=$(df finish "$X" 2>&1); df conf-get "$XC" status >/dev/null
+assert_contains "NOT FIXED" "$out" "finish at stage ship still says NOT FIXED"
+assert_eq "unresolved" "$(df conf-get "$XC" status)" "finish at stage ship: unresolved"
+Y=$(newrun); df conf-set "$SC/$Y/run.conf" track bugfix
+out=$(df fixed "$Y" 2>&1); rc=$?
+assert_eq "0" "$rc" "fixed: bugfix with source: exit 0"; assert_eq "" "$out" "fixed: bugfix with source: silent"
+out=$(df fixed nope-id 2>&1); rc=$?
+assert_eq "1" "$rc" "fixed: unknown run: exit 1"; assert_eq "df: no such run: nope-id" "$out" "fixed: unknown run: message"
+
+grep -q "^  fixed)" "$DF" && ok "df dispatches fixed" || bad "df dispatches fixed"
+
 finish
