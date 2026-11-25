@@ -85,3 +85,12 @@ Defect found: seven of the eight milestone lines matched `[df <run-id>] <stage>:
 closing line was `[df <run-id>] done`, with no event, and two lines carried commentary after
 the event. The prompt now gives the closing line's form and forbids trailing text. That fix
 is covered by a structural test only; it has not been re-run live.
+
+## v2 slice 2 (review must pass before QA), 2026-11-25
+
+| Run | Result | What it showed |
+|---|---|---|
+| `fixtures/feature` on the slice branch | **pass** | 1 chunk, 1 attempt, `expect.sh` 0. The chunk's panel was quality, ponytail, security and impact, with no functional QA. Stage `review` ran one round with five lenses (goal included) and nothing blocking, then stage `qa` ran the hidden scenarios once. `run.conf` ended with `review_round=1`, `qa_round=1`. |
+
+One earlier attempt was stopped by hand when the branch review's fixes landed, and one was cut
+off by a usage limit; neither is counted.
