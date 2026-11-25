@@ -46,7 +46,7 @@ finding() { printf -- '- severity: %s\n  source: %s\n  where: %s\n  what: %s\n' 
 # Interpreter and tool artefacts are not changes made by a role.
 ARTEFACT_RE='(^|/)(__pycache__|\.pytest_cache|\.mypy_cache|node_modules)/|\.pyc$'
 TEST_RE='(^|/)(tests?|spec|__tests__)/|(_test|\.test|\.spec)\.[A-Za-z]+$|(^|/)test_[^/]*$'
-# High-confidence secret formats only: used on the pushed commits, where a
+# High-confidence secret formats only: used on what leaves the machine (pushed commits, PR text), where a
 # keyword match such as 'password = request.form[...]' would block ordinary code.
 STRICT_SECRET_RE='AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|://[^/@ :]+:[^/@ ]+@'
 SECRET_RE='AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|([Pp]assword|[Pp]asswd|PASSWORD|[Ss]ecret|SECRET|[Tt]oken|TOKEN|[Aa]pi[_-]?[Kk]ey|API[_-]?KEY)[ ]*[=:][ ]*[^ ]+|[Ss]ecret[_A-Za-z]*[ ]*[=:][ ]*[^ ]+|[Bb]earer [A-Za-z0-9._~+/-]{10,}|://[^/@ :]+:[^/@ ]+@'
@@ -128,10 +128,14 @@ cmd_validate() { # df validate <run-id>
       git cat-file -e "$b^{commit}" 2>/dev/null || die "$f: base_sha not found"
     fi
   done
-  [ ! -f "$(state_root)/profile.md" ] || profile_check "$(state_root)/profile.md"
+  # The profile is shared by every run in the repo; it binds only a run that will still execute it.
+  if [ "$(conf_get "$c" status)" = active ]; then
+    [ ! -f "$(state_root)/profile.md" ] || profile_check "$(state_root)/profile.md"
+    [ "$(conf_get "$c" profile_sha)" != none ] || [ ! -f "$(state_root)/profile.md" ] ||
+      die "$(state_root)/profile.md appeared after sign-off (none was shown); abort and start again"
+  fi
   # Pinned at sign-off: the profile's commands run unattended later, so they must be the ones shown.
   pin=$(conf_get "$c" profile_sha)
-  # The profile is shared by every run in the repo; a pin binds only a run that will still execute it.
   if [ -n "$pin" ] && [ "$pin" != none ] && [ "$(conf_get "$c" status)" = active ]; then
     [ -f "$(state_root)/profile.md" ] || die "$(state_root)/profile.md was pinned at sign-off and is now missing"
     [ "$(sha < "$(state_root)/profile.md")" = "$pin" ] || die "$(state_root)/profile.md changed since sign-off; restore it, or abort and start again"
@@ -140,8 +144,8 @@ cmd_validate() { # df validate <run-id>
 
 # The repo profile (beside the clone, never committed): commands the run will execute, so the
 # app it starts must be local and the file must name credentials, never hold them.
-profile_check() { # profile_check <profile.md> <run.conf>
-  local p=$1 u pin
+profile_check() { # profile_check <profile.md>
+  local p=$1 u
   # The key block must be exactly the known keys, once each, spelled plainly.
   tr -d '\r' < "$p" | awk '/^---$/{n++; next} n==1' | awk '
     /^[ \t]*$/ { next }
@@ -155,7 +159,7 @@ profile_check() { # profile_check <profile.md> <run.conf>
   case "$(fm_get "$p" e2e_needs_app)" in ""|yes|no) ;; *) die "$p: e2e_needs_app must be yes or no";; esac
   # A value that names an environment variable ($NAME, or `$NAME` in prose) or says none is not a secret.
   if grep -Eo "$SECRET_RE" "$p" | grep -Evq '[=:][ ]*`?\$[A-Za-z_{]|[=:][ ]*([Nn]one|N/A|n/a|-)[.,;]?$' ||
-     grep -Eq "$STRICT_SECRET_RE" "$p"; then
+     grep -Eo "$STRICT_SECRET_RE" "$p" | grep -Evq '://[^/@ :]+:\$'; then
     die "$p: looks like it holds a secret; name credentials by environment variable instead"
   fi
 }
@@ -341,6 +345,10 @@ cmd_lessons_set() { # df lessons-set <run-id>: install the retro's lessons (max 
   [ "$n" -le 30 ] || die "lessons-set: $n lines; at most 30 (old lessons kept)"
   ! grep -Eq "$SECRET_RE" "$rd/lessons-new.md" || die "lessons-set: lessons look like they hold a secret (old lessons kept)"
   ! awk 'length($0) > 200 { bad=1 } END { exit !bad }' "$rd/lessons-new.md" || die "lessons-set: a line is over 200 characters (old lessons kept)"
+  if [ -f "$rd/proposals-new.md" ]; then
+    ! grep -Eq "$SECRET_RE" "$rd/proposals-new.md" || die "lessons-set: proposals look like they hold a secret (old lessons kept)"
+    ! awk 'length($0) > 200 { bad=1 } END { exit !bad }' "$rd/proposals-new.md" || die "lessons-set: a proposal line is over 200 characters (old lessons kept)"
+  fi
   # Later builders read lessons; holdout scenarios must never reach them.
   if [ -n "$(cmd_canary_scan "$rd/scenarios" "$rd/lessons-new.md")$( [ ! -f "$rd/proposals-new.md" ] || cmd_canary_scan "$rd/scenarios" "$rd/proposals-new.md")" ]; then
     die "lessons-set: a holdout scenario canary appears in the retro output (old lessons kept)"
@@ -379,8 +387,10 @@ cmd_metrics() { # df metrics <run-id>: one row per run in <state-root>/metrics.t
 # ponytail: overlap is "one glob's literal prefix is a prefix of the other's"; conservative,
 # so it can serialise chunks that would not really collide.
 globs_of() { # literal prefix of each write glob; a glob that starts with a wildcard is __ALL__
-  { fm_get "$1" scope; fm_get "$1" touches_tests; } | tr -d '[]' | tr ',' '\n' | sed 's/^ *//; s/ *$//' | grep -v '^$' |
-    sed 's/[][*?].*//; s/^$/__ALL__/'; }
+  # Only the YAML list's outer brackets are stripped: [ab] inside a glob is a character class.
+  # A chunk with no write globs at all may write anywhere, so it overlaps everything.
+  { fm_get "$1" scope; fm_get "$1" touches_tests; } | sed 's/^ *\[//; s/\] *$//' | tr ',' '\n' | sed 's/^ *//; s/ *$//' |
+    grep -v '^$' | sed 's/[][*?].*//; s/^$/__ALL__/' | grep . || echo __ALL__; }
 overlaps() { # overlaps "<prefixes a>" "<prefixes b>"
   local p q
   for p in $1; do for q in $2; do
@@ -468,7 +478,7 @@ cmd_ship() { # df ship <run-id> <title> <body-file>: push the run branch and ope
   case $2 in ""|-*|*[[:cntrl:]]*) die "ship: title must be one non-empty line not starting with '-'";; esac
   case $3 in -*) die "ship: body file path must not start with '-'";; esac
   [ -f "$3" ] || die "ship: body file not found: $3"
-  [ "$(printf '%s\n' "$2" | grep -Ec "$SECRET_RE" || true)" -eq 0 ] && [ "$(grep -Ec "$SECRET_RE" "$3" || true)" -eq 0 ] || die "ship: title or body looks like it contains a secret"
+  [ "$(printf '%s\n' "$2" | grep -Ec "$STRICT_SECRET_RE" || true)" -eq 0 ] && [ "$(grep -Ec "$STRICT_SECRET_RE" "$3" || true)" -eq 0 ] || die "ship: title or body looks like it contains a secret"
   target=$(conf_get "$c" ship_base)
   if [ -z "$target" ]; then
     target=$(conf_get "$c" base_ref)
@@ -593,11 +603,12 @@ cmd_clean() { # df clean <run-id> [--force] [--branch]: removes worktree and sta
   fi
   # Every refusal comes before anything is deleted. --force never lets --branch drop uncommitted work.
   if [ -d "$wt" ] && [ -n "$(git -C "$wt" status --porcelain)" ] && { [ -n "$hb" ] || [ -z "$force" ]; }; then
-    die "worktree has uncommitted changes${hb:-; use --force}"
+    if [ -n "$hb" ]; then die "worktree has uncommitted changes"; else die "worktree has uncommitted changes; use --force"; fi
   fi
   # Sub-worktrees of a parallel wave (<worktree>-c<NN>): never discard uncommitted work unless forced.
-  subs=$(git worktree list --porcelain | sed -n 's/^worktree //p' | P="$wt-c" awk 'index($0, ENVIRON["P"]) == 1')
-  if [ -z "$force" ] && [ -n "$subs" ]; then
+  subs=$(git worktree list --porcelain | sed -n 's/^worktree //p' |
+    P="$wt-c" awk 'index($0, ENVIRON["P"]) == 1 { r = substr($0, length(ENVIRON["P"]) + 1); if (r ~ /^([0-9][0-9]?[0-9]?|FX-[0-9]+)$/) print }')
+  if { [ -z "$force" ] || [ -n "$hb" ]; } && [ -n "$subs" ]; then
     while IFS= read -r w; do
       [ -z "$(git -C "$w" status --porcelain)" ] || die "sub-worktree $w has uncommitted changes; use --force"
     done <<EOF
