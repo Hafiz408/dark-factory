@@ -72,12 +72,17 @@ st=$("$DF" conf-get "$rd/run.conf" started)
 [ $(( $(date +%s) - st )) -lt 1000 ] && ok "unpause credits the paused time to the budget" || bad "unpause credits the paused time to the budget"
 assert_eq "active" "$("$DF" conf-get "$rd/run.conf" status)" "unpause sets status active"
 assert_fail "unpause refuses a run that is not paused" bash -c "cd '$R' && '$DF' unpause '$id'"
-# third review: a per-repo lock, re-entrant for its owner, guards the shared files
-assert_ok "repo-lock acquire" bash -c "cd '$R' && '$DF' repo-lock '$id' acquire"
-assert_ok "metrics inside the owner's lock does not deadlock" bash -c "cd '$R' && '$DF' metrics '$id'"
-assert_fail "another run cannot take the lock while it is held" bash -c "cd '$R' && DF_REPO_LOCK_WAIT=1 '$DF' repo-lock other-run acquire"
-assert_ok "repo-lock release" bash -c "cd '$R' && '$DF' repo-lock '$id' release"
-assert_ok "another run can take it after release" bash -c "cd '$R' && DF_REPO_LOCK_WAIT=1 '$DF' repo-lock other-run acquire && '$DF' repo-lock other-run release"
+# fourth review: a second pause keeps the first paused_at; a later retro replaces the run's proposals
+"$DF" conf-set "$rd/run.conf" status active
+bash -c "cd '$R' && '$DF' pause '$id' first"; "$DF" conf-set "$rd/run.conf" paused_at 1000
+bash -c "cd '$R' && '$DF' pause '$id' second"
+assert_eq "1000" "$("$DF" conf-get "$rd/run.conf" paused_at)" "a second pause keeps the first paused_at"
+bash -c "cd '$R' && '$DF' unpause '$id'"
+printf 'ok lesson\n' > "$rd/lessons-new.md"; printf -- '- first proposal\n' > "$rd/proposals-new.md"; ls_ >/dev/null 2>&1
+printf -- '- second proposal\n' > "$rd/proposals-new.md"; ls_ >/dev/null 2>&1
+assert_contains "second proposal" "$(cat "$SR/proposals.md")" "a later retro's proposals are recorded"
+assert_eq "1" "$(grep -cx "## $id" "$SR/proposals.md")" "the run has one proposals section"
+: > "$rd/proposals-new.md"
 
 # retro stage
 T=$(mktemp -d); printf 'status=active\nstage=e2e\n' > "$T/c"

@@ -26,7 +26,7 @@ Try without installing: clone the repo, then `claude --plugin-dir ./dark-factory
 It first confirms the base branch ("ok" keeps the one you are on). You then answer one batch of
 questions (at most 8, each with a default) and approve once, on a sign-off screen that shows the
 approach, the alternatives considered, the trade-offs and the to-do list. After that you see one
-line per milestone, `[df <run-id>] <stage>: <event>`. `resume` works from a new session: all
+line per milestone, `[df <run-id>] <stage>: <event>`. One run executes per repo at a time; others wait until it finishes or pauses. `resume` works from a new session: all
 state is on disk.
 
 ## What you get

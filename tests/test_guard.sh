@@ -34,6 +34,8 @@ for p in "$W-c0/../repo" "$W-c0/../../.." "$W/.." "$W/../../.." "$W-c9-notmine" 
   assert_fail "rm escaping the worktree blocked: ${p#$W}" call "rm -rf $p"
 done
 assert_ok "rm inside a fix-chunk sub-worktree allowed" call "rm -rf $W-cFX-1/build"
+assert_ok "rm inside a fix-chunk sub-worktree with a long id allowed" call "rm -rf $W-cFX-100/build"
+assert_fail "rm in a sub-worktree named FX-abc blocked" call "rm -rf $W-cFX-abc/x"
 
 "$DF" lock "$id" release
 assert_ok "inert again after release" call "git push origin main"

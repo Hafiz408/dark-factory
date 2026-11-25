@@ -58,8 +58,8 @@ Sweep runs on `sweep`, on `list`, and at the start of a new run. Never on `statu
    base written as `<remote>/<branch>` is fetched; any other spelling uses the local copy.
 4. Run `DF_ALLOW_INIT=1 {DF} start <scrubbed-file>` only if the directory is empty and the
    request looks like a new application; otherwise run it without the variable. Append
-   `--base <ref>` and `--branch <name>` only when the user gave them. If it refuses, relay the
-   reason in one line and stop. If it prints `could not fetch`, tell the user the base may be
+   `--base <ref>` and `--branch <name>` only when the user gave them. If it refuses (for example, another run is live in this repo:
+   one run executes per repo at a time), relay the reason in one line and stop. If it prints `could not fetch`, tell the user the base may be
    out of date, and repeat that on the sign-off screen's Base line.
 5. Pick a session id once for this run (for example `s` followed by the current epoch time) and
    pass it explicitly to every lock command: `{DF} lock <id> acquire <session-id>`. Refresh with
@@ -363,17 +363,14 @@ Proves nothing else changed. Run `{DF} conf-set {RD}/run.conf stage e2e`, then
    reported problem is still present and what a human must decide.
 2. **Retro (stage `retro`).** Run `{DF} conf-set {RD}/run.conf stage retro`
    unless the run is pausing: a paused run keeps the stage it stopped at, so it can never be finished from
-   here. Run `{DF} repo-lock <id> acquire` (other runs in this repo then wait to write the shared
-   lessons, proposals and metrics), then `{DF} state-hash` and `{DF} snapshot {WT}`, and keep
-   both in `log.md`. Spawn
+   here. Run `{DF} state-hash` and `{DF} snapshot {WT}` and keep both in `log.md`. Spawn
    `retro` with the run directory, the current `lessons.md` beside `{PROFILE}` (if any), and
    the output paths `{RD}/retro.md`, `{RD}/lessons-new.md`, `{RD}/proposals-new.md`. Run both
    commands again: if either changed, the retro wrote where it must not; say so, log it as a
    `critical` integrity finding, and skip `lessons-set`. Otherwise run `{DF} lessons-set <id>`
    (it installs the new lessons only when they are at most 30 lines of at most 200
    characters, hold no secret and no holdout canary; otherwise it keeps the old ones; relay a
-   refusal in one line). Then run `{DF} repo-lock <id> release`, whatever happened above.
-   Repo lessons are applied automatically to later runs. Plugin
+   refusal in one line). Repo lessons are applied automatically to later runs. Plugin
    proposals are never applied: they are collected in `proposals.md` beside `{PROFILE}` and
    listed in the final message for the user to decide on. A paused run also gets a retro (it
    is where the most is learned), then stops without the ship step.
