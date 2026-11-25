@@ -80,7 +80,7 @@ or the preflight found an unmet hard requirement (the user may still override).
 - Amend re-runs only the affected stages. At most 3 amend cycles, then approve or abort.
 - Mixed input (bug plus feature) is split into queued runs shown in the same sign-off. One
   approval covers all of them. They run serially in the order shown.
-- On resume, if `HEAD` moved since `root_base_sha`, the repo scan is repeated and only the
+- On resume, if the base (`base_ref`, or `HEAD` when it is absent or `detached`) moved since `root_base_sha`, the repo scan is repeated and only the
   affected questions are re-asked. Drift is recorded and reported. No automatic rebase.
 
 ## 5. Tracks
@@ -256,7 +256,7 @@ Resume protocol:
    file; never repair silently.
 3. Verify worktree and branch exist and match the last commit in `log.md`. If not,
    offer: recreate from the last logged commit, or abort. This is a stop case, not a guess.
-4. Report drift if `HEAD` moved since `root_base_sha`.
+4. Report drift if the base (`base_ref`, or `HEAD` when absent or `detached`) moved since `root_base_sha`.
 5. Before sign-off: re-ask only unanswered questions.
 6. During the loop: reset a dirty tree to the chunk's `base_sha`, mark the attempt
    `interrupted`, restart at the first role without a valid recorded verdict.

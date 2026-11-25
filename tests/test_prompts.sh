@@ -152,4 +152,6 @@ a=$(grep -n "## Functional changes" "$SK" | head -1 | cut -d: -f1); b=$(grep -n 
 [ -n "$a" ] && [ -n "$b" ] && [ "$a" -le "$b" ] && ok "SKILL.md: report leads with functional then technical changes" || bad "SKILL.md: report leads with functional then technical changes"
 grep -q "not confirmed" "$SK" && ok "SKILL.md: an unconfirmed criterion is reported as such" || bad "SKILL.md: an unconfirmed criterion is reported as such"
 
+grep -q "base_ref. is absent or .detached." "$SK" && ok "SKILL.md: resume drift is measured against the run's base" || bad "SKILL.md: resume drift is measured against the run's base"
+
 finish

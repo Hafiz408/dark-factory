@@ -226,8 +226,9 @@ Details you must follow:
 3. `{DF} validate <id>`. If it fails, show the message and stop. Never repair state silently.
 4. Confirm the worktree and branch exist and the branch head matches the last commit in
    `log.md`. If not, offer to recreate from the last logged commit, or abort.
-5. If `HEAD` of the main clone moved since `root_base_sha`, record the drift in `log.md`
-   and say so in the report. Do not rebase.
+5. If the base moved since `root_base_sha`, record the drift in `log.md` and say so in the
+   report. Do not rebase. The base is the commit `base_ref` (from `run.conf`) now points to; when
+   `base_ref` is absent or `detached`, it is `HEAD` of the main clone.
 6. Before sign-off: re-ask only unanswered questions. In the loop: reset a dirty tree to the
    chunk's `base_sha`, count the interrupted attempt in `interrupts` (cap 3), and restart at the
    first role without a valid recorded verdict.
