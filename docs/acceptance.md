@@ -111,3 +111,21 @@ bare repository as `origin`, driven by the same script that answers "ok" and "ap
 The run was cut off once by a usage limit and resumed with `--force`; the retro's proposals
 include counting the wall-clock budget as active time, because that idle gap pushed the run
 past 4 hours.
+
+## v2 slice 6 (parallel builders), 2026-11-25
+
+One build run on the top of the v2 stack with `parallel=on` (set by the driver at sign-off): two
+independent tools, `fizzbuzz.py` and `wordcount.py`, planned as two chunks with no dependencies.
+
+| What | Result |
+|---|---|
+| Outcome | **pass**, `done/done`; both tools give the right output and the suite (18 tests) is green |
+| Wave | Chunks 01 and 02 built together in sub-worktrees, each passed its four reviewers on attempt 1, and both were cherry-picked onto the run branch in id order; both joins are in `log.md`, then one full-suite run was green |
+| Cleanup | No sub-worktree or sub-branch left behind |
+| After the wave | Review round 1 clean (one reviewer retried for a missing verdict line, as an infra failure), QA 20/20, `e2e: not configured`, retro write check clean, ship skipped (no `origin`) |
+
+Before this the run paused on its wall-clock budget, because the budget counted hours the
+session spent on a usage limit; the pause wrote `PAUSED:` first, set `waiting_on`, and ran the
+retro. The budget was raised with `df conf-set` and `resume` continued it. In the session
+before the pause, chunk 01 had started on its own (the driver switched `parallel` on at
+sign-off); after resume the orchestrator read `run.conf` again and ran the wave.

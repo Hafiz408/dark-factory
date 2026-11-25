@@ -245,11 +245,26 @@ grep -q "lessons.md" "$SK" && grep -q "refiner" "$SK" && sed -n '/^### refine/,/
 grep -q "lessons" "$ROOT/agents/planner.md" && grep -q "lessons" "$ROOT/agents/builder.md" && ok "planner and builder read lessons" || bad "planner and builder read lessons"
 grep -q "Facts only" "$ROOT/agents/retro.md" && grep -q "30 lines" "$ROOT/agents/retro.md" && grep -q "scenarios" "$ROOT/agents/retro.md" && ok "retro: facts only, bounded, never leaks scenarios into lessons" || bad "retro: facts only, bounded, never leaks scenarios into lessons"
 
+# v2 slice 6: parallel builders
+LP=$(sed -n '/^### Parallel waves/,/^## Review/p' "$SK")
+[ -n "$LP" ] && ok "SKILL.md: has a parallel waves section" || bad "SKILL.md: has a parallel waves section"
+echo "$LP" | grep -q "parallel=on" && ok "SKILL.md: waves only when parallel is on" || bad "SKILL.md: waves only when parallel is on"
+echo "$LP" | grep -q "{DF} wave <id>" && echo "$LP" | grep -q "{DF} sub-add" && echo "$LP" | grep -q "{DF} sub-join" && echo "$LP" | grep -q "{DF} sub-drop" && ok "SKILL.md: waves go through the df helpers" || bad "SKILL.md: waves go through the df helpers"
+echo "$LP" | grep -q "in id order" && echo "$LP" | grep -q "interrupt, not an attempt" && ok "SKILL.md: join in id order; a conflict reruns serially as an interrupt" || bad "SKILL.md: join in id order; a conflict reruns serially as an interrupt"
+echo "$LP" | grep -q "full suite" && echo "$LP" | grep -q "serially" && ok "SKILL.md: a red suite after a wave reruns it serially" || bad "SKILL.md: a red suite after a wave reruns it serially"
+echo "$LP" | grep -q "install.commands" && echo "$LP" | grep -q "_c<NN>" && ok "SKILL.md: each sub-worktree gets installs, its own port and database" || bad "SKILL.md: each sub-worktree gets installs, its own port and database"
+sed -n '/^### preflight/,/^### signoff/p' "$SK" | grep -q "install.commands" && ok "SKILL.md: preflight records install commands" || bad "SKILL.md: preflight records install commands"
 # slice 5 branch review
 echo "$RT" | grep -q "unless the run is pausing" && ok "SKILL.md: a paused run's retro leaves its stage alone" || bad "SKILL.md: a paused run's retro leaves its stage alone"
 echo "$RT" | grep -q "{DF} state-hash" && ok "SKILL.md: the retro's writes are checked" || bad "SKILL.md: the retro's writes are checked"
 grep -q "qa-r" "$ROOT/agents/retro.md" && ok "retro: never reads QA outputs" || bad "retro: never reads QA outputs"
 sed -n '/^## Resume/,$p' "$SK" | grep -q "At .retro." && ok "SKILL.md: resume reruns an interrupted retro" || bad "SKILL.md: resume reruns an interrupted retro"
 sed -n '/\*\*Ship (stage/,/^## Resume/p' "$SK" | grep -q "skip to step 3" && bad "SKILL.md: ship step points at finish" || ok "SKILL.md: ship step points at finish"
+
+# slice 6 branch review
+echo "$LP" | grep -q "serial yes" && ok "SKILL.md: a requeued chunk is kept out of later waves" || bad "SKILL.md: a requeued chunk is kept out of later waves"
+echo "$LP" | grep -q "log.md" && echo "$LP" | grep -q "joined commit" && ok "SKILL.md: joined commits are logged for resume" || bad "SKILL.md: joined commits are logged for resume"
+echo "$LP" | grep -q "after its join" && ok "SKILL.md: a chunk's PASS line is printed after its join" || bad "SKILL.md: a chunk's PASS line is printed after its join"
+sed -n '/^## Resume/,$p' "$SK" | grep -q "sub_worktree" && ok "SKILL.md: resume cleans up an interrupted wave" || bad "SKILL.md: resume cleans up an interrupted wave"
 
 finish

@@ -26,6 +26,14 @@ assert_ok "npm test allowed" call "npm test"
 assert_ok "rm of a relative build dir allowed" call "rm -rf build"
 assert_ok "git status allowed" call "git status"
 assert_ok "git commit allowed" call "git commit -m done"
+W=$("$DF" conf-get "$("$DF" run-dir "$id")/run.conf" worktree)
+assert_ok "rm inside the run worktree allowed" call "rm -rf $W/build"
+assert_ok "rm inside a sub-worktree allowed (v2 slice 6)" call "rm -rf $W-c02/build"
+assert_fail "rm of a sibling that only shares the prefix blocked" call "rm -rf $W-other/x"
+for p in "$W-c0/../repo" "$W-c0/../../.." "$W/.." "$W/../../.." "$W-c9-notmine" "$W-cX" "$W-c02/../../x"; do
+  assert_fail "rm escaping the worktree blocked: ${p#$W}" call "rm -rf $p"
+done
+assert_ok "rm inside a fix-chunk sub-worktree allowed" call "rm -rf $W-cFX-1/build"
 
 "$DF" lock "$id" release
 assert_ok "inert again after release" call "git push origin main"
