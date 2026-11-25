@@ -26,7 +26,8 @@ In v1:
 
 Out of v1:
 - Cross-chunk parallel waves, `refactor` and `chore` tracks (v1.1).
-- Push, merge, deploy, PR creation. The factory ends at a local branch and a report.
+- Merge and deploy. The factory ends at a local branch and a report, and pushes and opens a
+  PR only on an explicit yes at the end of that run (section 6, Ship).
 - Other platforms, standalone CLI, dashboards, Windows-native, moving a run between machines.
 
 ## 3. Preconditions (checked at start, before anything is created)
@@ -66,6 +67,7 @@ Out of v1:
 | 8 | Loop | Section 6 | commits on the run branch |
 | 9 | Review | Section 6. Whole-branch review, five lenses, looped until clean | fix chunks |
 | 10 | QA | Section 6. Holdout scenarios against the reviewed branch | `report.md` |
+| 11 | Ship | Section 6. Only on a yes: push the run branch, open a PR | `pr_url` |
 
 ### Sign-off summary
 
@@ -206,6 +208,24 @@ Functional QA runs only against a branch the review has passed.
    holds across sessions. `df finish` refuses a run that is paused, has not reached `qa`, or
    has a BLOCKED or SKIPPED chunk. `unresolved` keeps its v0.1 meaning.
 
+### Ship
+
+Order at the end of a run: report, ship question, then `df finish`. The lock is held until
+`finish`, so the guard hook stays armed through the ship step.
+
+- The question is asked only for a run that completed QA, when the repo has an `origin` remote
+  and `gh` is signed in: "Push `<branch>` and open a PR into `<target>`? (yes / no)". Only
+  "yes" is a yes. A paused run, and a bugfix run that changed no source (`df fixed`), is never
+  offered.
+- On yes the orchestrator records `ship_confirmed=yes`, sets stage `ship`, and runs
+  `df ship <run-id> <title> <body-file>`. It refuses unless that key is set, the stage is
+  `ship` and the worktree is clean; pushes only the run branch, never forced; opens the PR with
+  the report's two summary sections as the body; records `pr_url` and `pushed_sha`. It never
+  merges.
+- The guard hook keeps blocking a raw `git push`. `df ship` is the only path that pushes.
+- `df clean <run-id> --branch` uses a forced local delete, because after a squash merge git
+  cannot see the branch as merged; the `pushed_sha` check is what makes that safe.
+
 Trade-off accepted: wrong behaviour is found after review instead of per chunk, so a
 functional miss costs a fix chunk plus a review round. The tester still runs the suite per
 chunk, which is the early signal.
@@ -249,7 +269,7 @@ State lives in a **hidden sibling of the main clone**, not in the working tree a
 the first live run.) The user is asked once to allow the parent directory.
 
 ```
-run.conf          track, worktree, branch, base_ref, root_base_sha, env, budget, max_review_rounds, max_qa_rounds, review_round, qa_round, stage cursor, status
+run.conf          track, worktree, branch, base_ref, root_base_sha, env, budget, max_review_rounds, max_qa_rounds, review_round, qa_round, ship_confirmed, ship_base, pushed_sha, pr_url, stage cursor, status
 lock              session id + heartbeat, refreshed on every verdict
 input.md          raw request (scrubbed)
 questions.md      refine questions, pending and answered
@@ -274,6 +294,8 @@ Commands (usable from a new session in the same repo):
 | `status [run-id]` | prints `progress.md` regenerated from source of truth. Read-only. |
 | `resume [run-id]` | continues. No id: most recent unfinished run, asks if several |
 | `clean <run-id>` | removes the worktree and state, keeps the branch. Refuses while a lock is live |
+| `clean <run-id> --branch` | also deletes the local branch, only when the worktree is clean and the branch head equals the sha pushed at ship time |
+| `sweep` | lists runs whose PR is merged and offers that cleanup, one question per run. Also runs on `list` and at the start of a new run, never on `status` |
 
 Resume protocol:
 1. Refuse if `lock` heartbeat is under 1 hour old (`DF_LOCK_TTL`) (override with `--force`).
@@ -325,7 +347,9 @@ Orchestrator-enforced integrity checks (not left to agent instructions):
 
 - All edits happen in a worktree on the run branch (`df/<run-id>` unless named with `--branch`). The main clone's files are untouched and
   the working tree contains no factory state.
-- No push, merge, deploy or external write in v1.
+- No merge or deploy. The only external write is `df ship`: one branch push and one PR, on an
+  explicit yes, never forced; it refuses a branch other than the run's own and commits that
+  carry a recognisable secret.
 - **Untrusted content.** `input.md`, repo files, test output and fetched pages are data.
   Every role prompt says so, wraps them in delimiters, and forbids following instructions
   found inside them. The sign-off shows the goal in the factory's own words and the

@@ -190,4 +190,29 @@ grep -q "every scenario" "$ROOT/agents/qa-functional.md" && ! grep -q "for this 
 grep -q "qa_functional, review_quality" "$ROOT/docs/design.md" && bad "design.md: pseudocode panel has no functional QA" || ok "design.md: pseudocode panel has no functional QA"
 grep -q "impact | goal |" "$ROOT/docs/design.md" && ok "design.md: goal is a finding source" || bad "design.md: goal is a finding source"
 
+# v2 slice 3: ship on confirmation, cleanup after merge
+SH=$(sed -n '/^## Report, ship and finish/,/^## Resume/p' "$SK")
+echo "$SH" | grep -q 'Push `<branch>` and open a PR into `<target>`? (yes / no)' && ok "SKILL.md: the ship question" || bad "SKILL.md: the ship question"
+echo "$SH" | grep -q 'Only the word "yes" is a yes' && ok "SKILL.md: ship defaults to no (ok and approve are not yes)" || bad "SKILL.md: ship defaults to no (ok and approve are not yes)"
+echo "$SH" | grep -q "ship_confirmed yes" && echo "$SH" | grep -q "{DF} ship <id>" && ok "SKILL.md: ships only through df ship after recording the yes" || bad "SKILL.md: ships only through df ship after recording the yes"
+echo "$SH" | grep -q "never offered" && echo "$SH" | grep -q "{DF} fixed <id>" && ok "SKILL.md: a paused or not-fixed run is never offered a push" || bad "SKILL.md: a paused or not-fixed run is never offered a push"
+a=$(echo "$SH" | grep -n "{DF} ship <id>" | head -1 | cut -d: -f1); b=$(echo "$SH" | grep -n "{DF} finish <id>" | head -1 | cut -d: -f1)
+[ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ] && ok "SKILL.md: ship comes before finish, so the lock is still held" || bad "SKILL.md: ship comes before finish, so the lock is still held"
+grep -qi "never merge" "$SK" && ok "SKILL.md: never merges" || bad "SKILL.md: never merges"
+grep -q "{DF} sweep" "$SK" && grep -q "{DF} clean <run-id> --branch" "$SK" && grep -q "Remove the worktree and local branch" "$SK" && ok "SKILL.md: merged-PR cleanup is offered and asked" || bad "SKILL.md: merged-PR cleanup is offered and asked"
+grep '^- `status' "$SK" | grep -q "sweep" && bad "SKILL.md: status stays read-only (no sweep)" || ok "SKILL.md: status stays read-only (no sweep)"
+grep -q "It never pushes, merges or opens a PR" "$ROOT/README.md" && bad "README: no longer claims it never opens a PR" || ok "README: no longer claims it never opens a PR"
+grep -q "sweep" "$ROOT/README.md" && grep -q "never merges" "$ROOT/README.md" && ok "README: documents ship and sweep" || bad "README: documents ship and sweep"
+
+# slice 3 branch review
+SH2=$(sed -n '/^## Report, ship and finish/,/^## Resume/p' "$SK")
+echo "$SH2" | grep -q "ship_confirmed no" && ok "SKILL.md: a no is recorded, so a stale yes cannot linger" || bad "SKILL.md: a no is recorded, so a stale yes cannot linger"
+a=$(echo "$SH2" | grep -n "stage ship\`;" | head -1 | cut -d: -f1); b=$(echo "$SH2" | grep -n "ship_confirmed yes" | head -1 | cut -d: -f1)
+[ -n "$a" ] && [ -n "$b" ] && [ "$a" -le "$b" ] && ok "SKILL.md: stage ship is set before the yes is recorded" || bad "SKILL.md: stage ship is set before the yes is recorded"
+echo "$SH2" | grep -q "before asking" && echo "$SH2" | grep -q "ship_base" && ok "SKILL.md: the PR target is settled before asking" || bad "SKILL.md: the PR target is settled before asking"
+echo "$SH2" | sed -n '1,/Ship (stage/p' | grep -q "{DF} fixed <id>" && ok "SKILL.md: the report uses df fixed, not finish's later output" || bad "SKILL.md: the report uses df fixed, not finish's later output"
+sed -n '/^## Resume/,$p' "$SK" | grep -q "At .ship." && ok "SKILL.md: resume finishes an interrupted ship without asking again" || bad "SKILL.md: resume finishes an interrupted ship without asking again"
+grep -q "No push, merge, deploy or external write in v1" "$ROOT/docs/design.md" && bad "design.md: safety section matches ship" || ok "design.md: safety section matches ship"
+sed -n '/^## Start a run/,/^1\. /p' "$SK" | grep -q "Sweep" && ok "SKILL.md: sweep runs at the start of a new run" || bad "SKILL.md: sweep runs at the start of a new run"
+
 finish

@@ -21,8 +21,10 @@ conf_set() {
       case "$3" in ''|*[!0-9]*) die "conf-set: $2 must be an integer";; esac ;;
     status=active|status=waiting_permission|status=paused|status=done|status=unresolved|status=aborted) ;;
     status=*) die "conf-set: invalid status '$3'";;
-    stage=intake|stage=route|stage=refine|stage=plan|stage=preflight|stage=signoff|stage=slice|stage=loop|stage=integrate|stage=review|stage=qa|stage=done) ;; # integrate: v0.1 name for review
+    stage=intake|stage=route|stage=refine|stage=plan|stage=preflight|stage=signoff|stage=slice|stage=loop|stage=integrate|stage=review|stage=qa|stage=ship|stage=done) ;; # integrate: v0.1 name for review
     stage=*) die "conf-set: invalid stage '$3'";;
+    ship_confirmed=yes|ship_confirmed=no) ;;
+    ship_confirmed=*) die "conf-set: ship_confirmed must be yes or no";;
     track=unrouted|track=bugfix|track=feature|track=build) ;;
     track=*) die "conf-set: invalid track '$3'";;
   esac
@@ -42,6 +44,9 @@ finding() { printf -- '- severity: %s\n  source: %s\n  where: %s\n  what: %s\n' 
 # Interpreter and tool artefacts are not changes made by a role.
 ARTEFACT_RE='(^|/)(__pycache__|\.pytest_cache|\.mypy_cache|node_modules)/|\.pyc$'
 TEST_RE='(^|/)(tests?|spec|__tests__)/|(_test|\.test|\.spec)\.[A-Za-z]+$|(^|/)test_[^/]*$'
+# High-confidence secret formats only: used on the pushed commits, where a
+# keyword match such as 'password = request.form[...]' would block ordinary code.
+STRICT_SECRET_RE='AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|://[^/@ :]+:[^/@ ]+@'
 SECRET_RE='AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|([Pp]assword|[Pp]asswd|PASSWORD|[Ss]ecret|SECRET|[Tt]oken|TOKEN|[Aa]pi[_-]?[Kk]ey|API[_-]?KEY)[ ]*[=:][ ]*[^ ]+'
 
 cmd_start() { # df start <input-file> [--base <ref>] [--branch <name>]   (DF_ALLOW_INIT=1 permits git init, build track only)
@@ -108,7 +113,7 @@ cmd_validate() { # df validate <run-id>
     [ -n "$(conf_get "$c" $k)" ] || die "$c: missing $k"
   done
   case "$(conf_get "$c" track)" in unrouted|bugfix|feature|build) ;; *) die "$c: bad track";; esac
-  case "$(conf_get "$c" stage)" in intake|route|refine|plan|preflight|signoff|slice|loop|integrate|review|qa|done) ;; *) die "$c: bad stage";; esac
+  case "$(conf_get "$c" stage)" in intake|route|refine|plan|preflight|signoff|slice|loop|integrate|review|qa|ship|done) ;; *) die "$c: bad stage";; esac
   case "$(conf_get "$c" status)" in active|waiting_permission|paused|done|unresolved|aborted) ;; *) die "$c: bad status";; esac
   git cat-file -e "$(conf_get "$c" root_base_sha)^{commit}" 2>/dev/null || die "$c: root_base_sha not found"
   for f in "$rd"/chunks/*.md; do
@@ -251,32 +256,106 @@ cmd_scrub() { # df scrub <file>: scrubbed copy on stdout, exit 3 if anything was
   [ "${n:-0}" -eq 0 ] || return 3
 }
 
+no_source_change() { # no_source_change <conf>: 0 when the run is a bugfix whose branch changes no source file
+  local c=$1 wt base tre prose
+  wt=$(conf_get "$c" worktree); base=$(conf_get "$c" root_base_sha)
+  # eval P1: a bugfix run whose branch changed no source is not a fix; say so, loudly.
+  # Test support files and prose do not count as source; config and requirements files do.
+  tre="$TEST_RE|(^|/)(conftest\.py|testdata|fixtures?)(/|$)|(Test|Tests)\.(java|kt|cs)$|_spec\.rb$"
+  prose='(^|/)(docs?|doc)/|(^|/)CHANGELOG[^/]*$|\.(md|rst)$'
+  [ "$(conf_get "$c" track)" = bugfix ] && [ -d "$wt" ] && git -C "$wt" rev-parse --verify -q "$base^{commit}" >/dev/null || return 1
+  [ -z "$(git -C "$wt" -c core.quotePath=false diff --name-only --no-renames "$base" HEAD |
+       grep -Ev "$ARTEFACT_RE" | grep -Ev "$tre" | grep -Eiv "$prose")" ]
+}
+
+cmd_fixed() { # df fixed <run-id>: exit 1 when a bugfix run changed no source file
+  local c; c="$(run_dir "${1:-}")/run.conf"
+  [ -f "$c" ] || die "no such run: ${1:-}"
+  ! no_source_change "$c" || { echo "df: fixed: the branch changes no source file (tests and docs only)" >&2; return 1; }
+}
+
 cmd_finish() { # df finish <run-id> [session]: end state is written together, then the lock is released
-  local rd c st=done wt base track tre prose f
+  local rd c st=done f
   rd=$(run_dir "$1"); c="$rd/run.conf"
   [ -f "$c" ] || die "no such run: $1"
   # Only a run that came through QA clean may finish; anything else pauses and stays resumable.
-  case "$(conf_get "$c" stage)" in qa|integrate|done) ;; *) die "finish: run has not completed QA (stage $(conf_get "$c" stage))";; esac
+  case "$(conf_get "$c" stage)" in qa|integrate|ship|done) ;; *) die "finish: run has not completed QA (stage $(conf_get "$c" stage))";; esac
   case "$(conf_get "$c" status)" in active|done|unresolved) ;; *) die "finish: run is $(conf_get "$c" status): $(conf_get "$c" waiting_on)";; esac
   for f in "$rd"/chunks/*.md; do
     [ -e "$f" ] || continue
     case "$(fm_get "$f" status)" in BLOCKED|SKIPPED) die "finish: chunk $(fm_get "$f" id) is $(fm_get "$f" status)";; esac
   done
-  track=$(conf_get "$c" track); wt=$(conf_get "$c" worktree); base=$(conf_get "$c" root_base_sha)
-  # eval P1: a bugfix run whose branch changed no source is not a fix; say so, loudly.
-  # Test support files and prose do not count as source; config and requirements files do.
-  tre="$TEST_RE|(^|/)(conftest\.py|testdata|fixtures?)(/|$)|(Test|Tests)\.(java|kt|cs)$|_spec\.rb$"
-  prose='(^|/)(docs?|doc)/|(^|/)CHANGELOG[^/]*$|\.(md|rst)$'
-  if [ "$track" = bugfix ] && [ -d "$wt" ] && git -C "$wt" rev-parse --verify -q "$base^{commit}" >/dev/null; then
-    if [ -z "$(git -C "$wt" -c core.quotePath=false diff --name-only --no-renames "$base" HEAD |
-         grep -Ev "$ARTEFACT_RE" | grep -Ev "$tre" | grep -Eiv "$prose")" ]; then
-      st=unresolved
-      echo "NOT FIXED: the branch changes no source file (tests and docs only); see report.md" >&2
-    fi
+  if no_source_change "$c"; then
+    st=unresolved
+    echo "NOT FIXED: the branch changes no source file (tests and docs only); see report.md" >&2
   fi
   conf_set "$c" stage done
   conf_set "$c" status "$st"
   cmd_lock "$1" release "${2:-}"
+}
+
+cmd_ship() { # df ship <run-id> <title> <body-file>: push the run branch and open a PR; prints the PR URL
+  local rd c wt branch target sha url body pout
+  [ $# -eq 3 ] || die "usage: df ship <run-id> <title> <body-file>"
+  rd=$(run_dir "$1"); c="$rd/run.conf"
+  [ -f "$c" ] || die "no such run: $1"
+  url=$(conf_get "$c" pr_url)
+  if [ -n "$url" ]; then
+    case $url in https://*) echo "$url"; return 0;; esac
+    die "ship: recorded pr_url is not an https:// URL"
+  fi
+  [ "$(conf_get "$c" ship_confirmed)" = yes ] || die "ship: ship_confirmed is not yes"
+  [ "$(conf_get "$c" stage)" = ship ] && [ "$(conf_get "$c" status)" = active ] || die "ship: run is not at stage ship with status active"
+  ! no_source_change "$c" || die "ship: the branch changes no source file (tests and docs only); nothing to ship"
+  wt=$(conf_get "$c" worktree); branch=$(conf_get "$c" branch)
+  [ -d "$wt" ] || die "ship: worktree is missing"
+  [ -z "$(git -C "$wt" status --porcelain)" ] || die "ship: worktree has uncommitted changes"
+  git remote | grep -qxF -- origin || die "ship: no remote named origin"
+  command -v gh >/dev/null 2>&1 || die "ship: gh is not on PATH"
+  gh auth status >/dev/null 2>&1 || die "ship: gh is not authenticated"
+  [ "$(git check-ref-format --branch "$branch" 2>/dev/null)" = "$branch" ] || die "ship: invalid branch name '$branch'"
+  case $2 in ""|-*|*[[:cntrl:]]*) die "ship: title must be one non-empty line not starting with '-'";; esac
+  case $3 in -*) die "ship: body file path must not start with '-'";; esac
+  [ -f "$3" ] || die "ship: body file not found: $3"
+  [ "$(printf '%s\n' "$2" | grep -Ec "$SECRET_RE" || true)" -eq 0 ] && [ "$(grep -Ec "$SECRET_RE" "$3" || true)" -eq 0 ] || die "ship: title or body looks like it contains a secret"
+  target=$(conf_get "$c" ship_base)
+  if [ -z "$target" ]; then
+    target=$(conf_get "$c" base_ref)
+    case $target in ""|detached) die "ship: no base branch; set ship_base";; esac
+    case $target in
+      origin/*) target=${target#origin/} ;;
+      */*) ! git remote | grep -qxF -- "${target%%/*}" || die "ship: base_ref '$target' is on another remote; set ship_base" ;;
+    esac
+  fi
+  case $target in -*) die "ship: base branch must not start with '-'";; esac
+  [ "$(git check-ref-format --branch "$target" 2>/dev/null)" = "$target" ] || die "ship: invalid base branch '$target'"
+  GIT_TERMINAL_PROMPT=0 git ls-remote --exit-code --heads origin "refs/heads/$target" >/dev/null 2>&1 || die "ship: base branch '$target' not found on origin"
+  body=$(cd "$(dirname "$3")" && pwd)/$(basename "$3")
+  sha=$(git -C "$wt" rev-parse --verify "refs/heads/$branch") || die "ship: branch '$branch' not found"
+  # Push only the branch this run built: the one checked out in its worktree, at its head, never the target.
+  [ "$(git -C "$wt" symbolic-ref -q --short HEAD)" = "$branch" ] && [ "$(git -C "$wt" rev-parse HEAD)" = "$sha" ] ||
+    die "ship: '$branch' is not the branch checked out in the run's worktree"
+  [ "$branch" != "$target" ] || die "ship: the run branch is the PR target"
+  # Nothing has left the machine until now: refuse to push a secret in the run's commits.
+  if git -C "$wt" log --format=%B "$(conf_get "$c" root_base_sha)..$sha" | grep -Eq "$STRICT_SECRET_RE" ||
+     git -C "$wt" diff "$(conf_get "$c" root_base_sha)" "$sha" | grep '^+' | grep -Eq "$STRICT_SECRET_RE"; then
+    die "ship: the run's commits look like they contain a secret; nothing pushed"
+  fi
+  pout=$(GIT_TERMINAL_PROMPT=0 git -C "$wt" push -u origin "refs/heads/$branch:refs/heads/$branch" 2>&1) || die "ship: push failed: $(printf '%s' "$pout" | tail -1 | sed "s,://[^/@ ]*@,://,g")"
+  conf_set "$c" pushed_sha "$sha"
+  if ! url=$(cd "$wt" && GH_PROMPT_DISABLED=1 gh pr create --base "$target" --head "$branch" --title "$2" --body-file "$body"); then
+    # create failed (e.g. a PR already exists): reuse it only if it is OPEN and its head is this push
+    pv=$(cd "$wt" && GH_PROMPT_DISABLED=1 gh pr view "$branch" --json url,state,headRefOid --jq '.url + " " + .state + " " + .headRefOid') || pv=
+    [ "$(printf '%s\n' "$pv" | grep -c .)" -eq 1 ] || die "ship: could not open PR"
+    set -- $pv
+    [ "${2:-}" = OPEN ] && [ "${3:-}" = "$sha" ] || die "ship: could not open PR (the existing PR for '$branch' is not open at this commit)"
+    url=$1
+    case $url in https://?*) ;; *) die "ship: could not open PR";; esac
+  fi
+  url=$(printf '%s\n' "$url" | tail -1)
+  case $url in https://?*) ;; *) die "ship: gh pr create did not print an https:// URL";; esac
+  conf_set "$c" pr_url "$url"
+  echo "$url"
 }
 
 cmd_status() { # df status <run-id>: regenerate and print progress.md
@@ -308,21 +387,79 @@ cmd_list() {
   done
 }
 
-cmd_clean() { # df clean <run-id> [--force]: removes worktree and state, keeps the branch
-  local rd c wt
-  [ -n "${1:-}" ] || die "clean: run id required"
-  rd=$(run_dir "$1"); c="$rd/run.conf"
-  [ -f "$c" ] || die "no such run: $1"
-  if [ "${2:-}" != --force ] && [ "$(cmd_lock "$1" check)" = live ]; then die "run is live; use --force"; fi
+cmd_sweep() { # df sweep: list runs whose PR is merged; always exit 0, never writes
+  local c u b id
+  git rev-parse --git-dir >/dev/null 2>&1 || return 0
+  command -v gh >/dev/null 2>&1 || return 0
+  for c in "$(state_root)"/*/run.conf; do
+    [ -e "$c" ] || continue
+    u=$(conf_get "$c" pr_url); b=$(conf_get "$c" branch)
+    case $u in https://*) ;; *) continue;; esac
+    git check-ref-format --branch "$b" >/dev/null 2>&1 || continue
+    id=$(basename "$(dirname "$c")")
+    [ "$(GH_PROMPT_DISABLED=1 gh pr view "$u" --json state --jq .state 2>/dev/null)" = MERGED ] && printf '%s %s %s\n' "$id" "$u" "$b"
+  done
+  return 0
+}
+
+physpath() { # physical path of a dir, or of a missing dir via its parent
+  if [ -d "$1" ]; then (cd -P "$1" && pwd -P); else printf '%s/%s\n' "$(cd -P "$(dirname "$1")" 2>/dev/null && pwd -P)" "$(basename "$1")"; fi
+}
+
+cmd_clean() { # df clean <run-id> [--force] [--branch]: removes worktree and state; --branch also deletes the local branch
+  local rd c wt id=${1:-} force="" hb="" usage br ps own p line cur lh u
+  usage="usage: df clean <run-id> [--force] [--branch]"
+  case $id in ""|-*) die "clean: run id required; $usage" ;; esac
+  shift
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --force) [ -z "$force" ] || die "$usage"; force=1 ;;
+      --branch) [ -z "$hb" ] || die "$usage"; hb=1 ;;
+      *) die "$usage" ;;
+    esac
+    shift
+  done
+  rd=$(run_dir "$id"); c="$rd/run.conf"
+  [ -f "$c" ] || die "no such run: $id"
+  if [ -z "$force" ] && [ "$(cmd_lock "$id" check)" = live ]; then die "run is live; use --force"; fi
   wt=$(conf_get "$c" worktree)
+  if [ -n "$hb" ]; then
+    br=$(conf_get "$c" branch); ps=$(conf_get "$c" pushed_sha)
+    printf '%s' "$ps" | grep -Eq '^[0-9a-f]{40}$' || die "clean: --branch needs a recorded pushed_sha"
+    git check-ref-format --branch "$br" >/dev/null 2>&1 || die "clean: bad branch name"
+    if [ -d "$wt" ] && [ -n "$(git -C "$wt" status --porcelain)" ]; then die "clean: worktree has uncommitted changes"; fi
+    if git show-ref --verify --quiet "refs/heads/$br" && [ "$(git rev-parse "refs/heads/$br")" != "$ps" ]; then
+      die "clean: branch head differs from pushed_sha"
+    fi
+    # pushed_sha is only a note in run.conf; the remote is the proof that nothing unpushed is lost:
+    # origin has this exact head, or (the host deleted the branch after merging) the PR merged at it.
+    if git show-ref --verify --quiet "refs/heads/$br"; then
+      lh=$(git rev-parse "refs/heads/$br")
+      if [ "$(GIT_TERMINAL_PROMPT=0 git ls-remote origin "refs/heads/$br" 2>/dev/null | cut -f1)" != "$lh" ]; then
+        u=$(conf_get "$c" pr_url)
+        case $u in https://?*) ;; *) die "clean: the branch head is not on origin and no PR is recorded";; esac
+        command -v gh >/dev/null 2>&1 || die "clean: the branch head is not on origin and gh is not available to check the PR"
+        [ "$(GH_PROMPT_DISABLED=1 gh pr view "$u" --json state,headRefOid --jq '.state + " " + .headRefOid' 2>/dev/null)" = "MERGED $lh" ] ||
+          die "clean: the branch head is not on origin and the PR did not merge at this head"
+      fi
+    fi
+    own=$(physpath "$wt"); cur=""
+    while IFS= read -r line; do
+      case $line in
+        "worktree "*) cur=${line#worktree } ;;
+        "branch refs/heads/$br") p=$(physpath "$cur"); [ "$p" = "$own" ] || die "clean: branch is checked out in $cur" ;;
+      esac
+    done < <(git worktree list --porcelain)
+  fi
   if [ -d "$wt" ]; then
-    if [ "${2:-}" != --force ] && [ -n "$(git -C "$wt" status --porcelain)" ]; then
+    if [ -z "$hb" ] && [ -z "$force" ] && [ -n "$(git -C "$wt" status --porcelain)" ]; then
       die "worktree has uncommitted changes; use --force"
     fi
     git worktree remove --force "$wt"
   fi
   rm -rf "$rd"
   git worktree prune
+  if [ -n "$hb" ] && git show-ref --verify --quiet "refs/heads/$br"; then git branch -D -- "$br" >/dev/null; fi
 }
 
 cmd=${1:-}; [ $# -gt 0 ] && shift
@@ -341,6 +478,9 @@ case "$cmd" in
   status) cmd_status "$@";;
   list) cmd_list;;
   clean) cmd_clean "$@";;
+  ship) cmd_ship "$@";;
+  sweep) cmd_sweep;;
+  fixed) cmd_fixed "$@";;
   finish) cmd_finish "$@";;
   run-dir) run_dir "$@";;
   conf-get) conf_get "$@";;
@@ -348,5 +488,5 @@ case "$cmd" in
   fm-get) fm_get "$@";;
   fm-set) fm_set "$@";;
   write) atomic "$@";;
-  *) die "usage: df {start|validate|verdict|gate|lock|snapshot|check-diff|canary-scan|srchash|commit|scrub|status|list|clean|finish|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
+  *) die "usage: df {start|validate|verdict|gate|lock|snapshot|check-diff|canary-scan|srchash|commit|scrub|status|list|clean|fixed|finish|ship|sweep|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
 esac
