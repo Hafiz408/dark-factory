@@ -109,11 +109,12 @@ Show one screen:
 - Commands the run will execute (from `env.commands`) and any new dependencies it will install.
 - Uncommitted files not included. Unmet needs from preflight. Queued follow-up runs for mixed
   input.
-- Budgets: 3 attempts per chunk, 4 hours wall clock, severity gate medium and above.
+- Budgets: 3 attempts per chunk, 3 review rounds, 2 QA rounds, 4 hours wall clock, severity
+  gate medium and above.
 - `Recommend abort: <reason>` if the risk lens found infeasibility or preflight found an unmet
   hard requirement.
 Ask: approve, amend `<what>` (re-run only the affected stages; at most 3 amend cycles), or
-abort. Record the approval in `log.md`. This is the last time you ask the user anything.
+abort. Record the approval in `log.md`. This is the last question before the report.
 
 ### slice
 `mv` each file from `chunks-draft/` to `chunks/`. Run `{DF} validate <id>`.
@@ -139,7 +140,7 @@ for attempt in 1..3:
     gate = {DF} gate (integrity + tester findings)
     if blocking: write failure note, reset, continue
     for each read-only role below: S=$({DF} snapshot {WT}) before, compare after
-    in ONE message spawn qa-functional + reviewer(quality) + reviewer(security) + reviewer(impact)
+    in ONE message spawn reviewer(quality) + reviewer(ponytail) + reviewer(security) + reviewer(impact)
     merge findings, apply the severity gate and precedence
     if blocking: write ONE merged note (symptoms only), reset, continue
     {DF} commit {WT} "df(chunk NN): title"       # stages everything except tool artefacts
@@ -163,18 +164,18 @@ Details you must follow:
   track the conservative default is the one that makes the reported input behave correctly:
   if the cause sits in a source file outside the chunk's `scope`, add that file to `scope`
   (log it) and fix it. A test-only outcome is acceptable only when the defect cannot be
-  reproduced at all, and then the report must say so first (see Integrate).
+  reproduced at all, and then the report must say so first (see Report and finish).
 - **Read-only violation.** If `{DF} snapshot` differs after a read-only role, that is a
   `critical` integrity finding. Reset and continue.
 - **Merging findings.** Feed the concatenated findings through `{DF} gate`. On contradictions,
-  precedence is security, then functional and impact, then quality, then ponytail.
+  precedence is security, then goal, functional and impact, then quality, then ponytail.
 - **Waiver.** A finding that survives two attempts with a builder rebuttal in the chunk notes
   goes to `reviewer` with lens `adjudicate`. `waived` is recorded in `log.md`; never for critical.
 - **Stall.** If two attempts fail with the same top finding, tell the next builder to take a
   different approach. A third identical failure ends the chunk.
 - **Late finds.** From attempt 2 pass the previous attempt's patch and findings to reviewers so
   they can tag `late-find`.
-- **SCENARIO_INVALID** from qa-functional: spawn `qa-author` once to rewrite that scenario, else
+- **SCENARIO_INVALID** from qa-functional (QA stage): spawn `qa-author` once to rewrite that scenario, else
   mark it `executable: no`.
 - **BLOCKED chunk**: allow one re-plan per run (planner receives the failure notes). Still
   blocked: mark transitive dependents SKIPPED and continue with independent chunks.
@@ -187,25 +188,57 @@ Details you must follow:
 - **Milestone lines.** The user sees one line per milestone, not per role spawn, in the form
   `[df <run-id>] <stage>: <event>`, where `<stage>` is the `stage` value in `run.conf`. Examples:
   `[df r261125-101500-123] loop: chunk 02 PASS (2/4), attempt 1` and
-  `[df r261125-101500-123] integrate: round 2, 1 blocking (security)`. The milestones are: a
-  stage is entered; a chunk reaches PASS, is retried, or is BLOCKED; each Integrate review
-  round; the QA result; and the end of the run, as `[df <run-id>] done: <green or not green>`.
+  `[df r261125-101500-123] review: round 2, 1 blocking (security)`. The milestones are: a
+  stage is entered; a chunk reaches PASS, is retried, or is BLOCKED; each review round; each
+  QA round's result; a pause; and the end of the run, as `[df <run-id>] done: <green or not green>`.
   That closing line is printed once, after `{DF} finish`, as the last line before the final
   message; entering the `done` stage is not announced separately. Every line has both parts
   and nothing after the event. Print nothing else between sign-off and the final message,
   except a stop that needs the user (a permission denial, an exhausted budget).
 
-## Integrate
+## Review (stage `review`)
 
-1. In ONE message spawn the three static reviewers (quality, security, impact) over the whole
-   branch diff against `root_base_sha`, while you run the full suite yourself.
-2. Then spawn `qa-functional` over every scenario against the final branch.
-3. Medium-and-above findings become fix chunks `FX-1`, `FX-2`, ... through the same loop. At
-   most 2 fix rounds. Write each fix chunk's `scope` to cover every file named in its findings,
-   and list any existing test or test helper among them in `touches_tests`; otherwise the
-   integrity check rejects the attempt. A fix chunk changes only what its findings name: no new
-   test files, README or other prose unless a finding is about them.
-4. Write `report.md`. It starts with two sections:
+The consolidated review of the whole branch. QA does not start until this is clean. A run
+started on v0.1 may show stage `integrate`; treat it as `review`.
+
+1. In ONE message spawn reviewer(quality), reviewer(ponytail), reviewer(security),
+   reviewer(impact) and reviewer(goal) over the whole branch diff against `root_base_sha`,
+   while you run the full suite yourself. Pass the chunk files to the goal reviewer only.
+   Snapshot around these read-only roles as in the loop.
+2. Feed the findings through `{DF} gate`. Blocking findings, and a red suite, become fix chunks
+   `FX-1`, `FX-2`, ... through the same loop. Write each fix chunk's `scope` to cover every
+   file named in its findings, and list any existing test or test helper among them in
+   `touches_tests`; otherwise the integrity check rejects the attempt. A fix chunk changes only
+   what its findings name: no new test files, README or other prose unless a finding is about
+   them. Then run step 1 again; that is the next round.
+3. Cap: `max_review_rounds` in `run.conf` (default 3). The count restarts each time QA sends
+   work back here.
+4. **Stopping before QA.** The run does not enter QA when the cap is reached with blocking
+   findings left, or when any chunk is BLOCKED or SKIPPED (no fix chunks are made for a chunk
+   that already used its attempts and its re-plan). Instead: write the report (below), with
+   `PAUSED: <what is open>` as its first line; run
+   `{DF} conf-set {RD}/run.conf waiting_on "<what is open>"` and
+   `{DF} conf-set {RD}/run.conf status paused`; leave `stage` where it is; run
+   `{DF} lock <id> release <session-id>`; and tell the user what is open and that `resume`
+   continues after they raise the cap with `{DF} conf-set` or amend the plan. Do not run
+   `{DF} finish` for a paused run.
+
+## QA (stage `qa`)
+
+Functional QA runs only against a branch the review passed.
+
+1. Spawn `qa-functional` over every scenario against the reviewed branch, with a snapshot
+   before and after.
+2. All pass: go to Report and finish.
+3. A failure becomes a fix chunk through the loop. It carries symptoms only, never scenario
+   text. The fix then goes back through Review (its round count restarts at 1) before QA runs
+   again. One pass through this stage is one QA round.
+4. Cap: `max_qa_rounds` in `run.conf` (default 2). On the cap with failures left, pause exactly
+   as in Review step 4.
+
+## Report and finish
+
+1. Write `report.md`. It starts with two sections:
    - `## Functional changes`: bullets of user-visible behaviour, one per acceptance criterion
      in `spec.md` that QA confirmed. A criterion QA did not confirm is listed last, marked
      "not confirmed", with the reason.
@@ -219,7 +252,7 @@ Details you must follow:
    finish` prints `NOT FIXED` (the branch changes no source), the report's first line is
    `NOT FIXED: <why>`, above both sections, and your first sentence to the user says the
    reported problem is still present and what a human must decide.
-5. `{DF} finish <id> <session-id>` (sets stage to done and status to done, or to `unresolved` when a bugfix branch changes no source, and releases the lock).
+2. For a run that completed QA: `{DF} finish <id> <session-id>` (sets stage to done and status to done, or to `unresolved` when a bugfix branch changes no source, and releases the lock).
    If it prints `NOT FIXED`, put the `NOT FIXED: <why>` line at the top of `report.md` now.
    Your final message to the user is, in this order: the NOT FIXED sentence when it applies,
    the two sections, the one plain sentence stating whether the branch is green, and one line
@@ -228,6 +261,8 @@ Details you must follow:
 ## Resume
 
 1. Pick the run: the id given, else the most recent unfinished one (stage is not `done`); ask only if several.
+   A run with status `paused`: show its `waiting_on`, set `status active`, and continue at the
+   recorded stage. If the same cap is still reached it pauses again at once; say so.
    A run with status `unresolved` is finished: report it, do not resume it.
 2. Pick a new session id, then `{DF} lock <id> acquire <session-id>`. If it refuses, say the run is live in another session and stop
    (the user may pass `--force`, which releases the lock first).

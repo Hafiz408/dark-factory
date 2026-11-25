@@ -19,10 +19,10 @@ every lens file is self-sufficient).
 
 In v1:
 - Tracks `bugfix`, `feature`, `build`, chosen by an invisible router.
-- One human gate (sign-off). Refine questions and preflight precede it, nothing follows it.
-- Per-chunk loop: build, test, then a parallel QA panel of four agents.
+- One human gate (sign-off). The base question, refine questions and preflight precede it; it is the last question before the report.
+- Per-chunk loop: build, test, then a parallel review panel of four lenses.
 - Progress tracking, status, resume, clean.
-- Parallel subagents inside stages (refine lenses, plan, QA panel, integrate).
+- Parallel subagents inside stages (refine lenses, plan, review panel, consolidated review).
 
 Out of v1:
 - Cross-chunk parallel waves, `refactor` and `chore` tracks (v1.1).
@@ -50,7 +50,7 @@ Out of v1:
 ```
 /dark-factory <input>
  Intake -> Route -> Refine (you answer) -> Plan + QA checklist -> Preflight
- -> SIGN-OFF -> Slice -> per chunk [Build -> Test -> QA panel x4] -> Integrate -> Report
+ -> SIGN-OFF -> Slice -> per chunk [Build -> Test -> Review panel x4] -> Review -> QA -> Report
 ```
 
 | # | Stage | What happens | Output |
@@ -64,7 +64,8 @@ Out of v1:
 | 6 | Sign-off | The only gate. One-screen summary: the base, the approach with alternatives and trade-offs (at most ten lines, from `plan.md`), and the chunks as a to-do list. approve, amend, or abort. | `log.md` |
 | 7 | Slice | One file per chunk | `chunks/NN.md` |
 | 8 | Loop | Section 6 | commits on the run branch |
-| 9 | Integrate | Section 6 | `report.md` |
+| 9 | Review | Section 6. Whole-branch review, five lenses, looped until clean | fix chunks |
+| 10 | QA | Section 6. Holdout scenarios against the reviewed branch | `report.md` |
 
 ### Sign-off summary
 
@@ -131,8 +132,10 @@ reset = git reset --hard <base_sha> && git clean -fd   (no -x: ignored deps and 
 |---|---|---|---|
 | builder | spec, plan, own chunk, last failure note | implements the chunk | read `scenarios/`, edit outside chunk scope |
 | tester | spec, chunk, diff | writes or extends tests, runs suite, lint, typecheck; checks new tests fail without the change | read `scenarios/`, edit non-test code |
-| qa-functional | checklist and scenarios for this and earlier chunks, running code | executes each item with evidence | edit any file |
-| reviewer: quality | diff, spec, conventions | correctness and maintainability, then `ponytail:ponytail-review` or its inlined rubric | edit any file |
+| qa-functional | checklist and every scenario, the reviewed branch (QA stage only) | executes each item with evidence | edit any file |
+| reviewer: quality | diff, spec, conventions | correctness and maintainability | edit any file |
+| reviewer: ponytail | diff, spec, plan | over-engineering: `ponytail:ponytail-review` or its inlined rubric | edit any file |
+| reviewer: goal | final diff, spec, chunk files (consolidated review only) | every acceptance criterion and "Done when" met or not met, with evidence | edit any file |
 | reviewer: security | diff, manifests, config | validation, injection, authn/authz, secrets, unsafe deps, exposure; runs scanners if present, otherwise declares `unscanned` | edit any file |
 | reviewer: impact | diff, repo, existing tests | callers of changed symbols, interface/schema/config changes, affected tests | edit any file |
 | reviewer: adjudicate | one disputed finding, builder rebuttal, code | rules the finding valid or `WAIVED` | edit any file |
@@ -151,8 +154,8 @@ abstraction = medium; speculative subsystem = high; small dead flexibility = low
   previous attempt's review is tagged `late-find`, is advisory, and is listed in the
   report. High and critical always block. Findings on changed lines, and findings carried
   over from earlier attempts, keep blocking at medium.
-- **Precedence on contradiction:** security, then functional and impact, then quality, then
-  ponytail. The merged note keeps the higher one and drops the lower.
+- **Precedence on contradiction:** security, then goal, functional and impact, then quality,
+  then ponytail. The merged note keeps the higher one and drops the lower.
 - **Waiver.** A finding that survives two attempts with a builder rebuttal in the chunk
   notes goes to `reviewer: adjudicate`. A `WAIVED` ruling is listed in the report with the
   reasoning. Waivers are not available for critical findings.
@@ -178,16 +181,32 @@ medium or above in its file is treated as `FAIL`.
 subagent usage reports. Exhaustion stops gracefully, writes the report, and the run stays
 resumable with a raised budget.
 
-### Integrate
+### Review, then QA
 
-1. Static reviewers (quality, security, impact) run in parallel with the full suite.
-2. `qa-functional` then runs every scenario against the final branch. (Suite and functional
-   QA do not overlap, to avoid port and database collisions. Each run also gets its own
-   port range `DF_PORT_BASE` and database name suffix.)
-3. Findings of medium or above become fix chunks `FX-n` through the normal loop. At most 2
-   fix rounds, then remaining findings go in the report. If a fix chunk regresses an
-   earlier scenario the regression is a finding like any other; the report states plainly
-   whether the final branch is green.
+Functional QA runs only against a branch the review has passed.
+
+1. **Per chunk**, after the tester passes: a review panel of four in parallel (quality,
+   ponytail, security, impact). `qa-functional` is not part of it.
+2. **Stage `review`** (called `integrate` in v0.1; `df validate` accepts the old name as an
+   alias): the same four lenses plus `goal` over the whole branch diff, in parallel with the
+   full suite. The goal lens checks every acceptance criterion and every chunk's "Done when"
+   against the final diff; one not met is `high`. Findings of medium or above become fix
+   chunks `FX-n` through the normal loop, then the review runs again. Cap:
+   `max_review_rounds` (3), restarting each time QA sends work back.
+3. **Stage `qa`**: `qa-functional` runs every scenario against the reviewed branch. A failure
+   becomes a fix chunk (symptoms only), which goes back through the review before QA runs
+   again. Cap: `max_qa_rounds` (2). (Suite and functional QA do not overlap, to avoid port and
+   database collisions. Each run also gets its own port range `DF_PORT_BASE` and database
+   name suffix.)
+3a. **Stopping before QA.** When a cap is reached with blocking findings, or any chunk is
+   BLOCKED or SKIPPED, the run writes its report, sets status `paused` with `waiting_on`, keeps
+   its stage and releases the lock. `resume` continues after the user raises the cap or amends
+   the plan. `unresolved` keeps its v0.1 meaning.
+
+Trade-off accepted: wrong behaviour is found after review instead of per chunk, so a
+functional miss costs a fix chunk plus a review round. The tester still runs the suite per
+chunk, which is the early signal.
+
 4. `report.md` opens with `## Functional changes` (user-visible behaviour, one bullet per
    acceptance criterion QA confirmed; an unconfirmed one is marked as such) and
    `## Technical changes` (high level: modules, dependencies, schema, config, migrations).
@@ -195,8 +214,8 @@ resumable with a raised budget.
    and worktree path; a `NOT FIXED` sentence comes first when it applies.
 
 Progress to the user is one line per milestone, not per role spawn:
-`[df <run-id>] <stage>: <event>` (stage entered; chunk PASS, retry or BLOCKED; each Integrate
-review round; the QA result; and a closing `done:` line). Before `df start` the user is asked
+`[df <run-id>] <stage>: <event>` (stage entered; chunk PASS, retry or BLOCKED; each review
+round; each QA round; the QA result; and a closing `done:` line). Before `df start` the user is asked
 which base to branch from; a base written as `<remote>/<branch>` is fetched first, falling back
 to the local copy with a warning.
 
@@ -206,8 +225,8 @@ to the local copy with a warning.
 |---|---|---|
 | Refine | 3 refiner lenses | merged gap list |
 | Plan | planner, qa-author | plan-coverage reviewer |
-| Per chunk | 4 QA panel agents (after tester passes) | merged findings |
-| Integrate | static reviewers with the full suite | then qa-functional |
+| Per chunk | 4 review lenses (after tester passes) | merged findings |
+| Review | 5 review lenses with the full suite | merged findings, then the QA stage |
 | Not parallel | build then test, test then panel, user answers | |
 | v1.1 | independent file-disjoint chunks in sub-worktrees | merge in order |
 
@@ -216,7 +235,7 @@ to the local copy with a warning.
 The orchestrator is a skill running in the user's main thread. It spawns agents; agents
 never spawn agents. Whether a plugin subagent can call the Skill tool (for
 `ponytail:ponytail-review`) is unverified and is a build-time spike with an inlined-rubric
-fallback in `lenses/quality.md`.
+fallback in `lenses/ponytail.md`.
 
 ## 8. State, progress, resume, clean
 
@@ -227,7 +246,7 @@ State lives in a **hidden sibling of the main clone**, not in the working tree a
 the first live run.) The user is asked once to allow the parent directory.
 
 ```
-run.conf          track, worktree, branch, base_ref, root_base_sha, env, budget, stage cursor, status
+run.conf          track, worktree, branch, base_ref, root_base_sha, env, budget, max_review_rounds, max_qa_rounds, stage cursor, status
 lock              session id + heartbeat, refreshed on every verdict
 input.md          raw request (scrubbed)
 questions.md      refine questions, pending and answered

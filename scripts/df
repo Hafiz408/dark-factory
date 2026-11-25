@@ -18,7 +18,7 @@ conf_set() {
   case "$2=$3" in
     status=active|status=waiting_permission|status=paused|status=done|status=unresolved|status=aborted) ;;
     status=*) die "conf-set: invalid status '$3'";;
-    stage=intake|stage=route|stage=refine|stage=plan|stage=preflight|stage=signoff|stage=slice|stage=loop|stage=integrate|stage=done) ;;
+    stage=intake|stage=route|stage=refine|stage=plan|stage=preflight|stage=signoff|stage=slice|stage=loop|stage=integrate|stage=review|stage=qa|stage=done) ;; # integrate: v0.1 name for review
     stage=*) die "conf-set: invalid stage '$3'";;
     track=unrouted|track=bugfix|track=feature|track=build) ;;
     track=*) die "conf-set: invalid track '$3'";;
@@ -93,7 +93,7 @@ cmd_start() { # df start <input-file> [--base <ref>] [--branch <name>]   (DF_ALL
   cp "$input" "$rd/input.md"
   { echo "track=unrouted"; echo "worktree=$wt"; echo "branch=$branch"; echo "root_base_sha=$base"; echo "base_ref=$baseref"
     echo "stage=intake"; echo "status=active"
-    echo "started=$(date +%s)"; echo "budget_seconds=${DF_BUDGET_SECONDS:-14400}"; echo "max_attempts=3"; } | atomic "$rd/run.conf"
+    echo "started=$(date +%s)"; echo "budget_seconds=${DF_BUDGET_SECONDS:-14400}"; echo "max_attempts=3"; echo "max_review_rounds=3"; echo "max_qa_rounds=2"; } | atomic "$rd/run.conf"
   echo "$id"
 }
 
@@ -105,7 +105,7 @@ cmd_validate() { # df validate <run-id>
     [ -n "$(conf_get "$c" $k)" ] || die "$c: missing $k"
   done
   case "$(conf_get "$c" track)" in unrouted|bugfix|feature|build) ;; *) die "$c: bad track";; esac
-  case "$(conf_get "$c" stage)" in intake|route|refine|plan|preflight|signoff|slice|loop|integrate|done) ;; *) die "$c: bad stage";; esac
+  case "$(conf_get "$c" stage)" in intake|route|refine|plan|preflight|signoff|slice|loop|integrate|review|qa|done) ;; *) die "$c: bad stage";; esac
   case "$(conf_get "$c" status)" in active|waiting_permission|paused|done|unresolved|aborted) ;; *) die "$c: bad status";; esac
   git cat-file -e "$(conf_get "$c" root_base_sha)^{commit}" 2>/dev/null || die "$c: root_base_sha not found"
   for f in "$rd"/chunks/*.md; do
@@ -274,10 +274,12 @@ cmd_status() { # df status <run-id>: regenerate and print progress.md
   rd=$(run_dir "$1"); c="$rd/run.conf"
   cmd_validate "$1"
   out="Run $1   track: $(conf_get "$c" track)   stage: $(conf_get "$c" stage)   status: $(conf_get "$c" status)"
-  if [ "$(conf_get "$c" status)" = waiting_permission ]; then
-    out="$out
-  needs permission: $(conf_get "$c" waiting_on)"
-  fi
+  case "$(conf_get "$c" status)" in
+    waiting_permission) out="$out
+  needs permission: $(conf_get "$c" waiting_on)" ;;
+    paused) out="$out
+  waiting on: $(conf_get "$c" waiting_on)" ;;
+  esac
   for f in "$rd"/chunks/*.md; do
     [ -e "$f" ] || continue
     out="$out
