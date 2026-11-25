@@ -166,4 +166,16 @@ echo "do it" > "$SP/../in.txt"
 id3=$(cd "$SP" && "$DF" start "$SP/../in.txt")
 assert_ok "run starts in a path with spaces" bash -c "cd '$SP' && '$DF' validate '$id3'"
 
+# Slice 1 branch review: no leftovers under DF_ALLOW_INIT, single-branch clones, refs/ branch names
+for flags in "--base nope" "--branch a..b"; do
+  EI=$(mktemp -d); echo x > "$EI/in.txt"
+  assert_fail "DF_ALLOW_INIT refuses $flags" bash -c "cd '$EI' && DF_ALLOW_INIT=1 '$DF' start '$EI/in.txt' $flags"
+  assert_fail "refused $flags leaves no .git behind" test -e "$EI/.git"
+done
+RO=$(mkrepo); ( cd "$RO" && git checkout -q -b side && echo s > s.txt && git add s.txt && git commit -qm side && git checkout -q - )
+RC="$(mktemp -d)/c"; git clone -q --single-branch "$RO" "$RC"; echo x > "$RC/../in.txt"
+i6=$(cd "$RC" && "$DF" start "$RC/../in.txt" --base origin/side)
+assert_eq "$(git -C "$RO" rev-parse side)" "$(cd "$RC" && "$DF" conf-get "$("$DF" run-dir "$i6")/run.conf" root_base_sha)" "a remote branch the clone does not track is fetched"
+assert_fail "a branch name under refs/ is refused" bash -c "cd '$RC' && '$DF' start '$RC/../in.txt' --branch refs/heads/zz"
+
 finish

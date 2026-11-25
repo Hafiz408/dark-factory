@@ -57,32 +57,36 @@ cmd_start() { # df start <input-file> [--base <ref>] [--branch <name>]   (DF_ALL
     shift 2
   done
   [ -f "$input" ] && [ -r "$input" ] || die "start: input file '$input' not found"
+  # Everything that can refuse runs before git init, so a refusal leaves nothing behind.
+  if [ -n "$hr" ]; then
+    case $branch in refs/*) die "start: invalid branch name '$branch'" ;; esac
+    [ "$(git check-ref-format --branch "$branch" 2>/dev/null)" = "$branch" ] || die "start: invalid branch name '$branch'"
+  fi
+  [ -z "$hb" ] || git rev-parse -q --verify HEAD >/dev/null 2>&1 || die "start: base ref '$bref' not found"
   if ! git rev-parse --git-dir >/dev/null 2>&1; then
     [ "${DF_ALLOW_INIT:-}" = 1 ] || die "not a git repo (DF_ALLOW_INIT=1 allows git init for the build track)"
     git init -q
   fi
   git rev-parse HEAD >/dev/null 2>&1 ||
     git -c user.name=dark-factory -c user.email=df@localhost commit -q --allow-empty -m "df: initial commit"
-  if [ -n "$hr" ]; then
-    [ "$(git check-ref-format --branch "$branch" 2>/dev/null)" = "$branch" ] || die "start: invalid branch name '$branch'"
-    ! git show-ref --verify -q "refs/heads/$branch" || die "start: branch '$branch' already exists"
-  fi
+  [ -z "$hr" ] || ! git show-ref --verify -q "refs/heads/$branch" || die "start: branch '$branch' already exists"
   top=$(git rev-parse --show-toplevel)
   id="r$(date +%y%m%d-%H%M%S)-$$"
   wt="$(dirname "$top")/$(basename "$top")-df-$id"
   [ -n "$hr" ] || branch="df/$id"
-  if [ -n "$hb" ]; then # fetch only <remote>/<rest> with a plain rest: never an option, refspec or force
+  if [ -n "$hb" ]; then # fetch only <remote>/<branch> with a plain branch: never a caller-supplied option or refspec.
+    # Other spellings (origin/HEAD, refs/remotes/..., origin/x~1) resolve from the local copy, unfetched.
     rem=${bref%%/*}; rest=${bref#*/}
     case $rest in ""|"$bref"|*:*|+*|-*) rem="" ;; esac
     if [ -n "$rem" ] && git remote | grep -qxF -- "$rem" && git check-ref-format "refs/remotes/$bref"; then
-      if ! GIT_TERMINAL_PROMPT=0 git -c core.sshCommand='ssh -oBatchMode=yes' fetch -q -- "$rem" "$rest" 2>/dev/null; then
+      if ! GIT_TERMINAL_PROMPT=0 git fetch -q -- "$rem" "+refs/heads/$rest:refs/remotes/$rem/$rest" 2>/dev/null; then
         echo "df: could not fetch $bref; using the cached copy" >&2
       fi
     fi
   fi
   base=$(git rev-parse --verify -q "${bref:-HEAD}^{commit}") || die "start: base ref '$bref' not found"
   baseref=${hb:+$bref}; [ -n "$hb" ] || baseref=$(git symbolic-ref -q --short HEAD || echo detached)
-  git worktree add -q -b "$branch" "$wt" "$base"
+  git worktree add -q -b "$branch" "$wt" "$base" || die "start: could not create the worktree on '$branch'"
   rd=$(run_dir "$id")
   mkdir -p "$rd/chunks" "$rd/scenarios" "$rd/panel"
   git status --porcelain > "$rd/dirty.txt"
