@@ -42,7 +42,7 @@ TEST_RE='(^|/)(tests?|spec|__tests__)/|(_test|\.test|\.spec)\.[A-Za-z]+$|(^|/)te
 SECRET_RE='AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|([Pp]assword|[Pp]asswd|PASSWORD|[Ss]ecret|SECRET|[Tt]oken|TOKEN|[Aa]pi[_-]?[Kk]ey|API[_-]?KEY)[ ]*[=:][ ]*[^ ]+'
 
 cmd_start() { # df start <input-file> [--base <ref>] [--branch <name>]   (DF_ALLOW_INIT=1 permits git init, build track only)
-  local input=${1:-} top id wt rd base bref="" branch="" baseref="" hb="" hr="" usage
+  local input=${1:-} rem rest top id wt rd base bref="" branch="" baseref="" hb="" hr="" usage
   usage="usage: df start <input-file> [--base <ref>] [--branch <name>]"
   case $input in ""|-*) die "$usage" ;; esac
   shift
@@ -71,6 +71,15 @@ cmd_start() { # df start <input-file> [--base <ref>] [--branch <name>]   (DF_ALL
   id="r$(date +%y%m%d-%H%M%S)-$$"
   wt="$(dirname "$top")/$(basename "$top")-df-$id"
   [ -n "$hr" ] || branch="df/$id"
+  if [ -n "$hb" ]; then # fetch only <remote>/<rest> with a plain rest: never an option, refspec or force
+    rem=${bref%%/*}; rest=${bref#*/}
+    case $rest in ""|"$bref"|*:*|+*|-*) rem="" ;; esac
+    if [ -n "$rem" ] && git remote | grep -qxF -- "$rem" && git check-ref-format "refs/remotes/$bref"; then
+      if ! GIT_TERMINAL_PROMPT=0 git -c core.sshCommand='ssh -oBatchMode=yes' fetch -q -- "$rem" "$rest" 2>/dev/null; then
+        echo "df: could not fetch $bref; using the cached copy" >&2
+      fi
+    fi
+  fi
   base=$(git rev-parse --verify -q "${bref:-HEAD}^{commit}") || die "start: base ref '$bref' not found"
   baseref=${hb:+$bref}; [ -n "$hb" ] || baseref=$(git symbolic-ref -q --short HEAD || echo detached)
   git worktree add -q -b "$branch" "$wt" "$base"

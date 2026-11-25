@@ -85,6 +85,40 @@ G=$(mktemp -d); echo x > "$G/in.txt"
 ( cd "$G" && DF_ALLOW_INIT=1 "$DF" start "$G/in.txt" --bogus v >/dev/null 2>&1 )
 assert_fail "usage error under DF_ALLOW_INIT leaves no .git" test -e "$G/.git"
 
+# remote base fetch (AC-7..AC-10)
+O=$(mkrepo); ob=$(git -C "$O" symbolic-ref --short HEAD); git -C "$O" branch x
+C="$(mktemp -d)/c"; git clone -q "$O" "$C"; echo y > "$C/in.txt"
+SC="$(dirname "$C")/.df-$(basename "$C")"
+git -C "$O" commit -q --allow-empty -m advanced; OH=$(git -C "$O" rev-parse "$ob")
+fr=$(cd "$C" && "$DF" start "$C/in.txt" --base "origin/$ob")
+fw=$(cd "$C" && "$DF" conf-get "$SC/$fr/run.conf" worktree)
+assert_eq "$OH" "$(git -C "$fw" rev-parse HEAD)" "fetch: worktree at origin's new head"
+assert_eq "$OH" "$(cd "$C" && "$DF" conf-get "$SC/$fr/run.conf" root_base_sha)" "fetch: root_base_sha is origin's new head"
+CACHED=$(git -C "$C" rev-parse "origin/$ob")
+git -C "$C" remote set-url origin /nonexistent/remote
+fr=$(cd "$C" && "$DF" start "$C/in.txt" --base "origin/$ob" 2>"$C/err")
+assert_contains "df: could not fetch origin/$ob; using the cached copy" "$(cat "$C/err")" "unreachable remote: could not fetch line"
+assert_eq "$CACHED" "$(cd "$C" && "$DF" conf-get "$SC/$fr/run.conf" root_base_sha)" "unreachable remote: cached commit used"
+sc() { echo "$(ls "$SC" | wc -l | tr -d ' ')|$(git -C "$C" worktree list)|$(git -C "$C" branch --list)"; }
+b4=$(sc); err=$(cd "$C" && "$DF" start "$C/in.txt" --base origin/nocache 2>&1 >/dev/null); rc=$?
+assert_eq "1" "$rc" "uncached base, unreachable remote: exit 1"
+assert_eq "df: could not fetch origin/nocache; using the cached copy
+df: start: base ref 'origin/nocache' not found" "$err" "uncached base, unreachable remote: messages"
+assert_eq "$b4" "$(sc)" "uncached base, unreachable remote: no leftovers"
+# guarded refs: a real fetch here would create a branch, move a stale tracking ref, or run a command
+git -C "$C" remote set-url origin "$O"
+git -C "$C" update-ref refs/remotes/origin/x "$CACHED"
+git -C "$O" commit -q --allow-empty -m x2; git -C "$O" checkout -q x; git -C "$O" commit -q --allow-empty -m xx; git -C "$O" checkout -q "$ob"
+refs() { git -C "$C" for-each-ref; }
+for bad in "origin/x:refs/heads/created" "origin/+x" "origin/--upload-pack=touch $C/pwned" "origin/--tags"; do
+  r4=$(refs); b4=$(sc); err=$(cd "$C" && "$DF" start "$C/in.txt" --base "$bad" 2>&1 >/dev/null); rc=$?
+  assert_eq "1" "$rc" "no fetch '$bad': exit 1"
+  assert_eq "df: start: base ref '$bad' not found" "$err" "no fetch '$bad': refused, nothing fetched"
+  assert_eq "$r4" "$(refs)" "no fetch '$bad': refs unchanged"
+  assert_eq "$b4" "$(sc)" "no fetch '$bad': no leftovers"
+done
+assert_fail "no fetch: no command executed" test -e "$C/pwned"
+
 # not a git repo
 N=$(mktemp -d); echo x > "$N/in.txt"
 assert_fail "non-git dir refused" bash -c "cd '$N' && '$DF' start '$N/in.txt'"
