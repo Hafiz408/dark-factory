@@ -29,7 +29,7 @@ for line in "ready_url : http://example.com/" "  ready_url: http://evil.com/" "$
   prof "$line"; assert_fail "refused: $(echo "$line" | head -1)" v
 done
 prof "ready_url: http://localhost:<PORT>/api/health?x=1"; assert_ok "a placeholder port and query are fine" v
-for sec in "e2e_cmd: DATABASE_URL=postgres://u:hunter2@db/x npm run e2e" "e2e_cmd: aws_secret_access_key=wJalrXUtnFEMI npm run e2e" "e2e_cmd: curl -H 'Authorization: Bearer abcdefghijklmnop' x"; do
+for sec in "e2e_cmd: DATABASE_URL=postgres://u:hunter2@db/x npm run e2e" "e2e_cmd: aws_secret_access_key=wJalrXUtnFEMI npm run e2e" "e2e_cmd: curl -H 'Authorization: Bearer abcdefghijklmnop01234567' x"; do
   prof "$sec"; assert_fail "secret refused: ${sec#e2e_cmd: }" v
 done
 prof "e2e_cmd: npm run e2e"
@@ -84,6 +84,11 @@ rm -f "$P"
 # fourth review: a literal secret next to a variable is still a secret
 prof 'start_cmd: DB_PASSWORD=hunter2 ./run.sh --port $PORT'
 assert_fail "a literal password beside a variable is refused" v
+rm -f "$P"
+
+# fifth review: status stays read-only when the profile is bad
+prof "ready_url: http://example.com/"
+assert_ok "status still prints for an active run with a bad profile" bash -c "cd '$R' && '$DF' status '$id'"
 rm -f "$P"
 
 # e2e stage

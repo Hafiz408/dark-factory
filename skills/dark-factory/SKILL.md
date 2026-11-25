@@ -428,8 +428,9 @@ Proves nothing else changed. Run `{DF} conf-set {RD}/run.conf stage e2e`, then
    `qa_round`) is above 0, subtract 1 so that step 1 of that stage brings it back; when it is
    0 the round never started, so leave it. Ignore that round's partial outputs.
 8. At `e2e`: if `e2e_needs_app` is yes, run `stop_cmd` first (an app may still be running from
-   the interrupted pass), then redo the E2E stage from step 1. A run paused at E2E continues
-   from E2E step 6, like the other caps.
+   the interrupted pass), then redo the E2E stage from step 1. A run paused at E2E for the
+   QA cap continues from E2E step 6; one paused because the app never became ready or the
+   profile changed restarts the E2E stage from step 1.
 9. At `retro`: run the retro step again from its start.
 10. An interrupted wave (a chunk file with a `sub_worktree` that is not `null`): for each such
     chunk run `{DF} sub-drop <id> NN`, set it to `pending` and add 1 to its `interrupts`;

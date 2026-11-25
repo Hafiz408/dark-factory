@@ -44,7 +44,8 @@ fm_set() {
 
 # strict_secret: stdin has a high-confidence secret. A credential URL whose password is an
 # environment variable, or whose host is this machine (a test fixture), does not count.
-strict_secret() { grep -Eo "$STRICT_SECRET_RE" | grep -Evq '://[^/@ :]+:\$|@(localhost|127\.0\.0\.1)([:/]|$)'; }
+# A host with no dot (localhost, a docker-compose service such as db) is this machine or a local fixture.
+strict_secret() { grep -Eo "$STRICT_SECRET_RE" | grep -Evq '://[^/@ :]+:\$|@(127\.0\.0\.1|[A-Za-z0-9_-]+)([:/]|$)'; }
 
 # One run executes per repo at a time, so the files every run shares (profile, lessons,
 # proposals, metrics) have a single writer and need no lock of their own.
@@ -60,6 +61,7 @@ other_live_run() { # other_live_run <run-id>: prints another run of this repo wh
 
 cmd_pause() { # df pause <run-id> <what is open>: stop the run's clock and mark it paused
   local c; c="$(run_dir "$1")/run.conf"; [ -f "$c" ] || die "no such run: $1"
+  case "$(conf_get "$c" status)" in active|waiting_permission|paused) ;; *) die "pause: run is $(conf_get "$c" status)";; esac
   conf_set "$c" waiting_on "${2:?df pause <run-id> <what is open>}"
   [ "$(conf_get "$c" status)" = paused ] || conf_set "$c" paused_at "$(date +%s)"
   conf_set "$c" status paused
@@ -79,7 +81,7 @@ TEST_RE='(^|/)(tests?|spec|__tests__)/|(_test|\.test|\.spec)\.[A-Za-z]+$|(^|/)te
 # High-confidence secret formats only: used on what leaves the machine (pushed commits, PR text), where a
 # keyword match such as 'password = request.form[...]' would block ordinary code.
 STRICT_SECRET_RE='AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|(^|[^A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|://[^/@ :]+:[^/@ ]+@[^/:" ]*'
-SECRET_RE='AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|([Pp]assword|[Pp]asswd|PASSWORD|[Ss]ecret|SECRET|[Tt]oken|TOKEN|[Aa]pi[_-]?[Kk]ey|API[_-]?KEY)[ ]*[=:][ ]*[^ ]+|[Ss]ecret[_A-Za-z]*[ ]*[=:][ ]*[^ ]+|[Bb]earer [A-Za-z0-9._~+/-]{10,}|://[^/@ :]+:[^/@ ]+@'
+SECRET_RE='AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|([Pp]assword|[Pp]asswd|PASSWORD|[Ss]ecret|SECRET|[Tt]oken|TOKEN|[Aa]pi[_-]?[Kk]ey|API[_-]?KEY)[ ]*[=:][ ]*[^ ]+|[Ss]ecret[_A-Za-z]*[ ]*[=:][ ]*[^ ]+|[Bb]earer [A-Za-z0-9._~+/-]{20,}|://[^/@ :]+:[^/@ ]+@'
 
 cmd_start() { # df start <input-file> [--base <ref>] [--branch <name>]   (DF_ALLOW_INIT=1 permits git init, build track only)
   local input=${1:-} rem rest top id wt rd base bref="" branch="" baseref="" hb="" hr="" usage
@@ -97,6 +99,8 @@ cmd_start() { # df start <input-file> [--base <ref>] [--branch <name>]   (DF_ALL
     shift 2
   done
   [ -f "$input" ] && [ -r "$input" ] || die "start: input file '$input' not found"
+  # ponytail: check then claim (the lock comes with the next `df lock acquire`, which re-checks);
+  # two starts within the same instant could both pass. Claim the lock here if that ever matters.
   if git rev-parse --git-dir >/dev/null 2>&1 && r=$(other_live_run ""); then
     die "start: run $r is live in this repo; one run executes per repo at a time (resume or finish it first)"
   fi
@@ -105,7 +109,7 @@ cmd_start() { # df start <input-file> [--base <ref>] [--branch <name>]   (DF_ALL
     case $branch in refs/*) die "start: invalid branch name '$branch'" ;; esac
     [ "$(git check-ref-format --branch "$branch" 2>/dev/null)" = "$branch" ] || die "start: invalid branch name '$branch'"
   fi
-  [ -z "$hb" ] || git rev-parse -q --verify HEAD >/dev/null 2>&1 || die "start: base ref '$bref' not found"
+  [ -z "$hb" ] || git rev-parse -q --verify HEAD >/dev/null 2>&1 || die "start: --base needs a repo with at least one commit"
   if ! git rev-parse --git-dir >/dev/null 2>&1; then
     [ "${DF_ALLOW_INIT:-}" = 1 ] || die "not a git repo (DF_ALLOW_INIT=1 allows git init for the build track)"
     git init -q
@@ -162,14 +166,14 @@ cmd_validate() { # df validate <run-id>
     fi
   done
   # The profile is shared by every run in the repo; it binds only a run that will still execute it.
-  if [ "$(conf_get "$c" status)" = active ]; then
+  if [ "$(conf_get "$c" status)" = active ] && [ -z "${DF_NO_PROFILE_CHECK:-}" ]; then
     [ ! -f "$(state_root)/profile.md" ] || profile_check "$(state_root)/profile.md"
     [ "$(conf_get "$c" profile_sha)" != none ] || [ ! -f "$(state_root)/profile.md" ] ||
       die "$(state_root)/profile.md appeared after sign-off (none was shown); abort and start again"
   fi
   # Pinned at sign-off: the profile's commands run unattended later, so they must be the ones shown.
   pin=$(conf_get "$c" profile_sha)
-  if [ -n "$pin" ] && [ "$pin" != none ] && [ "$(conf_get "$c" status)" = active ]; then
+  if [ -n "$pin" ] && [ "$pin" != none ] && [ "$(conf_get "$c" status)" = active ] && [ -z "${DF_NO_PROFILE_CHECK:-}" ]; then
     [ -f "$(state_root)/profile.md" ] || die "$(state_root)/profile.md was pinned at sign-off and is now missing"
     [ "$(sha < "$(state_root)/profile.md")" = "$pin" ] || die "$(state_root)/profile.md changed since sign-off; restore it, or abort and start again"
   fi
@@ -380,10 +384,10 @@ cmd_lessons_set() { # df lessons-set <run-id>: install the retro's lessons (max 
   [ -f "$rd/lessons-new.md" ] || die "lessons-set: $rd/lessons-new.md not found"
   n=$(grep -c '' "$rd/lessons-new.md" || true)
   [ "$n" -le 30 ] || die "lessons-set: $n lines; at most 30 (old lessons kept)"
-  ! grep -Eq "$SECRET_RE" "$rd/lessons-new.md" || die "lessons-set: lessons look like they hold a secret (old lessons kept)"
+  ! grep -E "$SECRET_RE" "$rd/lessons-new.md" | grep -Fvq '[REDACTED]' || die "lessons-set: lessons look like they hold a secret (old lessons kept)"
   ! awk 'length($0) > 200 { bad=1 } END { exit !bad }' "$rd/lessons-new.md" || die "lessons-set: a line is over 200 characters (old lessons kept)"
   if [ -f "$rd/proposals-new.md" ]; then
-    ! grep -Eq "$SECRET_RE" "$rd/proposals-new.md" || die "lessons-set: proposals look like they hold a secret (old lessons kept)"
+    ! grep -E "$SECRET_RE" "$rd/proposals-new.md" | grep -Fvq '[REDACTED]' || die "lessons-set: proposals look like they hold a secret (old lessons kept)"
     ! awk 'length($0) > 200 { bad=1 } END { exit !bad }' "$rd/proposals-new.md" || die "lessons-set: a proposal line is over 200 characters (old lessons kept)"
   fi
   # Later builders read lessons; holdout scenarios must never reach them.
@@ -536,8 +540,8 @@ cmd_ship() { # df ship <run-id> <title> <body-file>: push the run branch and ope
     die "ship: '$branch' is not the branch checked out in the run's worktree"
   [ "$branch" != "$target" ] || die "ship: the run branch is the PR target"
   # Nothing has left the machine until now: refuse to push a secret in the run's commits.
-  if { git -C "$wt" log --format=%B "$(conf_get "$c" root_base_sha)..$sha"
-       git -C "$wt" diff "$(conf_get "$c" root_base_sha)" "$sha" | grep '^+'; } | strict_secret; then
+  # Scan every commit the push would send: all of them not already on an origin ref.
+  if git -C "$wt" log -p --format=%B "$sha" --not --remotes=origin | grep -v '^-' | strict_secret; then
     die "ship: the run's commits look like they contain a secret; nothing pushed"
   fi
   pout=$(GIT_TERMINAL_PROMPT=0 git -C "$wt" push -u origin "refs/heads/$branch:refs/heads/$branch" 2>&1) || die "ship: push failed: $(printf '%s' "$pout" | tail -1 | sed "s,://[^/@ ]*@,://,g")"
@@ -554,7 +558,7 @@ cmd_ship() { # df ship <run-id> <title> <body-file>: push the run branch and ope
 cmd_status() { # df status <run-id>: regenerate and print progress.md
   local rd c out f
   rd=$(run_dir "$1"); c="$rd/run.conf"
-  cmd_validate "$1"
+  DF_NO_PROFILE_CHECK=1 cmd_validate "$1"   # status is read-only: a profile problem is reported, not fatal
   out="Run $1   track: $(conf_get "$c" track)   stage: $(conf_get "$c" stage)   status: $(conf_get "$c" status)"
   case "$(conf_get "$c" status)" in
     waiting_permission) out="$out

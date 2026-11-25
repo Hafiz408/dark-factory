@@ -329,4 +329,15 @@ Q3=$(newrun); Q3C="$SC/$Q3/run.conf"; df conf-set "$Q3C" base_ref main; q3w=$(df
 echo 'OPENAI = "sk-abcdefghijklmnopqrstuvwx"' > "$q3w/k.py"; git -C "$q3w" add k.py; git -C "$q3w" commit -qm k
 refuse "an sk- key in the commits" "$Q3" t "$T/body.md"
 
+# fifth review: compose service URLs ship; unpushed commits below the run's base are scanned
+Y=$(newrun); YC="$SC/$Y/run.conf"; df conf-set "$YC" base_ref main; yw=$(df conf-get "$YC" worktree)
+echo 'DATABASE_URL=postgres://app:app@db:5432/app' > "$yw/compose.env"; git -C "$yw" add compose.env; git -C "$yw" commit -qm compose
+assert_ok "a docker-compose service URL ships" df ship "$Y" "Compose" "$T/body.md"
+git -C "$C" checkout -q -b localbase main; echo 'K=AKIAABCDEFGHIJKLMNOP' > "$C/old.env"; git -C "$C" add old.env; git -C "$C" commit -qm old
+Z=$(cd "$C" && "$DF" start "$T/in.txt" --base localbase); ZC="$SC/$Z/run.conf"; zw=$(df conf-get "$ZC" worktree)
+echo z > "$zw/z.txt"; git -C "$zw" add z.txt; git -C "$zw" commit -qm z
+df conf-set "$ZC" stage ship; df conf-set "$ZC" ship_confirmed yes; df conf-set "$ZC" ship_base main
+refuse "an unpushed secret below the run's base" "$Z" t "$T/body.md"
+git -C "$C" checkout -q main
+
 finish
