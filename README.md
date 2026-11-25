@@ -5,7 +5,7 @@ answer, you sign off once, then a team of subagents builds, tests and QAs in a l
 in the middle. You get a git branch and a report, and at the end it asks whether to push the branch and
 open a PR. It pushes only on a yes, and it never merges.
 
-Claude Code plugin. v0.1, open source. macOS, Linux, WSL.
+Claude Code plugin. v0.2, open source. macOS, Linux, WSL.
 
 ## Install
 
