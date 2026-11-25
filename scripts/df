@@ -41,24 +41,57 @@ ARTEFACT_RE='(^|/)(__pycache__|\.pytest_cache|\.mypy_cache|node_modules)/|\.pyc$
 TEST_RE='(^|/)(tests?|spec|__tests__)/|(_test|\.test|\.spec)\.[A-Za-z]+$|(^|/)test_[^/]*$'
 SECRET_RE='AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|([Pp]assword|[Pp]asswd|PASSWORD|[Ss]ecret|SECRET|[Tt]oken|TOKEN|[Aa]pi[_-]?[Kk]ey|API[_-]?KEY)[ ]*[=:][ ]*[^ ]+'
 
-cmd_start() { # df start <input-file>   (DF_ALLOW_INIT=1 permits git init, build track only)
-  local input=$1 top id wt rd base
+cmd_start() { # df start <input-file> [--base <ref>] [--branch <name>]   (DF_ALLOW_INIT=1 permits git init, build track only)
+  local input=${1:-} rem rest top id wt rd base bref="" branch="" baseref="" hb="" hr="" usage
+  usage="usage: df start <input-file> [--base <ref>] [--branch <name>]"
+  case $input in ""|-*) die "$usage" ;; esac
+  shift
+  while [ $# -gt 0 ]; do
+    [ $# -ge 2 ] || die "$usage"
+    case $2 in ""|-*|*[[:cntrl:]]*) die "$usage" ;; esac
+    case $1 in
+      --base) [ -z "$hb" ] || die "$usage"; hb=1; bref=$2 ;;
+      --branch) [ -z "$hr" ] || die "$usage"; hr=1; branch=$2 ;;
+      *) die "$usage" ;;
+    esac
+    shift 2
+  done
+  [ -f "$input" ] && [ -r "$input" ] || die "start: input file '$input' not found"
+  # Everything that can refuse runs before git init, so a refusal leaves nothing behind.
+  if [ -n "$hr" ]; then
+    case $branch in refs/*) die "start: invalid branch name '$branch'" ;; esac
+    [ "$(git check-ref-format --branch "$branch" 2>/dev/null)" = "$branch" ] || die "start: invalid branch name '$branch'"
+  fi
+  [ -z "$hb" ] || git rev-parse -q --verify HEAD >/dev/null 2>&1 || die "start: base ref '$bref' not found"
   if ! git rev-parse --git-dir >/dev/null 2>&1; then
     [ "${DF_ALLOW_INIT:-}" = 1 ] || die "not a git repo (DF_ALLOW_INIT=1 allows git init for the build track)"
     git init -q
   fi
   git rev-parse HEAD >/dev/null 2>&1 ||
     git -c user.name=dark-factory -c user.email=df@localhost commit -q --allow-empty -m "df: initial commit"
+  [ -z "$hr" ] || ! git show-ref --verify -q "refs/heads/$branch" || die "start: branch '$branch' already exists"
   top=$(git rev-parse --show-toplevel)
   id="r$(date +%y%m%d-%H%M%S)-$$"
   wt="$(dirname "$top")/$(basename "$top")-df-$id"
-  base=$(git rev-parse HEAD)
-  git worktree add -q -b "df/$id" "$wt"
+  [ -n "$hr" ] || branch="df/$id"
+  if [ -n "$hb" ]; then # fetch only <remote>/<branch> with a plain branch: never a caller-supplied option or refspec.
+    # Other spellings (origin/HEAD, refs/remotes/..., origin/x~1) resolve from the local copy, unfetched.
+    rem=${bref%%/*}; rest=${bref#*/}
+    case $rest in ""|"$bref"|*:*|+*|-*) rem="" ;; esac
+    if [ -n "$rem" ] && git remote | grep -qxF -- "$rem" && git check-ref-format "refs/remotes/$bref"; then
+      if ! GIT_TERMINAL_PROMPT=0 git fetch -q -- "$rem" "+refs/heads/$rest:refs/remotes/$rem/$rest" 2>/dev/null; then
+        echo "df: could not fetch $bref; using the cached copy" >&2
+      fi
+    fi
+  fi
+  base=$(git rev-parse --verify -q "${bref:-HEAD}^{commit}") || die "start: base ref '$bref' not found"
+  baseref=${hb:+$bref}; [ -n "$hb" ] || baseref=$(git symbolic-ref -q --short HEAD || echo detached)
+  git worktree add -q -b "$branch" "$wt" "$base" || die "start: could not create the worktree on '$branch'"
   rd=$(run_dir "$id")
   mkdir -p "$rd/chunks" "$rd/scenarios" "$rd/panel"
   git status --porcelain > "$rd/dirty.txt"
   cp "$input" "$rd/input.md"
-  { echo "track=unrouted"; echo "worktree=$wt"; echo "branch=df/$id"; echo "root_base_sha=$base"
+  { echo "track=unrouted"; echo "worktree=$wt"; echo "branch=$branch"; echo "root_base_sha=$base"; echo "base_ref=$baseref"
     echo "stage=intake"; echo "status=active"
     echo "started=$(date +%s)"; echo "budget_seconds=${DF_BUDGET_SECONDS:-14400}"; echo "max_attempts=3"; } | atomic "$rd/run.conf"
   echo "$id"

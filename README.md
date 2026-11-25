@@ -22,15 +22,18 @@ Try without installing: clone the repo, then `claude --plugin-dir ./dark-factory
 /dark-factory list | status [run-id] | resume [run-id] | clean <run-id>
 ```
 
-You answer one batch of questions (at most 8, each with a default) and approve once. `resume`
-works from a new session: all state is on disk.
+It first confirms the base branch ("ok" keeps the one you are on). You then answer one batch of
+questions (at most 8, each with a default) and approve once, on a sign-off screen that shows the
+approach, the alternatives considered, the trade-offs and the to-do list. After that you see one
+line per milestone, `[df <run-id>] <stage>: <event>`. `resume` works from a new session: all
+state is on disk.
 
 ## What you get
 
 - **Routed work.** `bugfix`, `feature` or `build` is picked for you and changes how it plans.
-- **A branch `df/<run-id>`** in a separate git worktree, one commit per passing chunk.
-- **`report.md`:** what was built, what was left (with severity), assumptions, and one plain
-  line saying whether the branch is green. A bugfix that changed no source says **NOT FIXED**.
+- **A branch** (`df/<run-id>`, or the name you give) in a separate git worktree, one commit per passing chunk.
+- **`report.md`:** functional changes first, then high-level technical changes, then what was
+  left (with severity), assumptions, and one plain line saying whether the branch is green. A bugfix that changed no source says **NOT FIXED**.
 - **Hands-off QA.** Four parallel read-only reviewers, medium-or-above findings block.
 - **Resume** after a crash, closed laptop or expired login, losing at most one attempt.
 

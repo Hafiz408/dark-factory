@@ -55,15 +55,15 @@ Out of v1:
 
 | # | Stage | What happens | Output |
 |---|---|---|---|
-| 0 | Start | Preconditions. Create run id, worktree `../<repo>-df-<run-id>` on `df/<run-id>`, state dir (section 8). Record `root_base_sha`. | worktree, state dir |
+| 0 | Start | Preconditions. Create run id, worktree `../<repo>-df-<run-id>` on `df/<run-id>` (or the branch named with `--branch`), from `HEAD` (or the ref named with `--base`), state dir (section 8). Record `root_base_sha`. | worktree, state dir |
 | 1 | Intake | Store raw request verbatim (after secret scan) | `input.md` |
 | 2 | Route | `router` picks track and confidence. Below 0.7 the choice becomes a Refine question. | `run.conf` |
 | 3 | Refine | Three `refiner` lenses in parallel (requirements, codebase fit, risk). Merge, resolve what the repo can answer, ask one batched round. Max 2 rounds per cycle. Codebase-fit lens reads by sampling entry points and the areas the input names, and states what it did not read. | `questions.md`, `spec.md` |
 | 4 | Plan | In parallel: `planner` (plan, chunk list with size budget and path scope) and `qa-author` (checklist and holdout scenarios, from the spec alone). `reviewer` (plan-coverage lens) checks both against every spec requirement and validates the chunk dependency graph. | `plan.md`, `scenarios/` |
 | 5 | Preflight | Detect stack (per package in a monorepo), install dependencies in the worktree, find test, lint and typecheck commands, run each once, run the suite and scanners at `root_base_sha` as the **baseline**, list required services and credentials. Anything unmet is shown at sign-off, not discovered later. | `run.conf.env`, baseline |
-| 6 | Sign-off | The only gate. One-screen summary. approve, amend, or abort. | `log.md` |
+| 6 | Sign-off | The only gate. One-screen summary: the base, the approach with alternatives and trade-offs (at most ten lines, from `plan.md`), and the chunks as a to-do list. approve, amend, or abort. | `log.md` |
 | 7 | Slice | One file per chunk | `chunks/NN.md` |
-| 8 | Loop | Section 6 | commits on `df/<run-id>` |
+| 8 | Loop | Section 6 | commits on the run branch |
 | 9 | Integrate | Section 6 | `report.md` |
 
 ### Sign-off summary
@@ -80,7 +80,7 @@ or the preflight found an unmet hard requirement (the user may still override).
 - Amend re-runs only the affected stages. At most 3 amend cycles, then approve or abort.
 - Mixed input (bug plus feature) is split into queued runs shown in the same sign-off. One
   approval covers all of them. They run serially in the order shown.
-- On resume, if `HEAD` moved since `root_base_sha`, the repo scan is repeated and only the
+- On resume, if the base (`base_ref`, or `HEAD` when it is absent or `detached`) moved since `root_base_sha`, the repo scan is repeated and only the
   affected questions are re-asked. Drift is recorded and reported. No automatic rebase.
 
 ## 5. Tracks
@@ -188,6 +188,17 @@ resumable with a raised budget.
    fix rounds, then remaining findings go in the report. If a fix chunk regresses an
    earlier scenario the regression is a finding like any other; the report states plainly
    whether the final branch is green.
+4. `report.md` opens with `## Functional changes` (user-visible behaviour, one bullet per
+   acceptance criterion QA confirmed; an unconfirmed one is marked as such) and
+   `## Technical changes` (high level: modules, dependencies, schema, config, migrations).
+   The final message to the user is those two sections, the green sentence, and the branch
+   and worktree path; a `NOT FIXED` sentence comes first when it applies.
+
+Progress to the user is one line per milestone, not per role spawn:
+`[df <run-id>] <stage>: <event>` (stage entered; chunk PASS, retry or BLOCKED; each Integrate
+review round; the QA result; and a closing `done:` line). Before `df start` the user is asked
+which base to branch from; a base written as `<remote>/<branch>` is fetched first, falling back
+to the local copy with a warning.
 
 ### Parallelism
 
@@ -216,7 +227,7 @@ State lives in a **hidden sibling of the main clone**, not in the working tree a
 the first live run.) The user is asked once to allow the parent directory.
 
 ```
-run.conf          track, worktree, branch, root_base_sha, env, budget, stage cursor, status
+run.conf          track, worktree, branch, base_ref, root_base_sha, env, budget, stage cursor, status
 lock              session id + heartbeat, refreshed on every verdict
 input.md          raw request (scrubbed)
 questions.md      refine questions, pending and answered
@@ -227,7 +238,7 @@ chunks/NN.md      frontmatter + failure notes
 panel/NN-aK.md    findings per chunk and attempt
 log.md            one line per verdict and decision
 progress.md       DERIVED view, regenerated after every verdict, never read for decisions
-report.md         final
+report.md         final; opens with functional changes, then technical changes
 ```
 
 Source of truth: `run.conf`, `chunks/*.md`, and role output files. Every state file is
@@ -248,7 +259,7 @@ Resume protocol:
    file; never repair silently.
 3. Verify worktree and branch exist and match the last commit in `log.md`. If not,
    offer: recreate from the last logged commit, or abort. This is a stop case, not a guess.
-4. Report drift if `HEAD` moved since `root_base_sha`.
+4. Report drift if the base (`base_ref`, or `HEAD` when absent or `detached`) moved since `root_base_sha`.
 5. Before sign-off: re-ask only unanswered questions.
 6. During the loop: reset a dirty tree to the chunk's `base_sha`, mark the attempt
    `interrupted`, restart at the first role without a valid recorded verdict.
@@ -290,7 +301,7 @@ Orchestrator-enforced integrity checks (not left to agent instructions):
 
 ## 10. Safety
 
-- All edits happen in a worktree on `df/<run-id>`. The main clone's files are untouched and
+- All edits happen in a worktree on the run branch (`df/<run-id>` unless named with `--branch`). The main clone's files are untouched and
   the working tree contains no factory state.
 - No push, merge, deploy or external write in v1.
 - **Untrusted content.** `input.md`, repo files, test output and fetched pages are data.

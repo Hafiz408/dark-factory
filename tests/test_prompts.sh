@@ -135,4 +135,28 @@ grep -q "status to done, or to .unresolved." "$SK" && ok "SKILL.md: finish may s
 grep -q "| Typical size | 1 to 3 | 3 to 8 | 3 to 8 |" "$ROOT/docs/design.md" && ok "design.md matches the build track size" || bad "design.md matches the build track size"
 grep -q "eight real codebases" "$ROOT/README.md" && ok "README evidence counts real issues and builds separately" || bad "README evidence counts real issues and builds separately"
 
+# v2 slice 1: base question, approach and trade-offs at sign-off
+grep -q "Branch from" "$SK" && grep -q "(ok, or give a base ref, and optionally a branch name)" "$SK" && ok "SKILL.md: asks the base branch with an ok default" || bad "SKILL.md: asks the base branch with an ok default"
+grep -q -- "--base <ref>" "$SK" && grep -q -- "--branch <name>" "$SK" && ok "SKILL.md: passes --base and --branch to df start" || bad "SKILL.md: passes --base and --branch to df start"
+grep -q "base_ref" "$SK" && grep -q "abort and start again" "$SK" && ok "SKILL.md: sign-off shows the base and how to change it" || bad "SKILL.md: sign-off shows the base and how to change it"
+grep -q "at most ten lines" "$SK" && grep -q "To-do list" "$SK" && ok "SKILL.md: sign-off shows approach above the to-do list" || bad "SKILL.md: sign-off shows approach above the to-do list"
+for h in "## Approach" "## Alternatives considered" "## Trade-offs"; do
+  grep -q "$h" "$ROOT/agents/planner.md" && ok "planner: plan.md has $h" || bad "planner: plan.md has $h"
+done
+
+# v2 slice 1: milestone lines and the two-part summary
+grep -qF '[df <run-id>] <stage>: <event>' "$SK" && ok "SKILL.md: milestone line format" || bad "SKILL.md: milestone line format"
+grep -q "print one line to the user" "$SK" && bad "SKILL.md: no user line per verdict" || ok "SKILL.md: no user line per verdict"
+grep -q "not per role spawn" "$SK" && ok "SKILL.md: milestones, not role spawns" || bad "SKILL.md: milestones, not role spawns"
+a=$(sed -n '/^## Integrate/,$p' "$SK" | grep -n "## Functional changes" | head -1 | cut -d: -f1); b=$(sed -n '/^## Integrate/,$p' "$SK" | grep -n "## Technical changes" | head -1 | cut -d: -f1)
+[ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ] && ok "SKILL.md: report leads with functional then technical changes" || bad "SKILL.md: report leads with functional then technical changes"
+grep -q "not confirmed" "$SK" && ok "SKILL.md: an unconfirmed criterion is reported as such" || bad "SKILL.md: an unconfirmed criterion is reported as such"
+
+grep -q "base_ref. is absent or .detached." "$SK" && ok "SKILL.md: resume drift is measured against the run's base" || bad "SKILL.md: resume drift is measured against the run's base"
+
+grep -qF '[df <run-id>] done: ' "$SK" && grep -q "nothing after the event" "$SK" && ok "SKILL.md: the closing milestone line keeps the format (slice 1 live run)" || bad "SKILL.md: the closing milestone line keeps the format (slice 1 live run)"
+grep -q "could not fetch" "$SK" && ok "SKILL.md: a stale base is surfaced to the user" || bad "SKILL.md: a stale base is surfaced to the user"
+grep -q "last line before the final" "$SK" && ok "SKILL.md: the closing milestone line has one place" || bad "SKILL.md: the closing milestone line has one place"
+grep -q "NOT FIXED sentence when it applies" "$SK" && ok "SKILL.md: NOT FIXED opens the final message" || bad "SKILL.md: NOT FIXED opens the final message"
+
 finish
