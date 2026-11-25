@@ -303,6 +303,7 @@ cmd_ship() { # df ship <run-id> <title> <body-file>: push the run branch and ope
   fi
   [ "$(conf_get "$c" ship_confirmed)" = yes ] || die "ship: ship_confirmed is not yes"
   [ "$(conf_get "$c" stage)" = ship ] && [ "$(conf_get "$c" status)" = active ] || die "ship: run is not at stage ship with status active"
+  ! no_source_change "$c" || die "ship: the branch changes no source file (tests and docs only); nothing to ship"
   wt=$(conf_get "$c" worktree); branch=$(conf_get "$c" branch)
   [ -d "$wt" ] || die "ship: worktree is missing"
   [ -z "$(git -C "$wt" status --porcelain)" ] || die "ship: worktree has uncommitted changes"

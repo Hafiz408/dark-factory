@@ -197,6 +197,7 @@ assert_eq "0" "$rc" "fixed: feature, tests only: exit 0"; assert_eq "" "$out" "f
 df conf-set "$XC" track bugfix
 out=$(df fixed "$X" 2>&1 >/dev/null); rc=$?
 assert_eq "1" "$rc" "fixed: bugfix tests only: exit 1"; assert_contains "no source file" "$out" "fixed: bugfix tests only: stderr"
+df conf-set "$XC" base_ref main; refuse "a bugfix that fixed nothing" "$X" t "$T/body.md"
 df fixed "$X" >/dev/null 2>&1; out=$(df finish "$X" 2>&1); df conf-get "$XC" status >/dev/null
 assert_contains "NOT FIXED" "$out" "finish at stage ship still says NOT FIXED"
 assert_eq "unresolved" "$(df conf-get "$XC" status)" "finish at stage ship: unresolved"
