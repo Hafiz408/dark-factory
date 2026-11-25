@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # v2 slice 6: parallel builders. wave picks independent, scope-disjoint chunks; sub-worktrees join by cherry-pick.
 . "$(dirname "$0")/lib.sh"
+cd "$(mktemp -d)" || exit 1   # never run git against the repo these tests live in
 G="git -c user.name=t -c user.email=t@t"
 R=$(mkrepo); echo x > "$R/in.txt"
 id=$(cd "$R" && "$DF" start "$R/in.txt"); rd=$(cd "$R" && "$DF" run-dir "$id")
@@ -23,12 +24,12 @@ ch 02 "01" BLOCKED "src/b/**"
 assert_eq "03 05 06" "$(wave)" "a chunk that is not pending is not in a wave"
 
 # sub-worktrees
-sw=$(cd "$R" && "$DF" sub-add "$id" 03)
+sw=$(cd "$R" && "$DF" sub-add "$id" 03); [ -n "$sw" ] || { bad "sub-add printed a path"; finish; }
 assert_eq "$wt-c03" "$sw" "sub-worktree sits beside the run worktree"
 assert_eq "df/$id-c03" "$(git -C "$sw" rev-parse --abbrev-ref HEAD)" "sub-branch is named after the chunk"
 assert_eq "$(git -C "$wt" rev-parse HEAD)" "$(git -C "$sw" rev-parse HEAD)" "sub-branch starts at the run branch head"
 assert_eq "$sw" "$("$DF" fm-get "$rd/chunks/03.md" sub_worktree)" "chunk records its sub-worktree"
-sw5=$(cd "$R" && "$DF" sub-add "$id" 05)
+sw5=$(cd "$R" && "$DF" sub-add "$id" 05); [ -n "$sw5" ] || { bad "sub-add printed a path"; finish; }
 mkdir -p "$sw/src" "$sw5/lib"; echo c > "$sw/src/c.py"; echo l > "$sw5/lib/l.py"
 $G -C "$sw" add -A; $G -C "$sw" commit -qm "df(chunk 03)"; $G -C "$sw5" add -A; $G -C "$sw5" commit -qm "df(chunk 05)"
 assert_ok "join cherry-picks a passing chunk" bash -c "cd '$R' && '$DF' sub-join '$id' 03"
@@ -39,7 +40,7 @@ assert_fail "sub-worktree removed after join" test -d "$sw"
 assert_fail "sub-branch removed after join" git -C "$R" rev-parse --verify -q "df/$id-c03"
 
 # conflict: join refuses, leaves the run branch as it was, and the chunk can be dropped
-sa=$(cd "$R" && "$DF" sub-add "$id" 06); echo theirs > "$sa/f.txt"; $G -C "$sa" commit -qam "df(chunk 06)"
+sa=$(cd "$R" && "$DF" sub-add "$id" 06); [ -n "$sa" ] || { bad "sub-add printed a path"; finish; }; echo theirs > "$sa/f.txt"; $G -C "$sa" commit -qam "df(chunk 06)"
 echo ours > "$wt/f.txt"; $G -C "$wt" commit -qam "run branch moved"
 head=$(git -C "$wt" rev-parse HEAD)
 assert_fail "a conflicting join refuses" bash -c "cd '$R' && '$DF' sub-join '$id' 06"
@@ -50,8 +51,28 @@ assert_fail "dropped sub-worktree is gone" test -d "$sa"
 assert_fail "dropped sub-branch is gone" git -C "$R" rev-parse --verify -q "df/$id-c06"
 assert_fail "sub-add refuses a chunk that does not exist" bash -c "cd '$R' && '$DF' sub-add '$id' 99"
 
-# clean removes leftover sub-worktrees too
-s7=$(cd "$R" && "$DF" sub-add "$id" 05)
+# branch review: wildcard globs overlap everything; a requeued chunk stays out of waves
+ch 03 "01" pending "**"; ch 05 "01" pending "lib/**"; ch 06 "01" BLOCKED "docs/**"
+assert_eq "03" "$(wave)" "a scope that starts with a wildcard overlaps everything"
+ch 03 "01" pending "*.py"; ch 05 "01" pending "app.py"
+assert_eq "03" "$(wave)" "*.py overlaps app.py"
+ch 03 "01" pending "src/c.py"; ch 05 "01" pending "lib/**"
+printf -- '---\nid: 07\ntitle: c\ndepends_on: [01]\nstatus: pending\nattempts: 0\nbase_sha: null\nscope: [x/**]\ntouches_tests: [**/*.test.ts]\n---\n' > "$rd/chunks/07.md"
+assert_eq "03 05" "$(wave)" "a touches_tests wildcard overlaps everything"
+rm -f "$rd/chunks/07.md"
+"$DF" fm-set "$rd/chunks/03.md" serial yes
+assert_eq "05" "$(wave)" "a chunk marked serial is never put in a wave"
+"$DF" fm-set "$rd/chunks/03.md" serial no
+
+# empty commits join; clean keeps uncommitted sub-worktree work unless forced, and removes sub-branches
+se=$(cd "$R" && "$DF" sub-add "$id" 05); [ -n "$se" ] || { bad "sub-add printed a path"; finish; }
+$G -C "$se" commit -q --allow-empty -m "df(chunk 05) empty"
+assert_ok "an empty commit joins" bash -c "cd '$R' && '$DF' sub-join '$id' 05"
+s7=$(cd "$R" && "$DF" sub-add "$id" 05); [ -n "$s7" ] || { bad "sub-add printed a path"; finish; }
+echo wip > "$s7/work.txt"
+assert_fail "clean refuses while a sub-worktree has uncommitted work" bash -c "cd '$R' && '$DF' clean '$id'"
+assert_ok "the uncommitted sub-worktree work is still there" test -f "$s7/work.txt"
 (cd "$R" && "$DF" clean "$id" --force)
 assert_fail "clean removes leftover sub-worktrees" test -d "$s7"
+assert_fail "clean removes sub-branches" git -C "$R" rev-parse --verify -q "df/$id-c05"
 finish

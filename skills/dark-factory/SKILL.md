@@ -246,12 +246,16 @@ above.
    sub-worktree.
 4. Join when every chunk of the wave has finished (PASS or BLOCKED). Record the run branch head
    in `log.md` as the wave base. Join the PASS chunks in id order: for each, run `{DF} sub-join <id> NN`.
-   If it refuses (a conflict), run `{DF} sub-drop <id> NN`, set that chunk back to `pending`,
-   add 1 to its `interrupts` (an interrupt, not an attempt), and it runs serially on the
-   updated run branch. For each BLOCKED chunk run `{DF} sub-drop <id> NN`.
+   After each join, append the joined commit's sha to `log.md` (resume checks the branch head
+   against it), and only then print that chunk's PASS milestone line: the PASS line comes
+   after its join, never before. If a join refuses (a conflict), run `{DF} sub-drop <id> NN`,
+   set that chunk back to `pending` with `{DF} fm-set <chunk> serial yes` (so `{DF} wave`
+   never picks it again), and add 1 to its `interrupts` (an interrupt, not an attempt); it
+   runs serially on the updated run branch. At 3 interrupts the chunk is BLOCKED. For each
+   BLOCKED chunk run `{DF} sub-drop <id> NN`.
 5. Run the full suite once in the run worktree. If it is red, reset the run worktree to the
-   wave base, set the wave's joined chunks back to `pending` (attempts unchanged, interrupts
-   +1), and run them serially.
+   wave base (log it), set the wave's joined chunks back to `pending` with `serial yes`
+   (attempts unchanged, interrupts +1), and run them serially.
 6. Back to step 1 until no chunk is pending.
 
 ## Review (stage `review`)
@@ -423,6 +427,9 @@ Proves nothing else changed. Run `{DF} conf-set {RD}/run.conf stage e2e`, then
    the interrupted pass), then redo the E2E stage from step 1. A run paused at E2E continues
    from E2E step 6, like the other caps.
 9. At `retro`: run the retro step again from its start.
-10. Before sign-off: re-ask only unanswered questions. In the loop: reset a dirty tree to the
+10. An interrupted wave (a chunk file with a `sub_worktree` that is not `null`): for each such
+    chunk run `{DF} sub-drop <id> NN`, set it to `pending` and add 1 to its `interrupts`;
+    reset the run worktree to the last commit in `log.md`; then continue the loop.
+11. Before sign-off: re-ask only unanswered questions. In the loop: reset a dirty tree to the
    chunk's `base_sha`, count the interrupted attempt in `interrupts` (cap 3), and restart at the
    first role without a valid recorded verdict.

@@ -360,10 +360,13 @@ cmd_metrics() { # df metrics <run-id>: one row per run in <state-root>/metrics.t
 # passed and whose write globs (scope + touches_tests) are pairwise disjoint, at most 3.
 # ponytail: overlap is "one glob's literal prefix is a prefix of the other's"; conservative,
 # so it can serialise chunks that would not really collide.
-globs_of() { { fm_get "$1" scope; fm_get "$1" touches_tests; } | tr -d '[]' | tr ',' '\n' | sed 's/^ *//; s/ *$//' | grep -v '^$' | sed 's/[][*?].*//'; }
+globs_of() { # literal prefix of each write glob; a glob that starts with a wildcard is __ALL__
+  { fm_get "$1" scope; fm_get "$1" touches_tests; } | tr -d '[]' | tr ',' '\n' | sed 's/^ *//; s/ *$//' | grep -v '^$' |
+    sed 's/[][*?].*//; s/^$/__ALL__/'; }
 overlaps() { # overlaps "<prefixes a>" "<prefixes b>"
   local p q
   for p in $1; do for q in $2; do
+    [ "$p" != __ALL__ ] && [ "$q" != __ALL__ ] || return 0
     case "$q" in "$p"*) return 0;; esac
     case "$p" in "$q"*) return 0;; esac
   done; done
@@ -375,6 +378,7 @@ cmd_wave() { # df wave <run-id>: chunk ids that may run in parallel, one per lin
   for f in "$rd"/chunks/*.md; do
     [ -e "$f" ] || continue
     [ "$(fm_get "$f" status)" = pending ] || continue
+    [ "$(fm_get "$f" serial)" != yes ] || continue
     ok=1
     for d in $(fm_get "$f" depends_on | tr -d '[]' | tr ',' ' '); do
       st=$(fm_get "$rd/chunks/$d.md" status 2>/dev/null || true)
@@ -414,7 +418,7 @@ cmd_sub_join() { # df sub-join <run-id> <chunk-id>: cherry-pick the chunk's comm
   mb=$(git -C "$wt" merge-base HEAD "$sb") || die "sub-join: no sub-branch for chunk $2"
   [ -n "$(git -C "$wt" config user.email)" ] || id="-c user.name=dark-factory -c user.email=df@localhost"
   if [ "$mb" != "$(git -C "$wt" rev-parse "$sb")" ]; then
-    if ! git -C "$wt" $id cherry-pick "$mb..$sb" >/dev/null 2>&1; then
+    if ! git -C "$wt" $id cherry-pick --allow-empty --keep-redundant-commits "$mb..$sb" >/dev/null 2>&1; then
       git -C "$wt" cherry-pick --abort >/dev/null 2>&1 || true
       die "sub-join: chunk $2 conflicts with the run branch; drop it and rerun it serially"
     fi
@@ -452,15 +456,26 @@ cmd_list() {
 }
 
 cmd_clean() { # df clean <run-id> [--force]: removes worktree and state, keeps the branch
-  local rd c wt
+  local rd c wt subs w
   [ -n "${1:-}" ] || die "clean: run id required"
   rd=$(run_dir "$1"); c="$rd/run.conf"
   [ -f "$c" ] || die "no such run: $1"
   if [ "${2:-}" != --force ] && [ "$(cmd_lock "$1" check)" = live ]; then die "run is live; use --force"; fi
   wt=$(conf_get "$c" worktree)
-  git worktree list --porcelain | sed -n 's/^worktree //p' | while IFS= read -r w; do
-    case "$w" in "$wt"-c*) git worktree remove --force "$w";; esac
-  done
+  subs=$(git worktree list --porcelain | sed -n 's/^worktree //p' | P="$wt-c" awk 'index($0, ENVIRON["P"]) == 1')
+  if [ "${2:-}" != --force ] && [ -n "$subs" ]; then
+    while IFS= read -r w; do
+      [ -z "$(git -C "$w" status --porcelain)" ] || die "sub-worktree $w has uncommitted changes; use --force"
+    done <<EOF
+$subs
+EOF
+  fi
+  if [ -n "$subs" ]; then
+    while IFS= read -r w; do git worktree remove --force "$w"; done <<EOF
+$subs
+EOF
+  fi
+  git for-each-ref --format='%(refname:short)' "refs/heads/$(conf_get "$c" branch)-c*" | while IFS= read -r b; do git branch -q -D "$b"; done
   if [ -d "$wt" ]; then
     if [ "${2:-}" != --force ] && [ -n "$(git -C "$wt" status --porcelain)" ]; then
       die "worktree has uncommitted changes; use --force"

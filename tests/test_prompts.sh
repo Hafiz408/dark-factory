@@ -251,4 +251,10 @@ grep -q "qa-r" "$ROOT/agents/retro.md" && ok "retro: never reads QA outputs" || 
 sed -n '/^## Resume/,$p' "$SK" | grep -q "At .retro." && ok "SKILL.md: resume reruns an interrupted retro" || bad "SKILL.md: resume reruns an interrupted retro"
 sed -n '/\*\*Ship (stage/,/^## Resume/p' "$SK" | grep -q "skip to step 3" && bad "SKILL.md: ship step points at finish" || ok "SKILL.md: ship step points at finish"
 
+# slice 6 branch review
+echo "$LP" | grep -q "serial yes" && ok "SKILL.md: a requeued chunk is kept out of later waves" || bad "SKILL.md: a requeued chunk is kept out of later waves"
+echo "$LP" | grep -q "log.md" && echo "$LP" | grep -q "joined commit" && ok "SKILL.md: joined commits are logged for resume" || bad "SKILL.md: joined commits are logged for resume"
+echo "$LP" | grep -q "after its join" && ok "SKILL.md: a chunk's PASS line is printed after its join" || bad "SKILL.md: a chunk's PASS line is printed after its join"
+sed -n '/^## Resume/,$p' "$SK" | grep -q "sub_worktree" && ok "SKILL.md: resume cleans up an interrupted wave" || bad "SKILL.md: resume cleans up an interrupted wave"
+
 finish
