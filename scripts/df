@@ -42,7 +42,7 @@ finding() { printf -- '- severity: %s\n  source: %s\n  where: %s\n  what: %s\n' 
 # Interpreter and tool artefacts are not changes made by a role.
 ARTEFACT_RE='(^|/)(__pycache__|\.pytest_cache|\.mypy_cache|node_modules)/|\.pyc$'
 TEST_RE='(^|/)(tests?|spec|__tests__)/|(_test|\.test|\.spec)\.[A-Za-z]+$|(^|/)test_[^/]*$'
-SECRET_RE='AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|([Pp]assword|[Pp]asswd|PASSWORD|[Ss]ecret|SECRET|[Tt]oken|TOKEN|[Aa]pi[_-]?[Kk]ey|API[_-]?KEY)[ ]*[=:][ ]*[^ ]+'
+SECRET_RE='AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|([Pp]assword|[Pp]asswd|PASSWORD|[Ss]ecret|SECRET|[Tt]oken|TOKEN|[Aa]pi[_-]?[Kk]ey|API[_-]?KEY)[ ]*[=:][ ]*[^ ]+|[Ss]ecret[_A-Za-z]*[ ]*[=:][ ]*[^ ]+|[Bb]earer [A-Za-z0-9._~+/-]{10,}|://[^/@ :]+:[^/@ ]+@'
 
 cmd_start() { # df start <input-file> [--base <ref>] [--branch <name>]   (DF_ALLOW_INIT=1 permits git init, build track only)
   local input=${1:-} rem rest top id wt rd base bref="" branch="" baseref="" hb="" hr="" usage
@@ -101,7 +101,7 @@ cmd_start() { # df start <input-file> [--base <ref>] [--branch <name>]   (DF_ALL
 }
 
 cmd_validate() { # df validate <run-id>
-  local rd c f b
+  local rd c f b pin
   rd=$(run_dir "$1"); c="$rd/run.conf"
   [ -f "$c" ] || die "missing $c"
   for k in track worktree branch root_base_sha stage status; do
@@ -122,26 +122,39 @@ cmd_validate() { # df validate <run-id>
     fi
   done
   [ ! -f "$(state_root)/profile.md" ] || profile_check "$(state_root)/profile.md"
+  # Pinned at sign-off: the profile's commands run unattended later, so they must be the ones shown.
+  pin=$(conf_get "$c" profile_sha)
+  if [ -n "$pin" ] && [ "$pin" != none ]; then
+    [ -f "$(state_root)/profile.md" ] || die "$(state_root)/profile.md was pinned at sign-off and is now missing"
+    [ "$(sha < "$(state_root)/profile.md")" = "$pin" ] || die "$(state_root)/profile.md changed since sign-off; restore it, or abort and start again"
+  fi
 }
 
 # The repo profile (beside the clone, never committed): commands the run will execute, so the
 # app it starts must be local and the file must name credentials, never hold them.
-profile_check() {
-  local p=$1 u
+profile_check() { # profile_check <profile.md> <run.conf>
+  local p=$1 u pin
+  # The key block must be exactly the known keys, once each, spelled plainly.
+  tr -d '\r' < "$p" | awk '/^---$/{n++; next} n==1' | awk '
+    /^[ \t]*$/ { next }
+    !/^(e2e_cmd|e2e_needs_app|start_cmd|ready_url|stop_cmd):( .*)?$/ { print "bad"; exit }
+    { k=$0; sub(/:.*/, "", k); if (seen[k]++) { print "dup"; exit } }' | grep -q . &&
+    die "$p: the --- block may hold only e2e_cmd, e2e_needs_app, start_cmd, ready_url, stop_cmd, once each, as 'key: value'"
   u=$(fm_get "$p" ready_url)
-  if [ -n "$u" ]; then
-    case "$u" in *@*) die "$p: ready_url must be localhost or 127.0.0.1, without user info";; esac
-    case "$u" in
-      http://localhost|http://localhost[:/]*|https://localhost|https://localhost[:/]*) ;;
-      http://127.0.0.1|http://127.0.0.1[:/]*|https://127.0.0.1|https://127.0.0.1[:/]*) ;;
-      *) die "$p: ready_url must be localhost or 127.0.0.1 (got $u)";;
-    esac
+  if [ -n "$u" ] && ! printf '%s\n' "$u" | grep -Eq '^https?://(localhost|127\.0\.0\.1)(:([0-9]+|<PORT>))?(/[A-Za-z0-9._~/<>?=&%-]*)?$'; then
+    die "$p: ready_url must be a plain http(s) URL on localhost or 127.0.0.1 (got $u)"
   fi
   case "$(fm_get "$p" e2e_needs_app)" in ""|yes|no) ;; *) die "$p: e2e_needs_app must be yes or no";; esac
   # A value that is an environment variable reference ($NAME) is a name, not a secret.
   if grep -Eo "$SECRET_RE" "$p" | grep -Evq '[=:][ ]*\$[A-Za-z_{]'; then
     die "$p: looks like it holds a secret; name credentials by environment variable instead"
   fi
+}
+
+cmd_profile_pin() { # df profile-pin <run-id>: record the profile's hash at sign-off (or none)
+  local c p; c="$(run_dir "$1")/run.conf"; p="$(state_root)/profile.md"
+  [ -f "$c" ] || die "no such run: $1"
+  if [ -f "$p" ]; then conf_set "$c" profile_sha "$(sha < "$p")"; else conf_set "$c" profile_sha none; fi
 }
 
 cmd_verdict() { # df verdict <role-output-file>: prints the verdict word, exit 1 if invalid
@@ -268,7 +281,7 @@ cmd_canary_scan() { # df canary-scan <scenarios-dir> <output-file>: finding on s
 cmd_scrub() { # df scrub <file>: scrubbed copy on stdout, exit 3 if anything was redacted
   local n
   n=$(grep -Ec "$SECRET_RE" "$1" || true)
-  sed -E "s/($SECRET_RE)/[REDACTED]/g" "$1"
+  sed -E "s#($SECRET_RE)#[REDACTED]#g" "$1"
   [ "${n:-0}" -eq 0 ] || return 3
 }
 
@@ -350,6 +363,7 @@ cmd=${1:-}; [ $# -gt 0 ] && shift
 case "$cmd" in
   start) cmd_start "$@";;
   validate) cmd_validate "$@";;
+  profile-pin) cmd_profile_pin "$@";;
   verdict) cmd_verdict "$@";;
   gate) cmd_gate "$@";;
   lock) cmd_lock "$@";;
@@ -369,5 +383,5 @@ case "$cmd" in
   fm-get) fm_get "$@";;
   fm-set) fm_set "$@";;
   write) atomic "$@";;
-  *) die "usage: df {start|validate|verdict|gate|lock|snapshot|check-diff|canary-scan|srchash|commit|scrub|status|list|clean|finish|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
+  *) die "usage: df {start|validate|profile-pin|verdict|gate|lock|snapshot|check-diff|canary-scan|srchash|commit|scrub|status|list|clean|finish|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
 esac

