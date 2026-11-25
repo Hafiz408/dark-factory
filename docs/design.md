@@ -67,6 +67,7 @@ Out of v1:
 | 8 | Loop | Section 6 | commits on the run branch |
 | 9 | Review | Section 6. Whole-branch review, five lenses, looped until clean | fix chunks |
 | 10 | QA | Section 6. Holdout scenarios against the reviewed branch | `report.md` |
+| 10a | E2E | Section 6. The repo's own end-to-end command against the reviewed branch; only failures new since the baseline block | `panel/e2e-r<n>.md` |
 | 11 | Ship | Section 6. Only on a yes: push the run branch, open a PR | `pr_url` |
 
 ### Sign-off summary
@@ -208,12 +209,32 @@ Functional QA runs only against a branch the review has passed.
    holds across sessions. `df finish` refuses a run that is paused, has not reached `qa`, or
    has a BLOCKED or SKIPPED chunk. `unresolved` keeps its v0.1 meaning.
 
+### Repo profile and E2E
+
+- **Profile:** `profile.md` in the state root (`.df-<repo>`, beside the clone). Outside the
+  working tree, so it is never committed, never trips the scope check, and survives `clean`.
+  A `---` block of `e2e_cmd`, `e2e_needs_app`, `start_cmd`, `ready_url`, `stop_cmd` (with
+  `<WORKTREE>` and `<PORT>` placeholders), then `## How to start` and
+  `## Signing in for tests`. Preflight drafts it on a repo's first run; later runs reuse it.
+- **Trust:** its commands are shown at every sign-off. `df validate` refuses a `ready_url`
+  that is not localhost or 127.0.0.1 (or carries user info), and a profile that holds a
+  secret instead of naming an environment variable. Its free text reaches QA as owner-
+  confirmed run instructions, outside `<data>`.
+- **Baseline:** preflight runs `e2e_cmd` at `root_base_sha`, so failures already there are
+  `pre-existing`.
+- **Stage `e2e`**, after QA: start the app if needed, run `e2e_cmd`, stop the app. A test that
+  passed at baseline and fails now is `high`; it becomes a fix chunk and goes back through
+  review, QA and e2e under `max_qa_rounds`. No `e2e_cmd`: the report says
+  `e2e: not configured`, never a pass.
+- **Browser scenarios** stay manual checks: no portable read-only browser tool list exists
+  for a plugin agent (`docs/spikes.md`, S5).
+
 ### Ship
 
 Order at the end of a run: report, ship question, then `df finish`. The lock is held until
 `finish`, so the guard hook stays armed through the ship step.
 
-- The question is asked only for a run that completed QA, when the repo has an `origin` remote
+- The question is asked only for a run that completed QA and e2e, when the repo has an `origin` remote
   and `gh` is signed in: "Push `<branch>` and open a PR into `<target>`? (yes / no)". Only
   "yes" is a yes. A paused run, and a bugfix run that changed no source (`df fixed`), is never
   offered.
@@ -320,7 +341,7 @@ Findings:
 
 ```
 - severity: critical | high | medium | low
-  source: functional | quality | ponytail | security | impact | goal | tester | integrity
+  source: functional | quality | ponytail | security | impact | goal | e2e | tester | integrity
   where: <file:line or behaviour>
   what: <one line>
   tags: [pre-existing] [flaky] [late-find]

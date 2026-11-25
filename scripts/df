@@ -21,7 +21,7 @@ conf_set() {
       case "$3" in ''|*[!0-9]*) die "conf-set: $2 must be an integer";; esac ;;
     status=active|status=waiting_permission|status=paused|status=done|status=unresolved|status=aborted) ;;
     status=*) die "conf-set: invalid status '$3'";;
-    stage=intake|stage=route|stage=refine|stage=plan|stage=preflight|stage=signoff|stage=slice|stage=loop|stage=integrate|stage=review|stage=qa|stage=done) ;; # integrate: v0.1 name for review
+    stage=intake|stage=route|stage=refine|stage=plan|stage=preflight|stage=signoff|stage=slice|stage=loop|stage=integrate|stage=review|stage=qa|stage=e2e|stage=done) ;; # integrate: v0.1 name for review
     stage=*) die "conf-set: invalid stage '$3'";;
     track=unrouted|track=bugfix|track=feature|track=build) ;;
     track=*) die "conf-set: invalid track '$3'";;
@@ -108,7 +108,7 @@ cmd_validate() { # df validate <run-id>
     [ -n "$(conf_get "$c" $k)" ] || die "$c: missing $k"
   done
   case "$(conf_get "$c" track)" in unrouted|bugfix|feature|build) ;; *) die "$c: bad track";; esac
-  case "$(conf_get "$c" stage)" in intake|route|refine|plan|preflight|signoff|slice|loop|integrate|review|qa|done) ;; *) die "$c: bad stage";; esac
+  case "$(conf_get "$c" stage)" in intake|route|refine|plan|preflight|signoff|slice|loop|integrate|review|qa|e2e|done) ;; *) die "$c: bad stage";; esac
   case "$(conf_get "$c" status)" in active|waiting_permission|paused|done|unresolved|aborted) ;; *) die "$c: bad status";; esac
   git cat-file -e "$(conf_get "$c" root_base_sha)^{commit}" 2>/dev/null || die "$c: root_base_sha not found"
   for f in "$rd"/chunks/*.md; do
@@ -121,6 +121,27 @@ cmd_validate() { # df validate <run-id>
       git cat-file -e "$b^{commit}" 2>/dev/null || die "$f: base_sha not found"
     fi
   done
+  [ ! -f "$(state_root)/profile.md" ] || profile_check "$(state_root)/profile.md"
+}
+
+# The repo profile (beside the clone, never committed): commands the run will execute, so the
+# app it starts must be local and the file must name credentials, never hold them.
+profile_check() {
+  local p=$1 u
+  u=$(fm_get "$p" ready_url)
+  if [ -n "$u" ]; then
+    case "$u" in *@*) die "$p: ready_url must be localhost or 127.0.0.1, without user info";; esac
+    case "$u" in
+      http://localhost|http://localhost[:/]*|https://localhost|https://localhost[:/]*) ;;
+      http://127.0.0.1|http://127.0.0.1[:/]*|https://127.0.0.1|https://127.0.0.1[:/]*) ;;
+      *) die "$p: ready_url must be localhost or 127.0.0.1 (got $u)";;
+    esac
+  fi
+  case "$(fm_get "$p" e2e_needs_app)" in ""|yes|no) ;; *) die "$p: e2e_needs_app must be yes or no";; esac
+  # A value that is an environment variable reference ($NAME) is a name, not a secret.
+  if grep -Eo "$SECRET_RE" "$p" | grep -Evq '[=:][ ]*\$[A-Za-z_{]'; then
+    die "$p: looks like it holds a secret; name credentials by environment variable instead"
+  fi
 }
 
 cmd_verdict() { # df verdict <role-output-file>: prints the verdict word, exit 1 if invalid
@@ -256,7 +277,7 @@ cmd_finish() { # df finish <run-id> [session]: end state is written together, th
   rd=$(run_dir "$1"); c="$rd/run.conf"
   [ -f "$c" ] || die "no such run: $1"
   # Only a run that came through QA clean may finish; anything else pauses and stays resumable.
-  case "$(conf_get "$c" stage)" in qa|integrate|done) ;; *) die "finish: run has not completed QA (stage $(conf_get "$c" stage))";; esac
+  case "$(conf_get "$c" stage)" in qa|e2e|integrate|done) ;; *) die "finish: run has not completed QA (stage $(conf_get "$c" stage))";; esac
   case "$(conf_get "$c" status)" in active|done|unresolved) ;; *) die "finish: run is $(conf_get "$c" status): $(conf_get "$c" waiting_on)";; esac
   for f in "$rd"/chunks/*.md; do
     [ -e "$f" ] || continue

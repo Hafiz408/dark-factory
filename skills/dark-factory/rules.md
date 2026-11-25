@@ -25,7 +25,7 @@ Write each finding as:
 
 ```
 - severity: critical|high|medium|low
-  source: functional|quality|ponytail|security|impact|goal|tester|integrity
+  source: functional|quality|ponytail|security|impact|goal|e2e|tester|integrity
   where: <file:line, or the observable behaviour>
   what: <one line>
   tags: [pre-existing] [flaky] [late-find]      (optional line)

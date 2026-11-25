@@ -34,6 +34,8 @@ Rules:
 - Write every `run:` command against the literal placeholder `<WORKTREE>` (for example
   `cd <WORKTREE> && python3 calc.py`). Never write the path of the main clone or any other
   absolute path to the project; the code under test lives only in the run's worktree.
+- A scenario that can only be checked by driving a browser is `executable: no`: no portable
+  read-only browser tool list exists for a plugin agent (`docs/spikes.md`, S5).
 - Mark `executable: no` honestly. Never write a scenario you cannot describe how to run.
 
 End with `VERDICT: PASS - <n> scenarios, <m> not executable`.
