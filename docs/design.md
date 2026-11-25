@@ -55,7 +55,7 @@ Out of v1:
 
 | # | Stage | What happens | Output |
 |---|---|---|---|
-| 0 | Start | Preconditions. Create run id, worktree `../<repo>-df-<run-id>` on `df/<run-id>`, state dir (section 8). Record `root_base_sha`. | worktree, state dir |
+| 0 | Start | Preconditions. Create run id, worktree `../<repo>-df-<run-id>` on `df/<run-id>` (or the branch named with `--branch`), from `HEAD` (or the ref named with `--base`), state dir (section 8). Record `root_base_sha`. | worktree, state dir |
 | 1 | Intake | Store raw request verbatim (after secret scan) | `input.md` |
 | 2 | Route | `router` picks track and confidence. Below 0.7 the choice becomes a Refine question. | `run.conf` |
 | 3 | Refine | Three `refiner` lenses in parallel (requirements, codebase fit, risk). Merge, resolve what the repo can answer, ask one batched round. Max 2 rounds per cycle. Codebase-fit lens reads by sampling entry points and the areas the input names, and states what it did not read. | `questions.md`, `spec.md` |
@@ -224,7 +224,7 @@ State lives in a **hidden sibling of the main clone**, not in the working tree a
 the first live run.) The user is asked once to allow the parent directory.
 
 ```
-run.conf          track, worktree, branch, root_base_sha, env, budget, stage cursor, status
+run.conf          track, worktree, branch, base_ref, root_base_sha, env, budget, stage cursor, status
 lock              session id + heartbeat, refreshed on every verdict
 input.md          raw request (scrubbed)
 questions.md      refine questions, pending and answered
