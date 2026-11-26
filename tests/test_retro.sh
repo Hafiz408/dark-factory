@@ -74,9 +74,11 @@ case $(cat "$SR/proposals.md") in *sk-live*) bad "the secret proposal is not rec
 bash -c "cd '$R' && '$DF' pause '$id' 'review cap reached'"
 assert_eq "paused" "$("$DF" conf-get "$rd/run.conf" status)" "pause sets status paused"
 assert_eq "review cap reached" "$("$DF" conf-get "$rd/run.conf" waiting_on)" "pause records what is open"
-"$DF" conf-set "$rd/run.conf" paused_at $((now - 5000))
+"$DF" conf-set "$rd/run.conf" paused_at $((now - 5000)); "$DF" conf-set "$rd/run.conf" signoff_at $((now - 5100))
 bash -c "cd '$R' && '$DF' unpause '$id'"
 st=$("$DF" conf-get "$rd/run.conf" started)
+so=$("$DF" conf-get "$rd/run.conf" signoff_at)
+[ $(( $(date +%s) - so )) -lt 1000 ] && ok "unpause credits the paused time to signoff_at" || bad "unpause credits the paused time to signoff_at"
 [ $(( $(date +%s) - st )) -lt 1000 ] && ok "unpause credits the paused time to the budget" || bad "unpause credits the paused time to the budget"
 assert_eq "active" "$("$DF" conf-get "$rd/run.conf" status)" "unpause sets status active"
 assert_fail "unpause refuses a run that is not paused" bash -c "cd '$R' && '$DF' unpause '$id'"

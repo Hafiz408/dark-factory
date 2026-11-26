@@ -47,6 +47,11 @@ bash -c "cd '$R' && '$DF' profile-pin '$id'"
 assert_eq "$(shasum < "$P" | cut -d' ' -f1)" "$("$DF" conf-get "$rd/run.conf" profile_sha)" "profile-pin records the profile's hash"
 rm -f "$P"; bash -c "cd '$R' && '$DF' profile-pin '$id'"
 assert_eq "none" "$("$DF" conf-get "$rd/run.conf" profile_sha)" "profile-pin records none when there is no profile"
+sa=$("$DF" conf-get "$rd/run.conf" signoff_at)
+case $sa in ''|*[!0-9]*) bad "profile_pin_records_signoff_at ($sa)";; *) ok "profile_pin_records_signoff_at";; esac
+[ -n "$("$DF" conf-get "$rd/run.conf" ship_pin)" ] && ok "profile_pin_records_ship_pin" || bad "profile_pin_records_ship_pin"
+"$DF" conf-set "$rd/run.conf" signoff_at 5; bash -c "cd '$R' && '$DF' profile-pin '$id'"
+assert_eq "5" "$("$DF" conf-get "$rd/run.conf" signoff_at)" "a second profile-pin keeps the first signoff_at"
 
 # release review: prose that talks about credentials is fine; the pin binds only runs that are still going
 "$DF" conf-set "$rd/run.conf" profile_sha ""

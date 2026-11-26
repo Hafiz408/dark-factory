@@ -17,8 +17,13 @@ h3=$(df_ rundir-hash "$id" "$out"); echo l >> "$rd/log.md"; printf 'x\t1\t1\n' >
 assert_eq "$h3" "$(df_ rundir-hash "$id" "$out")" "rundir_hash_ignores_log: log.md and spawns.tsv are the orchestrator's"
 echo "status=done" >> "$rd/run.conf"
 [ "$h0" != "$(df_ rundir-hash "$id" "$out")" ] && ok "rundir-hash: writing another file changes the hash" || bad "rundir-hash: writing another file changes the hash"
-h1=$(df_ rundir-hash "$id" "$out"); echo y > "$rd/panel/other.md"
-[ "$h1" != "$(df_ rundir-hash "$id" "$out")" ] && ok "rundir-hash: creating another file changes the hash" || bad "rundir-hash: creating another file changes the hash"
+h1=$(df_ rundir-hash "$id" "$out"); echo y > "$rd/panel/other.md"; echo e > "$rd/panel/e2e-r1.md"
+assert_eq "$h1" "$(df_ rundir-hash "$id" "$out")" "rundir_hash_scoped: panel files written alongside do not change it"
+for f in spec.md plan.md questions.md scenarios/S1.md scenarios/checklist.md chunks/01.md; do
+  h=$(df_ rundir-hash "$id" "$out"); echo t >> "$rd/$f"
+  [ "$h" != "$(df_ rundir-hash "$id" "$out")" ] && ok "rundir_hash_scoped: writing $f changes it" || bad "rundir_hash_scoped: writing $f changes it"
+done
+rm -f "$rd/spec.md" "$rd/plan.md" "$rd/questions.md" "$rd/scenarios/S1.md" "$rd/scenarios/checklist.md" "$rd/chunks/01.md" "$rd/panel/e2e-r1.md"
 h2=$(df_ rundir-hash "$id" "$out" "$rd/panel/b.md"); echo z > "$rd/panel/b.md"
 assert_eq "$h2" "$(df_ rundir-hash "$id" "$out" "$rd/panel/b.md")" "rundir-hash: a parallel panel passes every output file"
 assert_fail "rundir-hash needs an output file" df_ rundir-hash "$id"
@@ -34,6 +39,9 @@ assert_eq "2" "$(grep -c '' "$rd/spawns.tsv")" "spawn-log appends one line per s
 assert_ok "spawn-log takes a kind" df_ spawn-log "$id" checker 30 900 resume
 assert_ok "spawn-log takes the old role names" df_ spawn-log "$id" tester 30 900
 df_ spawn-log "$id" builder 7 7 spawn; df_ spawn-log "$id" builder 7 7 spawn
+df_ spawn-log "$id" builder - - spawn; df_ spawn-log "$id" builder - - spawn
+assert_eq "7" "$(grep -c '' "$rd/spawns.tsv")" "spawn_log_keeps_unknown_usage: two parallel spawns with - - are two"
+sed -i.bak '$d' "$rd/spawns.tsv"; sed -i.bak '$d' "$rd/spawns.tsv"; rm -f "$rd/spawns.tsv.bak"
 assert_eq "5" "$(grep -c '' "$rd/spawns.tsv")" "spawn_log_dedupes: an identical row within 5 s is one spawn"
 assert_eq "checker	30	900	resume" "$(sed -n 3p "$rd/spawns.tsv" | cut -f1-4)" "spawn-log row is role, seconds, tokens, kind, epoch"
 assert_fail "spawn-log refuses an unknown kind" df_ spawn-log "$id" builder 1 1 rerun
@@ -78,6 +86,12 @@ assert_eq "3:budget: agents cap reached (2/2)" "$rc:$out" "budget_agents_exceede
 "$DF" conf-set "$C" max_agents 9; "$DF" conf-set "$C" budget_seconds 60; "$DF" conf-set "$C" started $(( $(date +%s) - 100 ))
 rc=0; out=$(df_ budget "$id") || rc=$?
 assert_eq "3:budget: time cap reached (2/1 min)" "$rc:$out" "budget_time_exceeded"
+"$DF" conf-set "$C" signoff_at $(( $(date +%s) - 10 ))
+rc=0; out=$(df_ budget "$id") || rc=$?
+assert_eq "0:" "$rc:$out" "budget_counts_from_signoff: time before sign-off is not counted"
+df_ metrics "$id"; s7=$(grep "^$id	" "$SR/metrics.tsv" | cut -f7)
+[ "$s7" -lt 50 ] && ok "metrics_seconds_from_signoff ($s7)" || bad "metrics_seconds_from_signoff ($s7)"
+sed -i.bak '/^signoff_at=/d' "$C"; rm -f "$C.bak" "$SR/metrics.tsv"
 : > "$rd/spawns.tsv"; sed -i.bak '/^max_agents=/d; /^budget_seconds=/d' "$C"; rm -f "$C.bak"
 printf 'run\ttrack\tchunks\tattempts\treview_rounds\tqa_rounds\tseconds\toutcome\nr1\tfeature\t2\t2\t1\t1\t3000\tdone\n' > "$SR/metrics.tsv"
 assert_contains "(default figures, no history yet)" "$(df_ estimate "$id" 3)" "one finished run is not history"

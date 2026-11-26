@@ -50,6 +50,8 @@ echo "oops" > README.md
 out=$("$DF" check-diff "$R" "$BASE" "$T/ch.md")
 assert_contains "README.md" "$out" "out-of-scope file flagged"
 assert_contains "severity: high" "$out" "out-of-scope is high"
+printf '%s\n' "$out" > "$T/cd.md"
+assert_fail "gate_blocks_df_findings: a check-diff scope finding blocks" "$DF" gate "$T/cd.md"
 rm README.md
 
 # existing test modified, undeclared
@@ -142,6 +144,11 @@ assert_contains "src/new.py" "$(git ls-files)" "commit stages real changes"
 case "$(git ls-files)" in *__pycache__*|*.pyc*) bad "commit leaves artefacts out";; *) ok "commit leaves artefacts out";; esac
 assert_contains "df(chunk 07)" "$(git log -1 --format=%s)" "commit message used"
 assert_fail "commit with nothing to commit is an error, not an empty commit" "$DF" commit "$R" "df(chunk 08): nothing"
+# df commit logs the commit in its run's log.md, found by the worktree
+echo i > "$T/in.txt"; cid=$("$DF" start "$T/in.txt"); crd=$("$DF" run-dir "$cid"); cwt=$("$DF" conf-get "$crd/run.conf" worktree)
+echo c > "$cwt/c.py"; "$DF" commit "$cwt" "df(step 01): c"
+assert_eq "commit $(git -C "$cwt" rev-parse HEAD) df(step 01): c" "$(tail -1 "$crd/log.md")" "commit_logs_to_run: commit <sha> <message> in log.md"
+git worktree remove --force "$cwt"
 
 # Eval J3: touches_tests may use globs, like scope does (a glob was flagged critical)
 mkdir -p tests/fixtures

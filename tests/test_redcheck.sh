@@ -29,5 +29,7 @@ git add . && git commit -qm "fix with a tautology"
 assert_eq "1" "$(rc_of 'bash tests/test_calc.sh && test ! -e src/new.sh')" "redcheck_tautology_exit1 (a file added since base is removed)"
 assert_eq "redcheck: new tests pass without the change" "$(cat "$T/out")" "redcheck_tautology_exit1: message"
 
+rc=0; "$DF" redcheck "$R" 0000000000000000000000000000000000000000 'exit 0' >/dev/null 2>&1 || rc=$?
+assert_eq "4" "$rc" "redcheck_infra_exit4: a base that is not found is exit 4, not 1"
 assert_eq "$n0" "$(wts)" "redcheck_cleans_temp_worktree"
 finish

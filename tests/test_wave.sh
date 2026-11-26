@@ -36,6 +36,7 @@ assert_ok "join cherry-picks a passing chunk" bash -c "cd '$R' && '$DF' sub-join
 assert_ok "a second disjoint chunk joins too" bash -c "cd '$R' && '$DF' sub-join '$id' 05"
 assert_ok "joined work is on the run branch" test -f "$wt/src/c.py" -a -f "$wt/lib/l.py"
 assert_eq "df(chunk 05)" "$(git -C "$wt" log -1 --format=%s)" "joined in the order asked"
+assert_eq "commit $(git -C "$wt" rev-parse HEAD) df: join step 05" "$(tail -1 "$rd/log.md")" "sub_join_logs_commit: the joined head is in log.md"
 assert_fail "sub-worktree removed after join" test -d "$sw"
 assert_fail "sub-branch removed after join" git -C "$R" rev-parse --verify -q "df/$id-c03"
 
