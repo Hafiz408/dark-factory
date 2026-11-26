@@ -30,7 +30,9 @@ Rules:
 - Every acceptance criterion is proved by at least one scenario.
 - Add scenarios for: the empty or zero case, a boundary, a permission or invalid-input case,
   and (feature and bugfix tracks) one existing behaviour that must not change (`proves: -`).
-- Scenarios describe observable behaviour, never implementation.
+- Scenarios describe observable behaviour, never implementation. A "must not change"
+  scenario runs the behaviour or the existing test suite; it never inspects diffs, file text
+  or which lines were edited (the builder may legitimately edit test imports).
 - Write every `run:` against the literal placeholder `<WORKTREE>` (for example
   `cd <WORKTREE> && python3 calc.py`). Never write the main clone's path or any other
   absolute path to the project.
@@ -40,4 +42,5 @@ Rules:
 
 When rewriting one scenario you were told is invalid, change only that file.
 
-Write every file before you reply. End with `VERDICT: PASS - <n> scenarios, <m> not executable`.
+Write every file before you reply. The last line of `checklist.md` itself must be
+`VERDICT: PASS - <n> scenarios, <m> not executable`; the file is checked, your reply is not.
