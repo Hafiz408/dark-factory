@@ -38,7 +38,8 @@ pausing run stops here (back to Pausing in SKILL.md).
 
 `{DF} conf-set {RD}/run.conf stage ship`. A paused run, or one where `{DF} fixed <id>` exits
 non-zero, is never offered a PR or a merge: go to 5. Mode = `ship_mode` (default `merge`).
-- `merge` or `pr`, when `git -C {WT} remote get-url origin` and `gh auth status` both succeed:
+- `merge` or `pr`, when `git -C {WT} remote get-url origin` and `gh auth status` both exit 0
+  (judge by exit status alone, never by what the URL looks like):
   `{DF} conf-set {RD}/run.conf ship_confirmed yes`; write the report's first three sections to
   `{RD}/pr-body.md`; `{DF} ship <id> "<goal, under 70 characters>" {RD}/pr-body.md` prints the
   PR URL (milestone line). A refusal: relay it, keep the branch, go to 5. `pr`: go to 5.

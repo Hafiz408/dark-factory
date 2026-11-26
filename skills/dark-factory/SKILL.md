@@ -156,7 +156,8 @@ Show one screen, in plain words:
 - Time and cost: the estimate line, then "This is a rough range, not a promise: retries and
   fixes are unknown in advance, it cannot see your remaining plan usage, and it gets more
   accurate after a few runs here." Then the `cap:` line: "I stop and ask if it goes past this."
-- The ending, by mode: with `origin` and `gh auth status` working: "When everything passes I
+- The ending, by mode (decide only by whether `git remote get-url origin` and `gh auth status`
+  exit 0, never by what the remote URL looks like): with both working: "When everything passes I
   will open a PR into `<target>`, merge it once its checks pass, test again after the merge
   and tidy up." Without them: "When everything passes I will merge it into `<target>` on this
   computer if your folder is clean and on `<target>`; otherwise I leave it on `<branch>`."
