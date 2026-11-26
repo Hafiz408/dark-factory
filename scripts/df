@@ -19,7 +19,7 @@ conf_set() {
   case "$2=$3" in
     parallel=on|parallel=off) ;;
     parallel=*) die "conf-set: parallel must be on or off";;
-    max_review_rounds=*|max_qa_rounds=*|review_round=*|qa_round=*|review_rounds_total=*|qa_rounds_total=*|started=*|budget_seconds=*|max_attempts=*|paused_at=*)
+    max_review_rounds=*|max_qa_rounds=*|review_round=*|qa_round=*|review_rounds_total=*|qa_rounds_total=*|max_agents=*|started=*|budget_seconds=*|max_attempts=*|paused_at=*)
       case "$3" in ''|*[!0-9]*) die "conf-set: $2 must be an integer";; esac ;;
     status=active|status=waiting_permission|status=paused|status=done|status=unresolved|status=aborted) ;;
     status=*) die "conf-set: invalid status '$3'";;
@@ -142,7 +142,7 @@ cmd_start() { # df start <input-file> [--base <ref>] [--branch <name>]   (DF_ALL
   cp "$input" "$rd/input.md"
   { echo "track=unrouted"; echo "worktree=$wt"; echo "branch=$branch"; echo "root_base_sha=$base"; echo "base_ref=$baseref"
     echo "stage=intake"; echo "status=active"
-    echo "started=$(date +%s)"; echo "budget_seconds=${DF_BUDGET_SECONDS:-14400}"; echo "max_attempts=3"; echo "max_review_rounds=3"; echo "max_qa_rounds=2"; echo "review_round=0"; echo "qa_round=0"; echo "parallel=off"; } | atomic "$rd/run.conf"
+    echo "started=$(date +%s)"; [ -z "${DF_BUDGET_SECONDS:-}" ] || echo "budget_seconds=$DF_BUDGET_SECONDS"; echo "max_attempts=3"; echo "max_review_rounds=3"; echo "max_qa_rounds=2"; echo "review_round=0"; echo "qa_round=0"; echo "parallel=off"; } | atomic "$rd/run.conf"
   echo "$id"
 }
 
@@ -478,24 +478,49 @@ cmd_bump() { # df bump <run-id> review|qa: add 1 to the round (reset per cycle) 
   echo $((r + 1))
 }
 
-cmd_estimate() { # df estimate <run-id> <chunks>: a rough time and agent range for the sign-off screen
-  local m
-  case "${2:-}" in ''|*[!0-9]*|0) die "usage: df estimate <run-id> <chunks> (chunks a positive integer)";; esac
+cmd_estimate() { # df estimate <run-id> <steps> [lanes]: a rough time and agent range, and the run's caps, for the sign-off screen
+  local m c est ma bs x y
+  case "${2:-}" in ''|*[!0-9]*|0) die "usage: df estimate <run-id> <steps> [lanes] (positive integers)";; esac
+  case "${3:-1}" in ''|*[!0-9]*|0) die "usage: df estimate <run-id> <steps> [lanes] (positive integers)";; esac
+  c="$(run_dir "$1")/run.conf"; [ -f "$c" ] || die "no such run: $1"
   m="$(state_root)/metrics.tsv"; [ -f "$m" ] || m=/dev/null
-  # ponytail: metrics.tsv has no per-stage times, so the default fixed overhead (12.5 min, 8 agents) is
-  # taken off each finished run and the rest is per chunk. Record stage times if this proves too coarse.
-  ID="$1" N="$2" awk -F'\t' '
+  # ponytail: metrics.tsv has no per-stage times, so the v0.2 fixed overhead (12.5 min, 8 agents) is
+  # taken off each finished run and the rest is per step. Record stage times if this proves too coarse.
+  # Defaults: refiner, planner, qa-author, checker, one builder per lane, and one fix or security pass per 3 steps.
+  est=$(ID="$1" N="$2" L="${3:-1}" awk -F'\t' '
     function med(a, k,   i, j, t) { for (i = 2; i <= k; i++) for (j = i; j > 1 && a[j-1] > a[j]; j--) { t = a[j]; a[j] = a[j-1]; a[j-1] = t }
       return k % 2 ? a[(k+1)/2] : (a[k/2] + a[k/2+1]) / 2 }
     function r(x) { return int(x + 0.5) }
+    function up(x) { return x == int(x) ? x : int(x) + 1 }
     NR > 1 && $1 != ENVIRON["ID"] && ($8 == "done" || $8 == "unresolved") && $3 > 0 && $7 ~ /^[0-9]+$/ {
       p[++k] = ($7 / 60 - 12.5) / $3; if (p[k] < 1) p[k] = 1
       if ($9 ~ /^[0-9]+$/) { q[++s] = ($9 - 8) / $3; if (q[s] < 1) q[s] = 1 } }
-    END { n = ENVIRON["N"]
+    END { n = ENVIRON["N"]; w = up(n / ENVIRON["L"])
       if (k >= 2) { pm = med(p, k); lo = 10 + n * pm * 0.8; hi = 15 + n * pm * 1.25; src = "based on " k " earlier runs in this repo" }
-      else { lo = 10 + n * 4 * 1.3 + 3 + 5; hi = 15 + n * 8 * 1.3 + 5 + 10; src = "default figures, no history yet" }
-      ag = (k >= 2 && s >= 2) ? 8 + n * med(q, s) : 8 + n * 6 * 1.3 + 5 + 3
-      printf "estimate: %d-%d min, ~%d agents (%s)\n", r(lo), r(hi), r(ag), src }' "$m"
+      else { lo = 3 + 2 * w; hi = 6 + 4 * w; src = "default figures, no history yet" }
+      ag = (k >= 2 && s >= 2) ? r(8 + n * med(q, s)) : 4 + ENVIRON["L"] + up(n / 3)
+      printf "%d %d estimate: %d-%d min, ~%d-%d agents (%s)\n", up((ag + 2) * 1.5), up(r(hi) * 1.5) * 60, r(lo), r(hi), ag, ag + 2, src }' "$m")
+  read -r x y est <<EOF
+$est
+EOF
+  ma=$(conf_get "$c" max_agents); [ -n "$ma" ] || { ma=$x; conf_set "$c" max_agents "$ma"; }
+  bs=$(conf_get "$c" budget_seconds); [ -n "$bs" ] || { bs=$y; conf_set "$c" budget_seconds "$bs"; }
+  printf '%s\ncap: up to %s agents and %s min\n' "$est" "$ma" $(( (bs + 59) / 60 ))
+}
+
+cmd_budget() { # df budget <run-id>: exit 3 when the agent or time cap is reached (call before every spawn)
+  local c rd ma bs used st
+  rd=$(run_dir "${1:-}"); c="$rd/run.conf"; [ -f "$c" ] || die "no such run: ${1:-}"
+  ma=$(conf_get "$c" max_agents); bs=$(conf_get "$c" budget_seconds); st=$(conf_get "$c" started)
+  if [ -n "$ma" ]; then # resumes keep their agent, so only spawns count
+    used=$( [ ! -f "$rd/spawns.tsv" ] || awk -F'\t' '$4 != "resume"' "$rd/spawns.tsv" | grep -c '' || true)
+    [ "${used:-0}" -lt "$ma" ] || { echo "budget: agents cap reached (${used:-0}/$ma)"; return 3; }
+  fi
+  if [ -n "$bs" ] && [ -n "$st" ]; then # both integers: conf_set refuses anything else
+    used=$(( $(date +%s) - st ))
+    [ "$used" -lt "$bs" ] || { echo "budget: time cap reached ($(( (used + 59) / 60 ))/$(( (bs + 59) / 60 )) min)"; return 3; }
+  fi
+  return 0
 }
 
 cmd_metrics() { # df metrics <run-id>: one row per run in <state-root>/metrics.tsv, replaced on re-run
@@ -824,11 +849,12 @@ case "$cmd" in
   spawn-log) cmd_spawn_log "$@";;
   bump) cmd_bump "$@";;
   estimate) cmd_estimate "$@";;
+  budget) cmd_budget "$@";;
   run-dir) run_dir "$@";;
   conf-get) conf_get "$@";;
   conf-set) conf_set "$@";;
   fm-get) fm_get "$@";;
   fm-set) fm_set "$@";;
   write) atomic "$@";;
-  *) die "usage: df {start|validate|profile-pin|verdict|gate|lock|snapshot|check-diff|canary-scan|srchash|redcheck|commit|scrub|status|list|clean|fixed|finish|ship|sweep|lessons-set|metrics|state-hash|rundir-hash|spawn-log|bump|estimate|pause|unpause|wave|sub-add|sub-join|sub-drop|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
+  *) die "usage: df {start|validate|profile-pin|verdict|gate|lock|snapshot|check-diff|canary-scan|srchash|redcheck|commit|scrub|status|list|clean|fixed|finish|ship|sweep|lessons-set|metrics|state-hash|rundir-hash|spawn-log|bump|estimate|budget|pause|unpause|wave|sub-add|sub-join|sub-drop|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
 esac

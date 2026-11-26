@@ -15,7 +15,7 @@ assert_fail "nothing is written under .git" test -e "$R/.git/df"
 ( cd "$R" && git clean -fdxq )
 assert_ok "git clean -fdx cannot reach the state" test -f "$SR/$id/run.conf"
 assert_ok "input copied" test -f "$rd/input.md"
-assert_eq "14400" "$(cd "$R" && "$DF" conf-get "$rd/run.conf" budget_seconds)" "wall-clock budget recorded"
+assert_eq "" "$(cd "$R" && "$DF" conf-get "$rd/run.conf" budget_seconds)" "no wall-clock budget until the sign-off estimate sets one"
 case "$(cd "$R" && "$DF" conf-get "$rd/run.conf" started)" in ''|*[!0-9]*) bad "start time recorded";; *) ok "start time recorded";; esac
 assert_contains "untracked.txt" "$(cat "$rd/dirty.txt")" "dirty files recorded"
 assert_eq "" "$(cd "$R" && git status --porcelain | grep -v untracked.txt | grep -v in.txt)" "main clone working tree untouched"
