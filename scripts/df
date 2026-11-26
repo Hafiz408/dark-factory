@@ -552,6 +552,23 @@ cmd_budget() { # df budget <run-id>: exit 3 when the agent or time cap is reache
   return 0
 }
 
+# One call around each spawn, so the orchestrator spends one turn on bookkeeping, not three.
+cmd_pre() { # df pre <run-id> <session-id>: budget check (exit 3 at a cap), then lock refresh
+  [ $# -eq 2 ] || die "usage: df pre <run-id> <session-id>"
+  cmd_budget "$1" || return $?
+  cmd_lock "$1" refresh "$2"
+}
+
+cmd_post() { # df post <run-id> <role> <seconds> <tokens> <spawn|resume> <output-file> <log line>: spawn-log, log line, then the verdict (exit 1 if invalid)
+  local rd
+  [ $# -eq 7 ] || die "usage: df post <run-id> <role> <seconds> <tokens> <spawn|resume> <output-file> <log line>"
+  cmd_spawn_log "$1" "$2" "$3" "$4" "$5"
+  rd=$(run_dir "$1")
+  printf '%s\n' "$7" | head -1 >> "$rd/log.md"
+  [ -f "$6" ] || { echo "post: no output file $6" >&2; return 1; }
+  cmd_verdict "$6"
+}
+
 cmd_metrics() { # df metrics <run-id>: one row per run in <state-root>/metrics.tsv, replaced on re-run
   local rd c m f chunks=0 att=0 a row sp=0 rs=0 tok=- rr qr
   rd=$(run_dir "$1"); c="$rd/run.conf"; m="$(state_root)/metrics.tsv"
@@ -1007,6 +1024,8 @@ case "$cmd" in
   state-hash) cmd_state_hash;;
   rundir-hash) cmd_rundir_hash "$@";;
   spawn-log) cmd_spawn_log "$@";;
+  pre) cmd_pre "$@";;
+  post) cmd_post "$@";;
   bump) cmd_bump "$@";;
   estimate) cmd_estimate "$@";;
   budget) cmd_budget "$@";;

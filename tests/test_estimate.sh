@@ -29,6 +29,7 @@ assert_eq "$h2" "$(df_ rundir-hash "$id" "$out" "$rd/panel/b.md")" "rundir-hash:
 assert_fail "rundir-hash needs an output file" df_ rundir-hash "$id"
 rm -f "$rd/panel/other.md" "$rd/panel/b.md" "$rd/spawns.tsv"
 
+T_OUT_FILE=$(mktemp)
 # spawn-log
 assert_ok "spawn-log records a spawn" df_ spawn-log "$id" reviewer 95 41200
 assert_ok "spawn-log takes - when unknown" df_ spawn-log "$id" builder - -
@@ -115,4 +116,11 @@ assert_contains "(based on 3 earlier runs in this repo)" "$e" "estimate counts f
 # r3: (40 - 12.5) / 2 = 13.75 -> median of 18.75, 5, 13.75 = 13.75; lo 10 + 2*13.75*0.8 = 32, hi 15 + 2*13.75*1.25 = 49.375
 assert_eq "estimate: 32-49 min, ~26-28 agents (based on 3 earlier runs in this repo)
 cap: up to 42 agents and 74 min" "$e" "estimate scales the history median by chunk count"
+# pre/post: one bookkeeping call each side of a spawn
+printf 'did it\nVERDICT: PASS - ok\n' > "$T_OUT_FILE"
+assert_eq "PASS" "$(cd "$R" && "$DF" post "$id" builder 12 3400 spawn "$T_OUT_FILE" "- builder step 01 PASS")" "post prints the verdict"
+assert_ok "post appended the log line" grep -q "builder step 01 PASS" "$rd/log.md"
+assert_ok "post logged the spawn" grep -q "^builder	12	3400	spawn" "$rd/spawns.tsv"
+printf 'no verdict here\n' > "$T_OUT_FILE"
+assert_fail "post fails on a missing verdict" bash -c "cd '$R' && '$DF' post '$id' builder 1 1 resume '$T_OUT_FILE' x"
 finish

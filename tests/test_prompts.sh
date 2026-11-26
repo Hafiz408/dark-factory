@@ -161,8 +161,8 @@ grep -q "one run executes per repo" "$S" && ok "SKILL.md: one run per repo" || b
 grep -qi "never force" $ALL && grep -q -- "--admin" "$SH" && ok "never force-push, never --admin" || bad "never force-push, never --admin"
 grep -q "{DF} finish <id> <session-id>" "$SH" && ok "ship.md ends a run with df finish" || bad "ship.md ends a run with df finish"
 grep -q "{DF} commit" "$S" && ok "SKILL.md commits through df commit" || bad "SKILL.md commits through df commit"
-grep -q "{DF} spawn-log <id> <role> <seconds> <tokens> spawn" "$S" && grep -q "resume" "$S" && grep -q "{RD}/spawns.tsv" "$S" && ok "SKILL.md: every spawn and resume is logged" || bad "SKILL.md: every spawn and resume is logged"
-grep -q "Never guess a number" "$S" && ok "SKILL.md: spawn log never guesses" || bad "SKILL.md: spawn log never guesses"
+grep -q "{DF} post <id> <role> <seconds> <tokens>" "$S" && grep -q "spawn|resume" "$S" && ok "SKILL.md: every spawn and resume is logged" || bad "SKILL.md: every spawn and resume is logged"
+grep -q "never guess" "$S" && ok "SKILL.md: spawn log never guesses" || bad "SKILL.md: spawn log never guesses"
 grep -q "{DF} rundir-hash" "$S" && grep -q "{DF} snapshot" "$S" && ok "SKILL.md: read-only roles are hashed" || bad "SKILL.md: read-only roles are hashed"
 # every df subcommand the skill calls must exist in scripts/df
 for sub in $(cat $ALL | grep -o '{DF} [a-z-]*' | awk '{print $2}' | sort -u); do
@@ -177,7 +177,7 @@ grep -q "checker_agent" "$S" && grep -q "refiner_agent" "$S" && ok "SKILL.md: ch
 grep -q "{DF} redcheck" "$S" && grep -q "no_tests" "$S" && ok "SKILL.md: redcheck, exit 2 only with no_tests" || bad "SKILL.md: redcheck, exit 2 only with no_tests"
 grep -q "{DF} check-diff" "$S" && grep -q "{DF} canary-scan" "$S" && grep -q "{DF} gate" "$S" && ok "SKILL.md: deterministic per-step checks" || bad "SKILL.md: deterministic per-step checks"
 grep -q "risk: high" "$S" && grep -q "lenses/security.md" "$S" && ok "SKILL.md: security reviewer only on high-risk steps" || bad "SKILL.md: security reviewer only on high-risk steps"
-grep -q "{DF} budget <id>" "$S" && grep -q "exit 3" "$S" && ok "SKILL.md: budget before every spawn, exit 3 pauses" || bad "SKILL.md: budget before every spawn, exit 3 pauses"
+grep -q "{DF} pre <id> <session-id>" "$S" && grep -q "exit 3" "$S" && ok "SKILL.md: budget before every spawn, exit 3 pauses" || bad "SKILL.md: budget before every spawn, exit 3 pauses"
 grep -q "{DF} bump <id> review" "$S" && ok "SKILL.md: check rounds counted by df bump" || bad "SKILL.md: check rounds counted by df bump"
 grep -q "{DF} wave <id>" "$S" && grep -q "{DF} sub-add" "$S" && grep -q "{DF} sub-join" "$S" && grep -q "{DF} sub-drop" "$S" && ok "SKILL.md: automatic waves through df helpers" || bad "SKILL.md: automatic waves through df helpers"
 grep -q "parallel=on" "$S" && bad "SKILL.md: parallel is automatic, no parallel=on" || ok "SKILL.md: parallel is automatic, no parallel=on"

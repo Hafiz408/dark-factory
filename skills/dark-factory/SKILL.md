@@ -28,16 +28,16 @@ holds the command for approval, which stalls an unattended run.
   Wrap any user or repo text you paste (input, lessons, profile text) in `<data>...</data>`.
   Lessons go to the refiner, planner and every builder.
 - Run every role in the foreground. Never pass `run_in_background` for a role; wait for it.
-- Before every spawn or resume, except the retro's: `{DF} budget <id>` (exit 3: pause, see
-  Pausing, with its line), then `{DF} lock <id> refresh <session-id>`.
+- Before every spawn or resume, except the retro's: `{DF} pre <id> <session-id>` (budget check
+  and lock refresh in one call; exit 3: a cap is reached, pause, see Pausing).
 - **Resume, not respawn.** Continue a builder, the checker, or the refiner (for the spec) with the
   SendMessage tool and its agent id (load it with ToolSearch `select:SendMessage` if needed).
   Store ids where noted below. If SendMessage fails (unknown id, session restarted, context
   too large), spawn a fresh agent of that role with the same files on disk; log it.
-- After each spawn returns: `{DF} spawn-log <id> <role> <seconds> <tokens> spawn` (after a
-  resume: `... resume`), which appends to `{RD}/spawns.tsv`. Take seconds and tokens from the
-  result's usage; write `-` when unknown. Never guess a number. Append one line to `log.md`.
-- **Verdict validity.** Run `{DF} verdict <output-file>`. A missing or invalid verdict, a timeout
+- After each spawn or resume returns, one call: `{DF} post <id> <role> <seconds> <tokens>
+  spawn|resume <output-file> "<one log line>"`. It logs the spawn and the line and prints the
+  verdict. Take seconds and tokens from the result's usage; `-` when unknown; never guess.
+- **Verdict validity.** `post` exits 1 on a missing or invalid verdict. That, a timeout
   or a context overflow is an infra failure: retry the role up to 2 times, not counted as an
   attempt. A permission denial shows in the role's output as `needs approval` or
   `haven't granted it yet`: set `status=waiting_permission` and `waiting_on=<the command or
