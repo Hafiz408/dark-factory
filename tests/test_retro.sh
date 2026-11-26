@@ -28,7 +28,7 @@ printf -- '---\nid: FX-1\nstatus: PASS\nattempts: 1\nscope: [a]\n---\n' > "$rd/c
 "$DF" conf-set "$rd/run.conf" status paused
 bash -c "cd '$R' && '$DF' metrics '$id'"
 M="$SR/metrics.tsv"
-assert_eq "run	track	chunks	attempts	review_rounds	qa_rounds	seconds	outcome	spawns	tokens" "$(head -1 "$M")" "metrics.tsv has a header"
+assert_eq "run	track	chunks	attempts	review_rounds	qa_rounds	seconds	outcome	spawns	tokens	resumes" "$(head -1 "$M")" "metrics.tsv has a header"
 row=$(grep "^$id	" "$M")
 assert_contains "$id	feature	2	3	2	1	" "$row" "metrics row counts chunks, attempts and rounds"
 assert_contains "	paused" "$row" "metrics row records the outcome"
@@ -41,7 +41,13 @@ mkdir -p "$rd/scenarios"; printf 'canary: DFC-abc123\n' > "$rd/scenarios/s1.md"
 printf 'scenario DFC-abc123: user enters 0 and expects error\n' > "$rd/lessons-new.md"; : > "$rd/proposals-new.md"
 assert_fail "lessons carrying a holdout canary are refused" ls_
 printf 'ok lesson\n' > "$rd/lessons-new.md"; printf -- '- see DFC-abc123\n' > "$rd/proposals-new.md"
-assert_fail "proposals carrying a holdout canary are refused" ls_
+assert_ok "proposals carrying a holdout canary do not stop the lessons" ls_
+assert_eq "ok lesson" "$(cat "$SR/lessons.md")" "lessons installed without the canary proposals"
+case $(cat "$SR/proposals.md") in *DFC-abc123*) bad "proposals carrying a holdout canary are dropped";; *) ok "proposals carrying a holdout canary are dropped";; esac
+printf 'long-proposal lesson\n' > "$rd/lessons-new.md"; python3 -c "print('- ' + 'p'*248)" > "$rd/proposals-new.md"
+assert_ok "lessons_kept_with_long_proposal: exit 0" ls_
+assert_eq "long-proposal lesson" "$(cat "$SR/lessons.md")" "lessons_kept_with_long_proposal: lessons installed"
+l=$(grep -- '- ppp' "$SR/proposals.md"); assert_eq "200:..." "${#l}:${l#"${l%???}"}" "lessons_kept_with_long_proposal: line cut to 197 + ..."
 : > "$rd/proposals-new.md"
 python3 -c "print('x'*300)" > "$rd/lessons-new.md"
 assert_fail "a lesson line over 200 characters is refused" ls_
@@ -57,8 +63,10 @@ assert_fail "a non-numeric start time is never evaluated" test -e "$SR/pwn"
 "$DF" conf-set "$rd/run.conf" started 1
 
 # re-review: proposals get the same secret and line checks as lessons
-printf 'ok lesson\n' > "$rd/lessons-new.md"; printf -- '- quote API_KEY=sk-livexxxxxxxxxxxxxxxxxxxxxx from the log\n' > "$rd/proposals-new.md"
-assert_fail "proposals holding a secret are refused" ls_
+printf 'ok lesson 2\n' > "$rd/lessons-new.md"; printf -- '- quote API_KEY=sk-livexxxxxxxxxxxxxxxxxxxxxx from the log\n' > "$rd/proposals-new.md"
+assert_contains "dropped" "$(ls_ 2>&1)" "proposals holding a secret are dropped, and it says so"
+assert_eq "ok lesson 2" "$(cat "$SR/lessons.md")" "the lessons still install"
+case $(cat "$SR/proposals.md") in *sk-live*) bad "the secret proposal is not recorded";; *) ok "the secret proposal is not recorded";; esac
 : > "$rd/proposals-new.md"
 
 # third review: pause stops the clock; unpause credits the paused time

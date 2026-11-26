@@ -28,6 +28,12 @@ s3=$("$DF" snapshot "$R")
 [ "$s1" != "$s3" ] && ok "snapshot sees untracked file" || bad "snapshot sees untracked file"
 rm src/new.py
 assert_eq "$s1" "$("$DF" snapshot "$R")" "snapshot returns to baseline"
+echo "x" >> src/a.py; git stash -q
+[ "$s1" != "$("$DF" snapshot "$R")" ] && ok "snapshot_sees_stash" || bad "snapshot_sees_stash"
+git stash drop -q
+echo "x" >> src/a.py; git add src/a.py; s4=$("$DF" snapshot "$R"); git reset -q src/a.py
+[ "$s4" != "$("$DF" snapshot "$R")" ] && ok "snapshot sees the index" || bad "snapshot sees the index"
+git checkout -q src/a.py
 
 # empty diff
 out=$("$DF" check-diff "$R" "$BASE" "$T/ch.md")

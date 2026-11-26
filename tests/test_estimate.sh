@@ -13,8 +13,8 @@ echo "VERDICT: PASS - ok" > "$out"
 assert_eq "$h0" "$(df_ rundir-hash "$id" "$out")" "rundir-hash: writing the allowed file changes nothing"
 echo hb > "$rd/lock"; echo p > "$rd/progress.md"
 assert_eq "$h0" "$(df_ rundir-hash "$id" "$out")" "rundir-hash: lock and progress.md are the orchestrator's"
-h3=$(df_ rundir-hash "$id" "$out"); echo l >> "$rd/log.md"
-[ "$h3" != "$(df_ rundir-hash "$id" "$out")" ] && ok "rundir-hash: a role writing log.md is caught" || bad "rundir-hash: a role writing log.md is caught"
+h3=$(df_ rundir-hash "$id" "$out"); echo l >> "$rd/log.md"; printf 'x\t1\t1\n' >> "$rd/spawns.tsv"
+assert_eq "$h3" "$(df_ rundir-hash "$id" "$out")" "rundir_hash_ignores_log: log.md and spawns.tsv are the orchestrator's"
 echo "status=done" >> "$rd/run.conf"
 [ "$h0" != "$(df_ rundir-hash "$id" "$out")" ] && ok "rundir-hash: writing another file changes the hash" || bad "rundir-hash: writing another file changes the hash"
 h1=$(df_ rundir-hash "$id" "$out"); echo y > "$rd/panel/other.md"
@@ -31,16 +31,25 @@ assert_fail "spawn-log refuses an unknown role" df_ spawn-log "$id" hacker 1 1
 assert_fail "spawn-log refuses a non-integer" df_ spawn-log "$id" tester 1.5 1
 assert_fail "spawn-log refuses a non-integer token count" df_ spawn-log "$id" tester 1 'x'
 assert_eq "2" "$(grep -c '' "$rd/spawns.tsv")" "spawn-log appends one line per spawn"
+assert_ok "spawn-log takes a kind" df_ spawn-log "$id" checker 30 900 resume
+assert_ok "spawn-log takes the old role names" df_ spawn-log "$id" tester 30 900
+df_ spawn-log "$id" builder 7 7 spawn; df_ spawn-log "$id" builder 7 7 spawn
+assert_eq "5" "$(grep -c '' "$rd/spawns.tsv")" "spawn_log_dedupes: an identical row within 5 s is one spawn"
+assert_eq "checker	30	900	resume" "$(sed -n 3p "$rd/spawns.tsv" | cut -f1-4)" "spawn-log row is role, seconds, tokens, kind, epoch"
+assert_fail "spawn-log refuses an unknown kind" df_ spawn-log "$id" builder 1 1 rerun
+printf 'builder\t1\t1\n' >> "$rd/spawns.tsv"
 
 # metrics: two new columns; an old 8-column file keeps its rows
 printf 'run\ttrack\tchunks\tattempts\treview_rounds\tqa_rounds\tseconds\toutcome\nr0\tbugfix\t1\t1\t1\t1\t600\tdone\n' > "$SR/metrics.tsv"
 "$DF" conf-set "$rd/run.conf" status active
 df_ metrics "$id"
-assert_eq "run	track	chunks	attempts	review_rounds	qa_rounds	seconds	outcome	spawns	tokens" "$(head -1 "$SR/metrics.tsv")" "metrics header has spawns and tokens"
+assert_eq "run	track	chunks	attempts	review_rounds	qa_rounds	seconds	outcome	spawns	tokens	resumes" "$(head -1 "$SR/metrics.tsv")" "metrics header has spawns, tokens and resumes"
 assert_eq "r0	bugfix	1	1	1	1	600	done" "$(grep '^r0	' "$SR/metrics.tsv")" "an old row is kept as it was"
-assert_contains "	active	2	41200" "$(grep "^$id	" "$SR/metrics.tsv")" "metrics counts spawns and sums known tokens"
+assert_contains "	active	5	43008	1" "$(grep "^$id	" "$SR/metrics.tsv")" "metrics_counts_resumes: spawns (rows without kind count), tokens, resumes"
+"$DF" conf-set "$rd/run.conf" review_round 1; "$DF" conf-set "$rd/run.conf" review_rounds_total 3
+df_ metrics "$id"; assert_eq "3" "$(grep "^$id	" "$SR/metrics.tsv" | cut -f5)" "metrics review_rounds reads the total"
 : > "$rd/spawns.tsv"; df_ metrics "$id"
-assert_contains "	active	0	-" "$(grep "^$id	" "$SR/metrics.tsv")" "no known tokens is -"
+assert_contains "	active	0	-	0" "$(grep "^$id	" "$SR/metrics.tsv")" "no known tokens is -"
 
 # estimate: defaults without history
 rm -f "$SR/metrics.tsv"

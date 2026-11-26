@@ -19,7 +19,7 @@ conf_set() {
   case "$2=$3" in
     parallel=on|parallel=off) ;;
     parallel=*) die "conf-set: parallel must be on or off";;
-    max_review_rounds=*|max_qa_rounds=*|review_round=*|qa_round=*|started=*|budget_seconds=*|max_attempts=*|paused_at=*)
+    max_review_rounds=*|max_qa_rounds=*|review_round=*|qa_round=*|review_rounds_total=*|qa_rounds_total=*|started=*|budget_seconds=*|max_attempts=*|paused_at=*)
       case "$3" in ''|*[!0-9]*) die "conf-set: $2 must be an integer";; esac ;;
     status=active|status=waiting_permission|status=paused|status=done|status=unresolved|status=aborted) ;;
     status=*) die "conf-set: invalid status '$3'";;
@@ -217,21 +217,25 @@ cmd_verdict() { # df verdict <role-output-file>: prints the verdict word, exit 1
   echo "$last" | sed -E 's/^VERDICT: ([A-Z_]+).*/\1/'
 }
 
-cmd_gate() { # df gate <findings-file>: prints "<blocking> <total>", exit 1 if blocking > 0
+cmd_gate() { # df gate <findings-file>...: prints "<blocking> <total>", exit 1 if blocking > 0
   local out
+  [ $# -ge 1 ] || die "usage: df gate <findings-file>..."
+  # A medium+ finding without an evidence: line (a failing command, scenario id, or file:line + input) counts as low.
   out=$(awk '
     function flush() {
       if (sev != "") {
         if (sev!="critical" && sev!="high" && sev!="medium" && sev!="low") bad++
         t++
-        if ((sev=="medium"||sev=="high"||sev=="critical") && tags !~ /pre-existing/ && !(sev=="medium" && tags ~ /late-find/)) b++
+        if ((sev=="medium"||sev=="high"||sev=="critical") && ev && tags !~ /pre-existing/ && !(sev=="medium" && tags ~ /late-find/)) b++
       }
-      sev=""; tags=""
+      sev=""; tags=""; ev=0
     }
+    FNR == 1 { flush() }
     /^- severity:/ { flush(); sev=$3 }
     /^[ \t]+tags:/ { tags=$0 }
-    END { flush(); printf "%d %d %d\n", b+0, t+0, bad+0 }' "$1")
-  if [ "${out##* }" -ne 0 ]; then die "gate: unknown severity word in $1 (use critical|high|medium|low, lowercase)"; fi
+    /^[ \t]+evidence:[ \t]*[^ \t]/ { ev=1 }
+    END { flush(); printf "%d %d %d\n", b+0, t+0, bad+0 }' "$@")
+  if [ "${out##* }" -ne 0 ]; then die "gate: unknown severity word in $* (use critical|high|medium|low, lowercase)"; fi
   out="${out% *}"
   echo "$out"
   [ "${out%% *}" -eq 0 ]
@@ -267,6 +271,7 @@ cmd_snapshot() { # df snapshot <worktree>: hash of everything a read-only role m
   ( cd "$1" && {
       git status --porcelain | cut -c4- | grep -Ev "$ARTEFACT_RE" || true
       git diff HEAD
+      git ls-files -s; git stash list   # a role that stashes or stages leaves the files looking clean
       git ls-files -o --exclude-standard | grep -Ev "$ARTEFACT_RE" | while IFS= read -r p; do printf '%s ' "$p"; sha < "$p"; done
     } | sha )
 }
@@ -381,25 +386,25 @@ cmd_finish() { # df finish <run-id> [session]: end state is written together, th
 }
 
 cmd_lessons_set() { # df lessons-set <run-id>: install the retro's lessons (max 30 lines), append its proposals once
-  local rd sr n
+  local rd sr n prop=""
   rd=$(run_dir "$1"); sr=$(state_root)
   [ -f "$rd/lessons-new.md" ] || die "lessons-set: $rd/lessons-new.md not found"
   n=$(grep -c '' "$rd/lessons-new.md" || true)
   [ "$n" -le 30 ] || die "lessons-set: $n lines; at most 30 (old lessons kept)"
   ! grep -E "$SECRET_RE" "$rd/lessons-new.md" | grep -Fvq '[REDACTED]' || die "lessons-set: lessons look like they hold a secret (old lessons kept)"
   ! awk 'length($0) > 200 { bad=1 } END { exit !bad }' "$rd/lessons-new.md" || die "lessons-set: a line is over 200 characters (old lessons kept)"
-  if [ -f "$rd/proposals-new.md" ]; then
-    ! grep -E "$SECRET_RE" "$rd/proposals-new.md" | grep -Fvq '[REDACTED]' || die "lessons-set: proposals look like they hold a secret (old lessons kept)"
-    ! awk 'length($0) > 200 { bad=1 } END { exit !bad }' "$rd/proposals-new.md" || die "lessons-set: a proposal line is over 200 characters (old lessons kept)"
-  fi
   # Later builders read lessons; holdout scenarios must never reach them.
-  if [ -n "$(cmd_canary_scan "$rd/scenarios" "$rd/lessons-new.md")$( [ ! -f "$rd/proposals-new.md" ] || cmd_canary_scan "$rd/scenarios" "$rd/proposals-new.md")" ]; then
-    die "lessons-set: a holdout scenario canary appears in the retro output (old lessons kept)"
+  [ -z "$(cmd_canary_scan "$rd/scenarios" "$rd/lessons-new.md")" ] || die "lessons-set: a holdout scenario canary appears in the lessons (old lessons kept)"
+  # Proposals are only collected for a human, so a bad one is dropped (long lines cut), never the lessons with it.
+  if [ -s "$rd/proposals-new.md" ]; then
+    if grep -E "$SECRET_RE" "$rd/proposals-new.md" | grep -Fvq '[REDACTED]'; then echo "df: lessons-set: proposals dropped (they look like they hold a secret)" >&2
+    elif [ -n "$(cmd_canary_scan "$rd/scenarios" "$rd/proposals-new.md")" ]; then echo "df: lessons-set: proposals dropped (a holdout scenario canary appears in them)" >&2
+    else prop=1; fi
   fi
   atomic "$sr/lessons.md" < "$rd/lessons-new.md"
-  if [ -s "$rd/proposals-new.md" ]; then # this run's latest retro replaces its earlier section
+  if [ -n "$prop" ]; then # this run's latest retro replaces its earlier section
     { [ ! -f "$sr/proposals.md" ] || H="## $1" awk '$0 == ENVIRON["H"] { skip=1; next } /^## / { skip=0 } !skip' "$sr/proposals.md"
-      printf '## %s\n' "$1"; cat "$rd/proposals-new.md"; } | atomic "$sr/proposals.md"
+      printf '## %s\n' "$1"; awk 'length($0) > 200 { $0 = substr($0, 1, 197) "..." } 1' "$rd/proposals-new.md"; } | atomic "$sr/proposals.md"
   fi
 }
 
@@ -410,26 +415,42 @@ cmd_state_hash() { # df state-hash: one hash over the shared per-repo files, to 
   done | sha
 }
 
-cmd_rundir_hash() { # df rundir-hash <run-id> <allowed-output-file>...: hash of the run dir except those files, lock and progress.md
+cmd_rundir_hash() { # df rundir-hash <run-id> <allowed-output-file>...: hash of the run dir except those files and the orchestrator's own (lock, progress.md, log.md, spawns.tsv)
   local rd p a skip
   rd=$(run_dir "${1:-}"); [ -f "$rd/run.conf" ] || die "no such run: ${1:-}"
   [ $# -ge 2 ] || die "usage: df rundir-hash <run-id> <allowed-output-file>..."
   shift
   ( cd "$rd" && find . -type f | sed 's,^\./,,' | sort | while IFS= read -r p; do
       skip=0
-      for a in lock progress.md "$@"; do [ "$p" != "${a#"$rd"/}" ] || skip=1; done
+      for a in lock progress.md log.md spawns.tsv "$@"; do [ "$p" != "${a#"$rd"/}" ] || skip=1; done
       [ $skip = 1 ] || { printf '%s ' "$p"; sha < "$p"; }
     done | sha )
 }
 
-ROLES=" router refiner planner qa-author builder tester qa-functional reviewer retro "
-cmd_spawn_log() { # df spawn-log <run-id> <role> <seconds> <tokens>: one line per role spawn in spawns.tsv
-  local rd v
-  [ $# -eq 4 ] || die "usage: df spawn-log <run-id> <role> <seconds> <tokens>"
+# router, tester, qa-functional: v0.2 roles, still accepted so an old run can log while it finishes.
+ROLES=" refiner planner qa-author builder checker reviewer retro router tester qa-functional "
+cmd_spawn_log() { # df spawn-log <run-id> <role> <seconds> <tokens> [spawn|resume]: one line per spawn or resume in spawns.tsv
+  local rd v k=${5:-spawn} now last
+  [ $# -eq 4 ] || [ $# -eq 5 ] || die "usage: df spawn-log <run-id> <role> <seconds> <tokens> [spawn|resume]"
   rd=$(run_dir "$1"); [ -f "$rd/run.conf" ] || die "no such run: $1"
   case "$ROLES" in *" $2 "*) ;; *) die "spawn-log: unknown role '$2'";; esac
   for v in "$3" "$4"; do case "$v" in -) ;; ''|*[!0-9]*) die "spawn-log: seconds and tokens must be integers or -";; esac; done
-  printf '%s\t%s\t%s\n' "$2" "$3" "$4" >> "$rd/spawns.tsv"
+  case "$k" in spawn|resume) ;; *) die "spawn-log: kind must be spawn or resume";; esac
+  now=$(date +%s)
+  # The same row logged twice within 5 s is one spawn logged twice (a retried tool call), not two spawns.
+  last=$( [ ! -f "$rd/spawns.tsv" ] || tail -1 "$rd/spawns.tsv")
+  case "$last" in "$2	$3	$4	$k	"*) [ $((now - ${last##*	})) -gt 5 ] || return 0;; esac
+  printf '%s\t%s\t%s\t%s\t%s\n' "$2" "$3" "$4" "$k" "$now" >> "$rd/spawns.tsv"
+}
+
+cmd_bump() { # df bump <run-id> review|qa: add 1 to the round (reset per cycle) and to its total (never reset); prints the round
+  local c r t
+  c="$(run_dir "${1:-}")/run.conf"; [ -f "$c" ] || die "no such run: ${1:-}"
+  case "${2:-}" in review|qa) ;; *) die "usage: df bump <run-id> review|qa";; esac
+  r=$(conf_get "$c" "$2_round"); case "$r" in ''|*[!0-9]*) r=0;; esac
+  t=$(conf_get "$c" "$2_rounds_total"); case "$t" in ''|*[!0-9]*) t=$r;; esac # a v0.2 run has no total yet
+  conf_set "$c" "$2_rounds_total" $((t + 1)); conf_set "$c" "$2_round" $((r + 1))
+  echo $((r + 1))
 }
 
 cmd_estimate() { # df estimate <run-id> <chunks>: a rough time and agent range for the sign-off screen
@@ -453,7 +474,7 @@ cmd_estimate() { # df estimate <run-id> <chunks>: a rough time and agent range f
 }
 
 cmd_metrics() { # df metrics <run-id>: one row per run in <state-root>/metrics.tsv, replaced on re-run
-  local rd c m f chunks=0 att=0 a row sp tok
+  local rd c m f chunks=0 att=0 a row sp=0 rs=0 tok=- rr qr
   rd=$(run_dir "$1"); c="$rd/run.conf"; m="$(state_root)/metrics.tsv"
   [ -f "$c" ] || die "no such run: $1"
   case "$(conf_get "$c" started)" in ''|*[!0-9]*) die "metrics: started in $c is not a number";; esac
@@ -461,15 +482,17 @@ cmd_metrics() { # df metrics <run-id>: one row per run in <state-root>/metrics.t
     [ -e "$f" ] || continue
     chunks=$((chunks + 1)); a=$(fm_get "$f" attempts); case "$a" in ''|*[!0-9]*) a=0;; esac; att=$((att + a))
   done
-  sp=0; tok=-
-  if [ -f "$rd/spawns.tsv" ]; then
-    sp=$(grep -c '' "$rd/spawns.tsv" || true)
-    tok=$(awk -F'\t' '$3 ~ /^[0-9]+$/ { t += $3; k = 1 } END { print k ? t : "-" }' "$rd/spawns.tsv")
+  if [ -f "$rd/spawns.tsv" ]; then # a row without a kind (v0.2) is a spawn
+    read -r sp rs tok <<EOF
+$(awk -F'\t' '{ if ($4 == "resume") r++; else s++ } $3 ~ /^[0-9]+$/ { t += $3; k = 1 } END { print s+0, r+0, (k ? t : "-") }' "$rd/spawns.tsv")
+EOF
   fi
-  row=$(printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' "$1" "$(conf_get "$c" track)" "$chunks" "$att" \
-    "$(conf_get "$c" review_round)" "$(conf_get "$c" qa_round)" "$(( $(date +%s) - $(conf_get "$c" started) ))" "$(conf_get "$c" status)" "$sp" "$tok")
-  # Rows written before v0.2 have 8 columns; they are kept as they are under the new header.
-  { printf 'run\ttrack\tchunks\tattempts\treview_rounds\tqa_rounds\tseconds\toutcome\tspawns\ttokens\n'
+  rr=$(conf_get "$c" review_rounds_total); [ -n "$rr" ] || rr=$(conf_get "$c" review_round)
+  qr=$(conf_get "$c" qa_rounds_total); [ -n "$qr" ] || qr=$(conf_get "$c" qa_round)
+  row=$(printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' "$1" "$(conf_get "$c" track)" "$chunks" "$att" \
+    "$rr" "$qr" "$(( $(date +%s) - $(conf_get "$c" started) ))" "$(conf_get "$c" status)" "$sp" "$tok" "$rs")
+  # Rows written before v0.3 have 8 or 10 columns; they are kept as they are under the new header.
+  { printf 'run\ttrack\tchunks\tattempts\treview_rounds\tqa_rounds\tseconds\toutcome\tspawns\ttokens\tresumes\n'
     [ -f "$m" ] && tail -n +2 "$m" | grep -v "^$1	" || true
     printf '%s\n' "$row"; } | atomic "$m"
 }
@@ -773,6 +796,7 @@ case "$cmd" in
   state-hash) cmd_state_hash;;
   rundir-hash) cmd_rundir_hash "$@";;
   spawn-log) cmd_spawn_log "$@";;
+  bump) cmd_bump "$@";;
   estimate) cmd_estimate "$@";;
   run-dir) run_dir "$@";;
   conf-get) conf_get "$@";;
@@ -780,5 +804,5 @@ case "$cmd" in
   fm-get) fm_get "$@";;
   fm-set) fm_set "$@";;
   write) atomic "$@";;
-  *) die "usage: df {start|validate|profile-pin|verdict|gate|lock|snapshot|check-diff|canary-scan|srchash|commit|scrub|status|list|clean|fixed|finish|ship|sweep|lessons-set|metrics|state-hash|rundir-hash|spawn-log|estimate|pause|unpause|wave|sub-add|sub-join|sub-drop|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
+  *) die "usage: df {start|validate|profile-pin|verdict|gate|lock|snapshot|check-diff|canary-scan|srchash|commit|scrub|status|list|clean|fixed|finish|ship|sweep|lessons-set|metrics|state-hash|rundir-hash|spawn-log|bump|estimate|pause|unpause|wave|sub-add|sub-join|sub-drop|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
 esac

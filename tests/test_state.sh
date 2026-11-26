@@ -47,6 +47,7 @@ cat > "$T/f1" <<'EOF'
   source: quality
   where: a.py:3
   what: dup
+  evidence: pytest tests/test_a.py fails with AssertionError
 - severity: low
   source: quality
   where: b.py:1
@@ -77,8 +78,15 @@ cat > "$T/f3" <<'EOF'
   where: c.py:9
   what: late but high
   tags: [late-find]
+  evidence: c.py:9 with input '; rm' runs the shell
 EOF
 assert_fail "late-find high still blocks" "$DF" gate "$T/f3"
+# v0.3: every file is read; medium+ without evidence counts as low
+printf -- '- severity: low\n  source: check\n  where: a\n  what: nit\n' > "$T/g1"
+rc=0; out=$("$DF" gate "$T/g1" "$T/f3") || rc=$?
+assert_eq "1:1 2" "$rc:$out" "gate_reads_all_files: a blocking finding in the second file blocks"
+printf -- '- severity: high\n  source: check\n  where: a.py:1\n  what: maybe wrong\n  tags: []\n- severity: medium\n  source: check\n  where: b\n  what: x\n  evidence:\n' > "$T/g2"
+assert_eq "0 2" "$("$DF" gate "$T/g2")" "gate_medium_without_evidence_is_low"
 
 # scrub
 printf 'use key AKIAABCDEFGHIJKLMNOP and password: hunter2 please\n' > "$T/s"
@@ -137,6 +145,14 @@ assert_ok "conf-set accepts an integer round" "$DF" conf-set "$T/st.conf" review
 assert_fail "conf-set refuses a value with a newline" "$DF" conf-set "$T/st.conf" waiting_on "$(printf 'a\nstatus=done')"
 assert_eq "0" "$("$DF" conf-get "$rd2/run.conf" review_round)" "start records review_round 0"
 assert_eq "0" "$("$DF" conf-get "$rd2/run.conf" qa_round)" "start records qa_round 0"
+# v0.3 bump: the per-cycle round can be reset, the total never is
+b_() { bash -c "cd '$R2' && '$DF' bump '$i2' $1"; }
+assert_eq "1" "$(b_ review)" "bump prints the new round"
+b_ review >/dev/null; "$DF" conf-set "$rd2/run.conf" review_round 0; b_ review >/dev/null
+assert_eq "1:3" "$("$DF" conf-get "$rd2/run.conf" review_round):$("$DF" conf-get "$rd2/run.conf" review_rounds_total)" "bump_counts_total"
+b_ qa >/dev/null
+assert_eq "1:1" "$("$DF" conf-get "$rd2/run.conf" qa_round):$("$DF" conf-get "$rd2/run.conf" qa_rounds_total)" "bump qa"
+assert_fail "bump refuses another counter" b_ attempts
 
 # fifth review: the word Bearer is not a secret; a bearer token is
 printf 'Use Bearer authentication for the API\n' > "$T/b1"; assert_ok "the word Bearer is not redacted" "$DF" scrub "$T/b1"
