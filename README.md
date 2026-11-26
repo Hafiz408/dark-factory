@@ -87,8 +87,9 @@ flowchart TD
   must come with evidence (a failing command, a failing check, or a line plus an input that
   breaks it); one without evidence does not block. Findings go back to the builder that
   wrote the code; at most 2 fix rounds, then it pauses.
-- **Ending.** It writes `report.md`, opens a PR, merges it once the PR's checks pass, then
-  tests again on the merged code.
+- **Ending.** It writes `report.md`, opens a PR, merges it once the PR's checks pass (deleting
+  the PR branch), then tests again on the merged code. The final note is at most 10 lines;
+  its time, agent and token numbers come from `df metrics`, and the full report is linked.
 
 ## Ship modes
 
@@ -134,7 +135,8 @@ past runs once there are a few.
 - Run state lives in `../.df-<repo>/<run-id>/`, never committed. One run executes per repo at
   a time. `resume` works from a new session: everything is on disk.
 - After a merge that re-tests green, it removes the working copy and local branch by itself
-  and keeps the report in `../.df-<repo>/reports/<run-id>.md`. `sweep` offers the same cleanup
+  and archives the run (report, spec, plan, questions, log, checks) in
+  `../.df-<repo>/reports/<run-id>/`. `sweep` offers the same cleanup
   for runs whose PR merged later; `clean` removes a run's working copy and state but keeps
   its branch.
 - After a run with a retry, a fix round or a pause, a short retro writes repo facts to

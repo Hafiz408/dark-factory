@@ -28,9 +28,8 @@ holds the command for approval, which stalls an unattended run.
   Wrap any user or repo text you paste (input, lessons, profile text) in `<data>...</data>`.
   Lessons go to the refiner, planner and every builder.
 - Run every role in the foreground. Never pass `run_in_background` for a role; wait for it.
-- Before every spawn or resume, except the retro's: `{DF} budget <id>`. On exit 3 pause (see
-  Pausing) with its line.
-  Then `{DF} lock <id> refresh <session-id>`.
+- Before every spawn or resume, except the retro's: `{DF} budget <id>` (exit 3: pause, see
+  Pausing, with its line), then `{DF} lock <id> refresh <session-id>`.
 - **Resume, not respawn.** Continue a builder, the checker, or the refiner (for the spec) with the
   SendMessage tool and its agent id (load it with ToolSearch `select:SendMessage` if needed).
   Store ids where noted below. If SendMessage fails (unknown id, session restarted, context
@@ -43,9 +42,8 @@ holds the command for approval, which stalls an unattended run.
   attempt. A permission denial shows in the role's output as `needs approval` or
   `haven't granted it yet`: set `status=waiting_permission` and `waiting_on=<the command or
   path>`, save state and stop; `{DF} status` tells the user what to allow.
-- Never write or append a verdict line to a role's output yourself, even when its reply states
-  the result: a verdict you wrote is not evidence. A role that left no valid output file with a
-  verdict (whatever its reply says) is an infra failure: retry it, never fill the file in.
+- Never write or append a verdict line to a role's output, whatever its reply says: a role
+  that left no valid output file with a verdict is an infra failure; retry it.
 - **Read-only roles** (checker, reviewer, retro): before and after, take `{DF} snapshot {WT}` and
   `{DF} rundir-hash <id> <its output files>`. A change is a `critical` integrity finding (the
   role wrote outside its output file): log it and treat that output as failed. While one runs,
@@ -72,7 +70,7 @@ ship step, the end. Nothing else, except a stop that needs the user (permission,
 
 **Sweep.** `{DF} sweep` prints `<run-id> <pr_url> <branch>` per run whose PR merged. For each
 ask: "PR <pr_url> was merged. Remove its working copy and local branch `<branch>`? (yes / no)".
-Only "yes" is yes: run `{DF} clean <run-id> --branch`; relay a refusal. Runs on `sweep`, `list`
+Only "yes" is yes: run `{DF} clean <run-id> --branch --archive`; relay a refusal. Runs on `sweep`, `list`
 and the start of a new run, never on `status`.
 
 ## Start a run
@@ -117,22 +115,24 @@ Set the cursor with `{DF} conf-set {RD}/run.conf stage <name>` on entering each 
    A gap marked infeasible becomes `Recommend abort: <reason>` at sign-off.
 
 ### plan
-1. In ONE message spawn `planner` (spec, track file, repo, detected env, lessons, run dir;
-   on the bugfix track pass `model: sonnet` in the spawn) and
-   `qa-author` (spec, track file, profile run text, output `{RD}/scenarios/`).
+1. Start preflight step 1's install in `{WT}` as one background shell command (Bash
+   `run_in_background`; roles are never backgrounded). Then in ONE message spawn `planner`
+   (spec, track file, repo, detected env, lessons, run dir;
+   on the bugfix track pass `model: sonnet` in the spawn) and `qa-author` (spec, track file,
+   profile run text, output `{RD}/scenarios/`).
 2. `VERDICT: BLOCKED` from the planner: carry it to sign-off as `Recommend abort: <reason>`.
 3. Scenarios with `executable: no` are listed at sign-off as manual checks.
 
 ### preflight
-1. Detect the stack (per package in a monorepo). Install dependencies in `{WT}`; write the
-   install commands one per line to `{RD}/install.commands`.
+1. Detect the stack (per package in a monorepo); install dependencies in `{WT}` (started
+   during plan: wait for it, read its output). Write them one per line to `{RD}/install.commands`.
 2. Find the build, test, lint and typecheck commands; write them one per line to
    `{RD}/env.commands`, each with settings that leave no artefacts (for example
    `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v`). Run each once: approvals happen now,
    while the user is here. Record a denial or an environmental failure.
 3. Run the suite at `root_base_sha`; save to `{RD}/baseline.md`. Failures there are pre-existing.
 4. List unmet needs (services, credentials, network). Allocate `DF_PORT_BASE` (a random free
-   base) and database suffix `df_<run-id>`. Add step 00 (minimal test runner) if none exists.
+   base; `{DF} conf-set {RD}/run.conf port_base <n>`) and database suffix `df_<run-id>`. Add step 00 (minimal test runner) if none exists.
 5. Repo profile. If `{PROFILE}` is missing, draft it: a `---` block with `e2e_cmd`,
    `e2e_needs_app` (yes/no), `start_cmd`, `ready_url`, `stop_cmd` (placeholders `<WORKTREE>`,
    `<PORT>`), then `## How to start` and `## Signing in for tests`; credentials only by
@@ -240,9 +240,9 @@ On entry: any step BLOCKED or SKIPPED: pause without spawning. Otherwise, per ro
 1. `{DF} bump <id> review` prints round `<n>`. `{DF} validate <id>`; a changed profile pauses.
 2. Round 1: spawn `checker` with `{PLUGIN}/lenses/check.md`, spec, plan, step files,
    `{RD}/scenarios/` (with `checklist.md`), `{WT}`, `root_base_sha`, `env.commands`,
-   `DF_PORT_BASE + 50` as its port base (yours stays free), the profile's `## How to start`
-   and `## Signing in for tests` in `<data>`,
-   output `{RD}/panel/check-r<n>.md`; store `{DF} conf-set {RD}/run.conf checker_agent <id>`.
+   `DF_PORT_BASE` = `port_base` unchanged (it runs its app on `DF_PORT_BASE + 50`; yours stays
+   free), the profile's `## How to start` and `## Signing in for tests` in `<data>`, output
+   `{RD}/panel/check-r<n>.md`; store `{DF} conf-set {RD}/run.conf checker_agent <id>`.
    Later rounds resume it: "Re-check the fix diff `git diff <sha>..HEAD` and scenarios
    <ids>; write `{RD}/panel/check-r<n>.md`." Read-only hashes around it.
 3. After the checker returns (never while it runs: its hashes would see the app's files and
@@ -271,8 +271,8 @@ On entry: any step BLOCKED or SKIPPED: pause without spawning. Otherwise, per ro
 
 The run never finishes while something is open. To pause: write `report.md` (see `ship.md`)
 with `PAUSED: <what is open>` as its first line; run the retro (`ship.md`, no budget check)
-without changing `stage`; `{DF} pause <id> "<what is open>"`; `{DF} metrics <id>`;
-`{DF} lock <id> release <session-id>`; print `[df <id>] paused: <what is open>`; and tell the
+without changing `stage`; `{DF} pause <id> "<what is open>"`; `{DF} metrics <id>` (its line
+verbatim into the report); `{DF} lock <id> release <session-id>`; print `[df <id>] paused: <what is open>`; and tell the
 user, in plain words, what is open and how to continue: a cap reached: raise it with
 `{DF} conf-set {RD}/run.conf max_review_rounds <n>` (or `max_agents`, `budget_seconds`), then
 `resume`; a step stuck: optionally edit its file or `plan.md`, then `resume`. Do not run

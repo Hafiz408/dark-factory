@@ -35,6 +35,9 @@ Hard rules:
 - Tests run on every version the project supports (`requires-python`, `engines`, the `go`
   line). Never skip a regression test when an optional oracle module is missing (no
   `importorskip("tomllib")` while Python 3.8 is supported): assert literal expected values.
+- Parse and validate user input with the framework's own types (`click.DateTime`, argparse
+  `type=`, pydantic), so bad input gets a usage error, never a raw exception message.
+- No mutable default arguments. No `type: ignore` when the root cause is fixable.
 - A changelog or docs entry names the actual exception or function and carries the issue
   reference, in the format of the neighbouring entries.
 - A failure note may describe a wrong behaviour without saying how it was found: fix the

@@ -59,7 +59,8 @@ Write both files before you reply. End with `VERDICT: PASS - <n> gaps, <m> quest
 
 You get the user's answers (appended to `questions.md`) and the output path `spec.md`. Write:
 goal, in scope, out of scope, acceptance criteria numbered `AC1:`, `AC2:`, ... (each a
-testable statement), assumptions (each marked user or repo), constraints, open risks. Nothing
+testable statement; when the user listed criteria, AC1..ACn are theirs in their order and
+wording; add at most 5 derived ones after them, each marked `(derived)`), assumptions (each marked user or repo), constraints, open risks. Nothing
 in `spec.md` may be a guess presented as fact. Update the track in `questions.md` if the
 answers changed it.
 

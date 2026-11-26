@@ -63,7 +63,8 @@ Smallest fix that works (bugfix and feature):
 
 Step rules:
 - One concern per step: at most 8 files and 5 done-criteria. Fewer, larger steps beat many
-  tiny ones. No separate "add tests" or "regression guard" step: each step brings its tests.
+  tiny ones. A feature with at most 5 user acceptance criteria that fits in at most 8 files is
+  one step. No separate "add tests" or "regression guard" step: each step brings its tests.
 - Every done-criterion is behaviour that does not exist before its step (its new tests must
   fail on the code before it). Edge cases and validation belong in the step that builds the
   feature, never in a later "edge cases" step.

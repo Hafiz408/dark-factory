@@ -220,7 +220,7 @@ grep -q "never applied" "$SH" && ok "ship.md: plugin proposals are never applied
 grep -qi "only when" "$SH" && grep -q "retry" "$SH" && ok "ship.md: retro only when something went wrong" || bad "ship.md: retro only when something went wrong"
 grep -q "ship_mode" "$SH" && grep -q "ship_confirmed yes" "$SH" && ok "ship.md: follows the ship mode from sign-off" || bad "ship.md: follows the ship mode from sign-off"
 grep -qi "no question" "$SH" && ok "ship.md: asks nothing after sign-off" || bad "ship.md: asks nothing after sign-off"
-grep -qi "post-merge" "$SH" && grep -qi "agents used" "$SH" && grep -q "estimate" "$SH" && ok "ship.md: final note has post-merge result and usage vs estimate" || bad "ship.md: final note has post-merge result and usage vs estimate"
+grep -qi "post-merge" "$SH" && grep -q "Time, agents" "$SH" && grep -q "estimate" "$SH" && ok "ship.md: final note has post-merge result and usage vs estimate" || bad "ship.md: final note has post-merge result and usage vs estimate"
 grep -q "{DF} finish" "$SH" && f=$(grep -n "{DF} finish <id>" "$SH" | head -1 | cut -d: -f1) && s=$(grep -n "{DF} ship <id>" "$SH" | head -1 | cut -d: -f1) && [ "$s" -lt "$f" ] && ok "ship.md: ship before finish, so the lock is held" || bad "ship.md: ship before finish, so the lock is held"
 grep -q "never offered" "$SH" && ok "ship.md: a paused or not-fixed run is never shipped" || bad "ship.md: a paused or not-fixed run is never shipped"
 grep -q "{DF} sweep" "$S" && ok "SKILL.md: merged-PR sweep kept" || bad "SKILL.md: merged-PR sweep kept"
@@ -253,4 +253,16 @@ a=$(echo "$SO" | grep -n "The ending" | head -1 | cut -d: -f1); d=$(echo "$SO" |
 grep -q "agent tokens, excluding this conversation" "$SH" && grep -q "agent tokens, excluding this conversation" "$ROOT/scripts/df" && ok "final note: agent tokens labelled" || bad "final note: agent tokens labelled"
 
 grep -q "never in a later" "$ROOT/agents/planner.md" && grep -q "README documents" "$ROOT/agents/planner.md" && ok "planner: no tests-only step, README in scope" || bad "planner: no tests-only step, README in scope"
+# Eval (taskplanner feature): audit trail, one source for numbers, short note, user's criteria, speed
+grep -qF "{DF} clean <id> --branch --archive" "$SH" && grep -qF "{DF} clean <id> --archive" "$SH" && grep -q "reports/<id>/report.md" "$SH" && ok "ship.md: cleanup archives the run to reports/<id>/" || bad "ship.md: cleanup archives the run to reports/<id>/"
+grep -qF "{DF} clean <run-id> --branch --archive" "$S" && ok "SKILL.md: sweep archives too" || bad "SKILL.md: sweep archives too"
+grep -q "only source of time, agents" "$SH" && grep -q "Never compute, round or estimate" "$SH" && m=$(grep -n "{DF} metrics <id>\`, after the post-merge" "$SH" | cut -d: -f1) && p=$(grep -n "^## 4. Post-merge" "$SH" | cut -d: -f1) && [ "$p" -lt "$m" ] && ok "ship.md: numbers come from df metrics after post-merge" || bad "ship.md: numbers come from df metrics after post-merge"
+grep -q "at most 10 lines" "$SH" && grep -q "Plugin proposals and technical leftovers go only in the report" "$SH" && grep -q "tests <before>→<after>, re-tested after" "$SH" && ok "ship.md: short final note, proposals only in the report" || bad "ship.md: short final note, proposals only in the report"
+grep -q "(derived)" "$SH" && ok "ship.md: user-facing counts skip derived criteria" || bad "ship.md: user-facing counts skip derived criteria"
+grep -q "their order and" "$RF" && grep -q "at most 5 derived" "$RF" && grep -q "(derived)" "$RF" && ok "refiner: keeps the user's criteria, derived ones marked" || bad "refiner: keeps the user's criteria, derived ones marked"
+i=$(grep -n "run_in_background\`; roles are never backgrounded" "$S" | cut -d: -f1); j=$(grep -n "in ONE message spawn \`planner\`" "$S" | cut -d: -f1)
+[ -n "$i" ] && [ -n "$j" ] && [ "$i" -le "$j" ] && ok "SKILL.md: install starts in the background before planning" || bad "SKILL.md: install starts in the background before planning"
+grep -q "at most 5 user acceptance criteria" "$ROOT/agents/planner.md" && grep -q "At most 5 user acceptance criteria and at most 8 files: one chunk" "$ROOT/tracks/feature.md" && ok "small features are planned as one step" || bad "small features are planned as one step"
+grep -q "click.DateTime" "$B" && grep -q "mutable default" "$B" && grep -q "type: ignore" "$B" && ok "builder: framework input types, no mutable defaults, no needless type: ignore" || bad "builder: framework input types, no mutable defaults, no needless type: ignore"
+grep -q "port_base <n>" "$S" && grep -q "\`port_base\` unchanged" "$S" && grep -q "preflight's base, as given" "$K" && grep -q "DF_PORT_BASE + 50" "$K" && ok "checker gets preflight's port base unchanged" || bad "checker gets preflight's port base unchanged"
 finish

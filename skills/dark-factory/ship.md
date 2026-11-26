@@ -14,10 +14,13 @@ Write `{RD}/report.md`, plain words first:
   the full suite result, the full app tests result (or `e2e: not configured`, never described
   as a pass), check rounds used, any differential check with its number of cases tried.
 - `## Anything left`: open low findings (the "what to delete" list), assumptions taken,
-  failures that were already there before the run, manual checks for the user.
+  failures that were already there before the run, manual checks for the user, technical
+  leftovers, and (added after the retro) its plugin proposals from `proposals-new.md`.
 - `## Technical changes`: modules touched, new dependencies, schema, config, migrations.
-- Then: outcome per step (PASS, BLOCKED, SKIPPED), findings left with severity, time and agents
-  used, and one sentence stating whether the branch is green.
+- Then: outcome per step (PASS, BLOCKED, SKIPPED), findings left with severity, and one
+  sentence stating whether the branch is green. No time, agent or token numbers yet (step 5).
+Counts of acceptance criteria shown to the user count only the user's own (`AC` lines without
+`(derived)`).
 If `{DF} fixed <id>` exits non-zero (a bugfix branch that changes no source), the first line is
 `NOT FIXED: <why>`.
 
@@ -31,7 +34,7 @@ Take `{DF} state-hash` and `{DF} snapshot {WT}`; spawn `retro` with the run dire
 current `lessons.md` beside `{PROFILE}` and outputs `{RD}/retro.md`, `{RD}/lessons-new.md`,
 `{RD}/proposals-new.md`; take both hashes again. Changed: a `critical` integrity finding, skip
 lessons. Else `{DF} lessons-set <id>` (relay a refusal in one line). Repo lessons apply to later
-runs automatically; plugin proposals are never applied, only listed in the final note. A
+runs automatically; plugin proposals are never applied, only listed in the report. A
 pausing run stops here (back to Pausing in SKILL.md).
 
 ## 3. Ship (stage `ship`)
@@ -69,24 +72,32 @@ merge, offer: "Say `undo` and I will move `<target>` back" (then
 
 ## 5. Finish and clean up
 
-1. Collect for the note: minutes = now minus `signoff_at` (in its own command), and the
-   estimate line from `log.md`.
-2. `{DF} finish <id> <session-id>` (sets done, or `unresolved` for a bugfix that changes no
+1. `{DF} finish <id> <session-id>` (sets done, or `unresolved` for a bugfix that changes no
    source, and releases the lock). If it prints `NOT FIXED`, put that line on top of the report.
-   Then `{DF} metrics <id>`: its line gives agents started and resumed, and agent tokens.
-3. Only after a merge whose post-merge test is green, clean up without asking: copy
-   `report.md` to `reports/<id>.md` in the parent of `{RD}`; then after a PR merge run
-   `{DF} clean <id> --branch`; after a local merge run `git -C <main clone> worktree remove {WT}`
-   and `git -C <main clone> branch -d <branch>`. A refusal: relay it in one line, leave
-   everything in place.
+2. `{DF} metrics <id>`, after the post-merge test. Its line is the only source of time, agents
+   and tokens: append `## Time and agents` to `report.md` with that line verbatim and the
+   estimate line from `log.md`. Never compute, round or estimate these numbers yourself.
+3. Only after a merge whose post-merge test is green, clean up without asking. This removes
+   only the working copy and local branch and archives the run's files to `reports/<id>/` in
+   the parent of `{RD}`: after a PR merge run `{DF} clean <id> --branch --archive`; after a
+   local merge run `git -C <main clone> worktree remove {WT}`, `git -C <main clone> branch -d
+   <branch>`, then `{DF} clean <id> --archive`. A refusal: relay it in one line, leave
+   everything in place. The report is then `reports/<id>/report.md`; otherwise `{RD}/report.md`.
 4. Print `[df <id>] done: <merged and verified | PR open | on branch <branch> | not green>` as
    the last line before the final note.
 
-## 6. Final note (plain words)
+## 6. Final note (plain words, at most 10 lines, for every reader)
 
-In order: the NOT FIXED sentence when it applies (the reported problem is still there and what
-a person must decide); what changed (the report's first section); how it was checked; where
-it is now (merged into `<target>`, the PR link, or the branch and working copy path); the
-post-merge result; time and agents used, and "agent tokens, excluding this conversation"
-(the metrics line), against the estimate; this run's plugin proposals (one line each, or
-none); where the report is.
+In order:
+- First, when they apply: the NOT FIXED sentence (the problem is still there, what a person
+  must decide), or a red post-merge test.
+- What changed: plain bullets, user-visible behaviour only.
+- Where it is now: merged into `<target>` (PR link) with "Say `revert` to undo it", or local
+  with "Say `undo` to move `<target>` back"; or the PR link; or the branch and working copy.
+- How it was checked, one line: "<n> checks passed, tests <before>→<after>, re-tested after
+  merge" (drop the last part when not merged).
+- Time, agents and "agent tokens, excluding this conversation" from the metrics line, against
+  the estimate.
+- A leftover only when the user must act on it.
+- `Full report: <absolute path of report.md>`.
+Plugin proposals and technical leftovers go only in the report, never in the note.

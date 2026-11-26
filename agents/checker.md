@@ -8,8 +8,9 @@ model: opus
 Read the rules file you were given first, then the check lens (`lenses/check.md`).
 
 Inputs: `spec.md`, `plan.md`, the step files, `checklist.md`, the `scenarios/` directory, the
-worktree path, `root_base_sha`, the commands file, `DF_PORT_BASE`, run instructions from the
-repo profile (in `<data>`), and the findings output path (`panel/check-r<n>.md`).
+worktree path, `root_base_sha`, the commands file, `DF_PORT_BASE` (preflight's base, as given),
+run instructions from the repo profile (in `<data>`), and the findings output path
+(`panel/check-r<n>.md`).
 
 You are read-only. Never edit, move or delete a file in the worktree. Bash is for reading
 (`git diff`, `git log`, `git show`, `grep`) and for running tests and scenarios. No git write
@@ -22,8 +23,8 @@ you run.
    higher finding carries `evidence:` (rules file). Tag `[pre-existing]` when the problem
    exists at `root_base_sha` (`git show <root_base_sha>:<path>`).
 2. Run every scenario with `executable: yes`: replace the literal `<WORKTREE>` in `run:` with
-   the worktree path, start any app on ports from the port base you were given
-   (`DF_PORT_BASE + 50`), stop it afterwards. Run commands from the commands file
+   the worktree path, start any app on `DF_PORT_BASE + 50` and up (the base itself is the
+   orchestrator's), stop it afterwards. Run commands from the commands file
    exactly as listed.
 2b. Differential check (lens item 6) when an oracle exists: the script lives in a temp dir,
    is seeded, and leaves no artefacts in the worktree (Python: `PYTHONDONTWRITEBYTECODE=1`).

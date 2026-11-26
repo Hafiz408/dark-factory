@@ -48,12 +48,16 @@ intake -> refine -> plan -> preflight -> signoff -> slice -> build -> check -> s
 - **refine.** The orchestrator picks the track (`bugfix`, `feature`, `build`) on intent, not
   wording. One `refiner` applies the requirements, codebase-fit and risk lenses in one pass and
   writes at most 8 questions, each with a default. A track disagreement or low confidence
-  becomes a question. After the answers the same refiner is resumed to write `spec.md`.
-- **plan.** `planner` and `qa-author` spawn together from the spec. The planner writes
+  becomes a question. After the answers the same refiner is resumed to write `spec.md`. The
+  user's own acceptance criteria stay AC1..ACn in their order and wording; at most 5 derived
+  ones follow, marked `(derived)`, and user-facing counts use only the user's.
+- **plan.** The dependency install starts as a background shell command, then `planner` and
+  `qa-author` spawn together from the spec (roles never run in the background). A feature with
+  at most 5 user criteria that fits in 8 files is one step. The planner writes
   `plan.md` (approach, alternatives, trade-offs, `lanes:`) and steps with `scope`,
   `depends_on`, `risk`, `size`. The QA author writes hidden scenarios (with canary tokens) and a
   checklist; the builder never sees them.
-- **preflight.** Install dependencies; record build, test, lint and typecheck commands in
+- **preflight.** Wait for the install; record `port_base`; record build, test, lint and typecheck commands in
   `env.commands` and run each once while the user is present (so permission prompts happen
   now); baseline suite at `root_base_sha`; draft the repo profile (`e2e_cmd`, how to start
   the app); settle the merge target.
@@ -103,7 +107,7 @@ Any BLOCKED or SKIPPED step pauses the run before the check. Otherwise, per roun
   evidence: a failing command and output, a failing scenario id, or `file:line` plus an input
   that breaks it.
 - After the checker returns, the orchestrator runs the full suite and the profile's `e2e_cmd`
-  (starting and stopping the app if needed); the checker's own app uses `DF_PORT_BASE + 50`. A test that passed at baseline and fails now is high. No
+  (starting and stopping the app if needed); the checker gets `port_base` unchanged and runs its own app on `DF_PORT_BASE + 50`. A test that passed at baseline and fails now is high. No
   `e2e_cmd`: the report says `e2e: not configured`, never a pass.
 - Clean and green: ship. Otherwise each finding becomes a fix step `FX-<k>` owned by the step
   whose scope holds the file, run by that step's resumed builder. The checker is resumed to
@@ -124,7 +128,8 @@ Any BLOCKED or SKIPPED step pauses the run before the check. Otherwise, per roun
    `DF_CHECKS_WAIT` (90 s) per call and exits 4 while they run; `ship.md` calls it up to 13
    times (about 20 min). No checks counts as a pass only once it has lasted
    `DF_NO_CHECKS_GRACE` (60 s) since the push. It merges with the first allowed method of
-   squash, merge, rebase, with `--match-head-commit` at the pushed sha. Failing or unfinished
+   squash, merge, rebase, with `--match-head-commit` at the pushed sha and `--delete-branch`
+   (run outside the clone, so only the remote branch goes). Failing or unfinished
    checks: PR left open, reason given. `local`, or
    `merge` without GitHub: `df local-merge` fast-forwards the target in the main clone only
    when it is clean and on the base branch; otherwise the branch is kept with one line on how
@@ -133,10 +138,14 @@ Any BLOCKED or SKIPPED step pauses the run before the check. Otherwise, per roun
    the main clone after a local merge); suite and e2e run there. Red: the note says so first
    and offers `revert` (`df revert-pr`, a revert PR, never a push to the target) or `undo`
    (`git reset --keep` to the pre-merge sha).
-5. **Finish.** `df finish`, `df metrics`. After a green post-merge test only: copy the report
-   to `reports/<id>.md`, remove the worktree and local branch (`df clean --branch`, which
-   refuses unless the branch head is on origin or the PR merged at it). Final note: what
-   changed, how it was checked, where it is, post-merge result, time and agents vs estimate.
+5. **Finish.** `df finish`, then `df metrics` after the post-merge test: its line (minutes from
+   sign-off, agents, agent tokens) is the only source of numbers in the report and the note.
+   After a green post-merge test only: remove the worktree and local branch and archive the
+   run (report, spec, plan, questions, log, spawns, panel, scenarios) to `reports/<id>/`
+   (`df clean --branch --archive`, which refuses unless the branch head is on origin or the PR
+   merged at it). Final note, at most 10 lines: what changed, where it is (with the undo word),
+   one line on how it was checked, time/agents/tokens vs estimate, the report link. Plugin
+   proposals and technical leftovers stay in the report.
 
 `df ship`, `df merge`, `df local-merge` and `df revert-pr` are the only paths that push or
 merge. `df profile-pin` (sign-off) records `ship_pin`, a hash of `ship_mode`, `ship_base` and
@@ -202,7 +211,8 @@ lock is stale. `resume` takes a new lock, validates state (never repairs silentl
 worktree and branch match `log.md`, tries to resume stored agent ids once and otherwise spawns
 fresh roles from the files on disk, then continues by stage (v0.2 stages map onto v0.3
 ones). `clean` removes worktree and state and keeps the branch; `--branch` also deletes it
-when safe. `sweep` offers that cleanup for runs whose PR merged.
+when safe; `--archive` first copies the audit trail to `reports/<id>/` (no `run.conf`, so
+`list` and `status` skip it). `sweep` offers that cleanup for runs whose PR merged.
 
 ## 10. Safety
 
