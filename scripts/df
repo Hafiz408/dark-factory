@@ -575,7 +575,7 @@ EOF
     [ -f "$m" ] && tail -n +2 "$m" | grep -v "^$1	" || true
     printf '%s\n' "$row"; } | atomic "$m"
   [ "$tok" = - ] && tok="unknown" # the orchestrator's own tokens are not in spawns.tsv
-  echo "agents: $sp started, $rs resumed; agent tokens, excluding this conversation: $tok"
+  echo "time: $(( ($(date +%s) - $(clock_start "$c") + 30) / 60 )) min from sign-off; agents: $sp started, $rs resumed; agent tokens, excluding this conversation: $tok"
 }
 
 # Parallel builders (off by default). A wave is the pending chunks whose dependencies all
@@ -758,7 +758,8 @@ cmd_merge() { # df merge <run-id>: wait up to DF_CHECKS_WAIT s for the PR's chec
   done
   rm -f "$out"
   for m in --squash --merge --rebase; do # the first method the repo allows, only at the head df ship pushed
-    if mout=$(GH_PROMPT_DISABLED=1 gh pr merge "$url" "$m" --match-head-commit "$psha" 2>&1); then
+    # Run outside the clone: gh then deletes only the remote branch; df clean removes the local one with its worktree.
+    if mout=$(cd / && GH_PROMPT_DISABLED=1 gh pr merge "$url" "$m" --match-head-commit "$psha" --delete-branch 2>&1); then
       sha=$(GH_PROMPT_DISABLED=1 gh pr view "$url" --json mergeCommit --jq .mergeCommit.oid 2>/dev/null) || true
       case $sha in ''|*[!0-9a-f]*) # ponytail: the target's head right after the merge; a merge landing in between would be taken for ours
         target=$(ship_target "$c") && sha=$(GIT_TERMINAL_PROMPT=0 git ls-remote origin "refs/heads/$target" 2>/dev/null | cut -f1) || sha="";; esac
@@ -890,15 +891,16 @@ physpath() { # physical path of a dir, or of a missing dir via its parent
   if [ -d "$1" ]; then (cd -P "$1" && pwd -P); else printf '%s/%s\n' "$(cd -P "$(dirname "$1")" 2>/dev/null && pwd -P)" "$(basename "$1")"; fi
 }
 
-cmd_clean() { # df clean <run-id> [--force] [--branch]: removes worktree and state; --branch also deletes the local branch
-  local rd c wt id=${1:-} force="" hb="" usage br own p line cur subs w lh u
-  usage="usage: df clean <run-id> [--force] [--branch]"
+cmd_clean() { # df clean <run-id> [--force] [--branch] [--archive]: removes worktree and state; --branch also deletes the local branch; --archive keeps the audit trail in <state-root>/reports/<id>/
+  local rd c wt id=${1:-} force="" hb="" ar="" usage br own p line cur subs w lh u a f
+  usage="usage: df clean <run-id> [--force] [--branch] [--archive]"
   case $id in ""|-*) die "clean: run id required; $usage" ;; esac
   shift
   while [ $# -gt 0 ]; do
     case $1 in
       --force) [ -z "$force" ] || die "$usage"; force=1 ;;
       --branch) [ -z "$hb" ] || die "$usage"; hb=1 ;;
+      --archive) [ -z "$ar" ] || die "$usage"; ar=1 ;;
       *) die "$usage" ;;
     esac
     shift
@@ -933,6 +935,12 @@ cmd_clean() { # df clean <run-id> [--force] [--branch]: removes worktree and sta
   # Every refusal comes before anything is deleted. --force never lets --branch drop uncommitted work.
   if [ -d "$wt" ] && [ -n "$(git -C "$wt" status --porcelain)" ] && { [ -n "$hb" ] || [ -z "$force" ]; }; then
     if [ -n "$hb" ]; then die "worktree has uncommitted changes"; else die "worktree has uncommitted changes; use --force"; fi
+  fi
+  if [ -n "$ar" ]; then # no run.conf in the archive, so list, status and sweep never see it
+    a="$(state_root)/reports/$id"; mkdir -p "$a"
+    for f in report.md spec.md plan.md questions.md log.md spawns.tsv panel scenarios; do
+      [ ! -e "$rd/$f" ] || cp -R "$rd/$f" "$a/" || die "clean: could not archive $f; nothing removed"
+    done
   fi
   # Sub-worktrees of a parallel wave (<worktree>-c<NN>): never discard uncommitted work unless forced.
   git worktree prune

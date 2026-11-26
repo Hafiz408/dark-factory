@@ -277,9 +277,19 @@ git -C "$kw" checkout -q --detach; git -C "$C" checkout -q "$kb"
 e=$(df clean "$K" --branch 2>&1); rc=$?
 assert_eq "1" "$rc" "clean: checked out in main clone: exit 1"; assert_contains "checked out" "$e" "clean: main clone: message"; intact "main clone" "$K"
 git -C "$C" checkout -q main
+# --archive: the audit trail moves to reports/<id>/, out of list and status
+K=$(shipped); KC="$SC/$K/run.conf"; kb=$(df conf-get "$KC" branch); kw=$(df conf-get "$KC" worktree)
+echo r > "$SC/$K/report.md"; echo s > "$SC/$K/spec.md"; mkdir -p "$SC/$K/panel" "$SC/$K/scenarios"; echo p > "$SC/$K/panel/check-r1.md"; echo q > "$SC/$K/scenarios/S1.md"
+assert_ok "clean --branch --archive: exit 0" df clean "$K" --branch --archive
+assert_fail "clean --archive: worktree gone" test -e "$kw"
+assert_fail "clean --archive: run state gone" test -e "$SC/$K"
+assert_fail "clean --archive: local branch gone" git -C "$C" show-ref --verify --quiet "refs/heads/$kb"
+for f in report.md spec.md panel/check-r1.md scenarios/S1.md; do assert_ok "clean --archive keeps $f" test -f "$SC/reports/$K/$f"; done
+assert_fail "clean --archive: no run.conf in the archive" test -e "$SC/reports/$K/run.conf"
+case "$(df list)" in *reports*|*"$K"*) bad "list skips archived runs";; *) ok "list skips archived runs";; esac
 # bad options
 K=$(shipped)
-for fl in "--bogus" "--branch --branch" "--force --force" "--branch --bogus"; do
+for fl in "--bogus" "--branch --branch" "--force --force" "--archive --archive" "--branch --bogus"; do
   e=$(df clean "$K" $fl 2>&1); rc=$?
   assert_eq "1" "$rc" "clean $fl: exit 1"; assert_contains "usage" "$e" "clean $fl: usage"; intact "clean $fl" "$K"
 done
@@ -371,7 +381,7 @@ assert_ok "ship records pushed_at" test -n "$(df conf-get "$GC" pushed_at)"
 assert_eq "0" "$(mrg GH_MERGE_SHA=$MS)" "merge_squash_records_sha: exit 0"
 assert_eq "yes:$MS" "$(df conf-get "$GC" merged):$(df conf-get "$GC" merge_sha)" "merge_squash_records_sha: recorded"
 assert_contains "$(printf 'pr\nchecks\nhttps://example.test/pr/1\n--watch\n')" "$(cat "$GH_LOG")" "merge waits for the checks"
-assert_contains "$(printf 'pr\nmerge\nhttps://example.test/pr/1\n--squash\n--match-head-commit\n%s\n' "$(df conf-get "$GC" pushed_sha)")" "$(cat "$GH_LOG")" "merge prefers squash, only at the pushed head"
+assert_contains "$(printf 'pr\nmerge\nhttps://example.test/pr/1\n--squash\n--match-head-commit\n%s\n--delete-branch\n' "$(df conf-get "$GC" pushed_sha)")" "$(cat "$GH_LOG")" "merge prefers squash, only at the pushed head, and deletes the remote branch"
 case $(cat "$GH_LOG") in *--admin*) bad "merge never uses --admin";; *) ok "merge never uses --admin";; esac
 : > "$GH_LOG"; assert_eq "0" "$(mrg GH_MERGE_SHA=$MS)" "merge again: exit 0"
 case $(cat "$GH_LOG") in *merge*) bad "merge again does not merge twice";; *) ok "merge again does not merge twice";; esac
