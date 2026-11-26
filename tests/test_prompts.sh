@@ -4,8 +4,8 @@
 
 fm() { awk '/^---$/{n++; next} n==1' "$1" | sed -n "s/^$2: *//p" | head -1; }
 
-AGENTS="router refiner planner qa-author builder tester qa-functional reviewer retro"
-LENSES="requirements codebase-fit risk quality ponytail goal security impact plan-coverage adjudicate"
+AGENTS="refiner planner qa-author builder checker reviewer retro"
+LENSES="requirements codebase-fit risk check security"
 TRACKS="bugfix feature build"
 
 for a in $AGENTS; do
@@ -14,61 +14,88 @@ for a in $AGENTS; do
   assert_eq "$a" "$(fm "$f" name)" "agent $a: name matches file"
   [ -n "$(fm "$f" description)" ] && ok "agent $a: has description" || bad "agent $a: has description"
   [ -n "$(fm "$f" tools)" ] && ok "agent $a: declares tools" || bad "agent $a: declares tools"
-  case "$(fm "$f" model)" in haiku|sonnet|opus) ok "agent $a: model set";; *) bad "agent $a: model set";; esac
   grep -q "rules file" "$f" && ok "agent $a: reads rules" || bad "agent $a: reads rules"
   grep -q "VERDICT" "$f" && ok "agent $a: states a verdict" || bad "agent $a: states a verdict"
+  grep -q "before you reply" "$f" && ok "agent $a: writes its output file before replying" || bad "agent $a: writes its output file before replying"
+  case "$(fm "$f" tools)" in *Agent*|*Task*) bad "agent $a: cannot spawn agents";; *) ok "agent $a: cannot spawn agents";; esac
+done
+# v0.3 models (spec section 7)
+for am in refiner:opus planner:opus qa-author:sonnet builder:sonnet checker:opus reviewer:sonnet retro:haiku; do
+  assert_eq "${am#*:}" "$(fm "$ROOT/agents/${am%%:*}.md" model)" "agent ${am%%:*}: model ${am#*:}"
+done
+# v0.3 removed roles and lenses (merged into refiner, builder, checker and lenses/check.md)
+for gone in agents/router.md agents/tester.md agents/qa-functional.md lenses/quality.md lenses/ponytail.md \
+  lenses/impact.md lenses/goal.md lenses/plan-coverage.md lenses/adjudicate.md; do
+  assert_fail "$gone is gone" test -e "$ROOT/$gone"
 done
 
 # read-only roles may Write their own output file (checked by rundir-hash), never Edit
-for a in qa-functional reviewer retro; do
+for a in checker reviewer retro; do
   t="$(fm "$ROOT/agents/$a.md" tools)"
   case "$t" in *Edit*) bad "agent $a: read-only tools (no Edit)";; *) ok "agent $a: read-only tools (no Edit)";; esac
   case "$t" in *Write*) ok "agent $a: can write its output file";; *) bad "agent $a: can write its output file";; esac
 done
-for a in qa-functional reviewer; do
+for a in checker reviewer; do
   grep -q "Write only to the findings output path" "$ROOT/agents/$a.md" && ok "agent $a: writes only its findings file" || bad "agent $a: writes only its findings file"
+  grep -q "git stash" "$ROOT/agents/$a.md" && ok "agent $a: forbids git write commands (stash)" || bad "agent $a: forbids git write commands (stash)"
 done
-# builder and tester are not given scenario access by instruction
-for a in builder tester; do
-  grep -qi "scenarios" "$ROOT/agents/$a.md" && ok "agent $a: mentions scenario barrier" || bad "agent $a: mentions scenario barrier"
-done
-# qa-author must be told not to read the plan or tests
+# the builder never sees the hidden scenarios; the checker runs them against <WORKTREE>
+grep -q "scenarios/" "$ROOT/agents/builder.md" && grep -q "must not read" "$ROOT/agents/builder.md" && ok "builder: scenario barrier" || bad "builder: scenario barrier"
 grep -q "must not read" "$ROOT/agents/qa-author.md" && ok "qa-author: barrier stated" || bad "qa-author: barrier stated"
-# live run finding: scenarios must be written against a worktree placeholder, not a fixed path
 grep -q "<WORKTREE>" "$ROOT/agents/qa-author.md" && ok "qa-author: uses <WORKTREE> placeholder" || bad "qa-author: uses <WORKTREE> placeholder"
-grep -q "<WORKTREE>" "$ROOT/agents/qa-functional.md" && ok "qa-functional: substitutes <WORKTREE>" || bad "qa-functional: substitutes <WORKTREE>"
-for a in builder tester qa-functional; do
+grep -q "<WORKTREE>" "$ROOT/agents/checker.md" && ok "checker: substitutes <WORKTREE>" || bad "checker: substitutes <WORKTREE>"
+grep -q "every scenario" "$ROOT/agents/checker.md" && ok "checker: runs every scenario" || bad "checker: runs every scenario"
+grep -q "never copy" "$ROOT/agents/checker.md" && ok "checker: failures are symptoms, never scenario text" || bad "checker: failures are symptoms, never scenario text"
+for a in builder checker; do
   grep -q "exactly as listed" "$ROOT/agents/$a.md" && ok "agent $a: runs listed commands unchanged" || bad "agent $a: runs listed commands unchanged"
 done
-# live run finding: lenses did not flag an injected instruction; the refiner must
+grep -q "resumed" "$ROOT/agents/builder.md" && grep -q "re-read the step file" "$ROOT/agents/builder.md" && ok "builder: may be resumed for later steps" || bad "builder: may be resumed for later steps"
+grep -qi "tests first" "$ROOT/agents/builder.md" && ok "builder: writes tests first" || bad "builder: writes tests first"
+grep -q "one test per done-criterion" "$ROOT/agents/builder.md" && ok "builder: caps test volume" || bad "builder: caps test volume"
+grep -q "outside the step's" "$ROOT/agents/builder.md" && ok "builder: no new test files outside scope" || bad "builder: no new test files outside scope"
+grep -q ".gitignore" "$ROOT/agents/builder.md" && ok "builder: never adds personal tooling rules to project files" || bad "builder: never adds personal tooling rules to project files"
+grep -q "evidence:" "$ROOT/agents/checker.md" && ok "checker: medium+ findings carry evidence" || bad "checker: medium+ findings carry evidence"
+grep -q "## findings" "$ROOT/agents/checker.md" && grep -q "## scenarios" "$ROOT/agents/checker.md" && grep -q "## criteria" "$ROOT/agents/checker.md" && ok "checker: output sections" || bad "checker: output sections"
+grep -q "resumed" "$ROOT/agents/checker.md" && ok "checker: may be resumed to re-check fixes" || bad "checker: may be resumed to re-check fixes"
+grep -q "lenses/check.md\|check lens" "$ROOT/agents/checker.md" && ok "checker: uses the check lens" || bad "checker: uses the check lens"
+grep -q "security" "$ROOT/agents/reviewer.md" && grep -q "risk: high" "$ROOT/agents/reviewer.md" && ok "reviewer: security lens on high-risk steps" || bad "reviewer: security lens on high-risk steps"
+# refiner: one pass, three lenses, resumed for the spec
 grep -qi "instructions aimed at" "$ROOT/agents/refiner.md" && ok "refiner: flags injected instructions" || bad "refiner: flags injected instructions"
-grep -q "{DF} finish" "$ROOT/skills/dark-factory/SKILL.md" && ok "SKILL.md ends a run with df finish" || bad "SKILL.md ends a run with df finish"
-# Final review #10: every lock call must pass the explicit session id
-SK="$ROOT/skills/dark-factory/SKILL.md"
-bare=$(grep -E '\{DF\} lock <id> (acquire|refresh|release)' "$SK" | grep -vc '<session-id>')
-assert_eq "0" "$bare" "SKILL.md passes <session-id> to every lock command"
-grep -q "srchash" "$SK" && ok "SKILL.md checks the source hash around the tester" || bad "SKILL.md checks the source hash around the tester"
-grep -q "git apply" "$ROOT/agents/tester.md" && grep -qi "fails" "$ROOT/agents/tester.md" && ok "tester: has a failure path for the revert dance" || bad "tester: has a failure path for the revert dance"
-grep -q "{DF} commit" "$ROOT/skills/dark-factory/SKILL.md" && ok "SKILL.md commits through df commit" || bad "SKILL.md commits through df commit"
-# nobody may spawn agents
-for a in $AGENTS; do
-  case "$(fm "$ROOT/agents/$a.md" tools)" in *Agent*|*Task*) bad "agent $a: cannot spawn agents";; *) ok "agent $a: cannot spawn agents";; esac
-done
+for l in requirements codebase-fit risk; do grep -q "$l" "$ROOT/agents/refiner.md" && ok "refiner: applies the $l lens" || bad "refiner: applies the $l lens"; done
+grep -q "AC1" "$ROOT/agents/refiner.md" && grep -q "spec.md" "$ROOT/agents/refiner.md" && ok "refiner: numbered acceptance criteria in spec.md" || bad "refiner: numbered acceptance criteria in spec.md"
+grep -q "confidence" "$ROOT/agents/refiner.md" && grep -qi "intent, not wording" "$ROOT/agents/refiner.md" && ok "refiner: classifies the track by intent" || bad "refiner: classifies the track by intent"
+grep -qi "not technical" "$ROOT/agents/refiner.md" && ok "refiner: questions in plain language" || bad "refiner: questions in plain language"
+grep -q "proves:" "$ROOT/agents/qa-author.md" && ok "qa-author: scenarios name the criteria they prove" || bad "qa-author: scenarios name the criteria they prove"
+grep -q "browser" "$ROOT/agents/qa-author.md" && ok "qa-author: browser-only scenarios are manual checks" || bad "qa-author: browser-only scenarios are manual checks"
+for k in "risk:" "size:" "no_tests" "lanes:"; do grep -q "$k" "$ROOT/agents/planner.md" && ok "planner: step files carry $k" || bad "planner: step files carry $k"; done
+for k in "auth" "migration" "dependency"; do grep -q "$k" "$ROOT/agents/planner.md" && ok "planner: high risk covers $k" || bad "planner: high risk covers $k"; done
+grep -q "30 lines" "$ROOT/agents/retro.md" && grep -q "200 char" "$ROOT/agents/retro.md" && ok "retro: lessons bounded" || bad "retro: lessons bounded"
+grep -q "Facts only" "$ROOT/agents/retro.md" && grep -q "scenarios/" "$ROOT/agents/retro.md" && grep -q "check-r" "$ROOT/agents/retro.md" && ok "retro: facts only, never leaks scenarios into lessons" || bad "retro: facts only, never leaks scenarios into lessons"
+R="$ROOT/skills/dark-factory/rules.md"
+grep -q "global CLAUDE.md" "$R" && ok "rules: never copy the user's global CLAUDE.md rules" || bad "rules: never copy the user's global CLAUDE.md rules"
+grep -q "write it before you reply" "$R" && ok "rules: output file before reply" || bad "rules: output file before reply"
+grep -q "git stash" "$R" && grep -q "read-only" "$R" && ok "rules: no git writes in read-only roles" || bad "rules: no git writes in read-only roles"
+grep -qi "plain" "$R" && ok "rules: plain language for user-facing text" || bad "rules: plain language for user-facing text"
+grep -q "evidence:" "$R" && ok "rules: findings carry evidence" || bad "rules: findings carry evidence"
 
 for l in $LENSES; do assert_ok "lens $l exists" test -f "$ROOT/lenses/$l.md"; done
-for l in quality ponytail goal security impact plan-coverage; do
+for l in check security; do
   grep -q "Severity rubric" "$ROOT/lenses/$l.md" && ok "lens $l: has severity rubric" || bad "lens $l: has severity rubric"
+done
+C="$ROOT/lenses/check.md"
+for k in "Fix wider than its cause" "justifies it" "test helpers" "existing behaviour" "acceptance criterion"; do
+  grep -qi "$k" "$C" && ok "check lens: covers '$k'" || bad "check lens: covers '$k'"
 done
 for t in $TRACKS; do
   assert_ok "track $t exists" test -f "$ROOT/tracks/$t.md"
   for h in "Refine asks" "Plan shape" "Chunks" "QA scenarios" "Done means"; do
     grep -q "^## $h" "$ROOT/tracks/$t.md" && ok "track $t: $h" || bad "track $t: $h"
   done
+  grep -qi "tester\|router\|qa-functional" "$ROOT/tracks/$t.md" && bad "track $t: names no removed role" || ok "track $t: names no removed role"
 done
 
 S="$ROOT/skills/dark-factory/SKILL.md"
 assert_ok "SKILL.md exists" test -f "$S"
-for a in $AGENTS; do grep -q "$a" "$S" && ok "SKILL.md uses $a" || bad "SKILL.md uses $a"; done
 for l in $LENSES; do grep -q "$l" "$S" "$ROOT/agents/reviewer.md" "$ROOT/agents/refiner.md" 2>/dev/null && ok "lens $l is referenced" || bad "lens $l is referenced"; done
 for w in "never push" "Never push" ; do :; done
 grep -qi "never push" "$S" && ok "SKILL.md: no push" || bad "SKILL.md: no push"
@@ -100,15 +127,8 @@ python3 -c "import json,sys; json.load(open('$ROOT/hooks/hooks.json')); json.loa
 # Field test (prettytable): fixes were too wide, tests too many, router keyed on wording
 grep -q "choke point" "$ROOT/agents/planner.md" && ok "planner: names the choke point" || bad "planner: names the choke point"
 grep -q "choke point" "$ROOT/tracks/bugfix.md" && ok "bugfix track: one fix point" || bad "bugfix track: one fix point"
-grep -q "Fix wider than its cause" "$ROOT/lenses/ponytail.md" && ok "quality lens: flags a fix wider than its cause" || bad "quality lens: flags a fix wider than its cause"
-grep -q "one test per done-criterion" "$ROOT/agents/tester.md" && ok "tester: caps test volume" || bad "tester: caps test volume"
-grep -q "delete it" "$ROOT/agents/tester.md" && ok "tester: drops a test that cannot go red" || bad "tester: drops a test that cannot go red"
-grep -qi "intent, not wording" "$ROOT/agents/router.md" && ok "router: intent over wording" || bad "router: intent over wording"
 
 # PR #1 review
-grep -q "uncovered" "$ROOT/agents/tester.md" && ok "tester: reports a criterion left uncovered by a deletion" || bad "tester: reports a criterion left uncovered by a deletion"
-grep -q "justifies it" "$ROOT/lenses/ponytail.md" && ok "quality lens: wide fix allowed when justified" || bad "quality lens: wide fix allowed when justified"
-grep -q "already promises" "$ROOT/agents/router.md" && grep -q "never produced" "$ROOT/agents/router.md" && grep -c "expected vs actual" "$ROOT/agents/router.md" | grep -q '^0$' && ok "router: no wording-keyed bullet left" || bad "router: no wording-keyed bullet left"
 grep -q "C --> T" "$ROOT/README.md" && ! grep -q "C -->|fail| N" "$ROOT/README.md" && ok "README: integrity failure still reaches the tester and gate" || bad "README: integrity failure still reaches the tester and gate"
 ! grep -q "attempt < 3" "$ROOT/README.md" && ok "README: no raw < in a mermaid label" || bad "README: no raw < in a mermaid label"
 
@@ -119,16 +139,14 @@ grep -q "makes the reported input behave correctly" "$SK" && ok "SKILL.md: bugfi
 grep -q "named in its findings" "$SK" && ok "SKILL.md: fix chunk scope covers files named by findings" || bad "SKILL.md: fix chunk scope covers files named by findings"
 grep -q "test helper" "$SK" && ok "SKILL.md: fix chunk lists touched test helpers" || bad "SKILL.md: fix chunk lists touched test helpers"
 grep -q "unless a finding is about" "$SK" && ok "SKILL.md: fix chunk adds no docs unprompted" || bad "SKILL.md: fix chunk adds no docs unprompted"
-grep -qi "test helpers" "$ROOT/lenses/quality.md" && ok "quality lens: test-helper duplication is low" || bad "quality lens: test-helper duplication is low"
 grep -qi "exposure" "$ROOT/lenses/security.md" && ok "security lens: severity follows stated exposure" || bad "security lens: severity follows stated exposure"
 grep -qi "single-user" "$ROOT/lenses/security.md" && ok "security lens: local single-user case is named" || bad "security lens: local single-user case is named"
-grep -q "outside the chunk's" "$ROOT/agents/tester.md" && ok "tester: no new test files outside scope" || bad "tester: no new test files outside scope"
 
 grep -q "Never write or append a verdict" "$SK" && ok "SKILL.md: orchestrator never writes a role verdict" || bad "SKILL.md: orchestrator never writes a role verdict"
 # Evaluation: P1 (test-only bugfix) and build-track cost
 grep -q "nearest reproducible defect" "$ROOT/tracks/bugfix.md" && ok "bugfix track: plan the nearest reproducible defect" || bad "bugfix track: plan the nearest reproducible defect"
 grep -qi "never plan a test-only" "$ROOT/tracks/bugfix.md" && ok "bugfix track: no test-only plan" || bad "bugfix track: no test-only plan"
-grep -q "source-changing chunk" "$ROOT/agents/planner.md" && ok "planner: bugfix plan has a source-changing chunk" || bad "planner: bugfix plan has a source-changing chunk"
+grep -q "source-changing step" "$ROOT/agents/planner.md" && ok "planner: bugfix plan has a source-changing step" || bad "planner: bugfix plan has a source-changing step"
 grep -q "Typical size: 3 to 8 chunks" "$ROOT/tracks/build.md" && ok "build track: fewer, larger slices" || bad "build track: fewer, larger slices"
 grep -q "one concern, not one command" "$ROOT/tracks/build.md" && ok "build track: no chunk per command" || bad "build track: no chunk per command"
 
@@ -173,9 +191,6 @@ r=$(grep -n "^## Review" "$SK" | head -1 | cut -d: -f1); q=$(grep -n "^## QA" "$
 grep -q "max_review_rounds" "$SK" && grep -q "max_qa_rounds" "$SK" && ok "SKILL.md: both loops have a cap in run.conf" || bad "SKILL.md: both loops have a cap in run.conf"
 grep -q "does not enter QA" "$SK" && grep -q "{DF} pause <id> \"<what is open>\"" "$SK" && ok "SKILL.md: an unclean review pauses before QA" || bad "SKILL.md: an unclean review pauses before QA"
 grep -q "reviewer(goal)" "$SK" && grep -q "chunk files" "$SK" && ok "SKILL.md: consolidated review adds the goal lens with the chunk files" || bad "SKILL.md: consolidated review adds the goal lens with the chunk files"
-G="$ROOT/lenses/goal.md"
-grep -q "Done when" "$G" && grep -q "file:line" "$G" && grep -q "not met" "$G" && ok "goal lens: every criterion met or not met, with evidence" || bad "goal lens: every criterion met or not met, with evidence"
-grep -q "ponytail:ponytail-review" "$ROOT/lenses/ponytail.md" && ! grep -q "ponytail:ponytail-review" "$ROOT/lenses/quality.md" && ok "ponytail is its own lens" || bad "ponytail is its own lens"
 grep -q "source: .*goal" "$ROOT/skills/dark-factory/rules.md" && ok "rules: goal is a finding source" || bad "rules: goal is a finding source"
 sed -n '/^## QA/,/^## Report/p' "$SK" | grep -q "symptoms only" && ok "SKILL.md: QA failures reach the builder as symptoms only" || bad "SKILL.md: QA failures reach the builder as symptoms only"
 grep -q "integrate" "$ROOT/docs/design.md" && grep -q "alias" "$ROOT/docs/design.md" && ok "design.md: integrate is documented as an alias of review" || bad "design.md: integrate is documented as an alias of review"
@@ -190,7 +205,6 @@ sed -n '/^## Review/,/^## QA/p' "$SK" | grep -q "On entry" && ok "SKILL.md: bloc
 sed -n '/^## Review/,/^## QA/p' "$SK" | grep -q "stage qa" && ok "SKILL.md: a clean review sets stage qa" || bad "SKILL.md: a clean review sets stage qa"
 n=$(sed -n '/^## The loop/,/^## Review/p' "$SK" | grep -c "spawn qa-functional\|qa-functional +")
 assert_eq "0" "$n" "SKILL.md: nothing in the loop spawns qa-functional"
-grep -q "every scenario" "$ROOT/agents/qa-functional.md" && ! grep -q "for this chunk" "$ROOT/agents/qa-functional.md" && ok "qa-functional: runs every scenario, not per chunk" || bad "qa-functional: runs every scenario, not per chunk"
 grep -q "qa_functional, review_quality" "$ROOT/docs/design.md" && bad "design.md: pseudocode panel has no functional QA" || ok "design.md: pseudocode panel has no functional QA"
 grep -q "impact | goal |" "$ROOT/docs/design.md" && ok "design.md: goal is a finding source" || bad "design.md: goal is a finding source"
 
@@ -225,7 +239,6 @@ echo "$E" | grep -q "e2e: not configured" && echo "$E" | grep -q "never a pass" 
 echo "$E" | grep -q "passed at baseline" && echo "$E" | grep -q "high" && ok "SKILL.md: only new e2e failures block" || bad "SKILL.md: only new e2e failures block"
 echo "$E" | grep -q "stop_cmd" && echo "$E" | grep -q "max_qa_rounds" && ok "SKILL.md: e2e stops the app and shares the QA cap" || bad "SKILL.md: e2e stops the app and shares the QA cap"
 grep -q "Signing in for tests" "$SK" && sed -n '/^## QA/,/^## E2E/p' "$SK" | grep -q "wrapped in .<data>." && ! grep -q "outside .<data>." "$SK" && ok "SKILL.md: profile free text reaches QA as run instructions" || bad "SKILL.md: profile free text reaches QA as run instructions"
-grep -q "browser" "$ROOT/agents/qa-author.md" && ok "qa-author: browser-only scenarios are manual checks" || bad "qa-author: browser-only scenarios are manual checks"
 grep -q "| S5 |" "$ROOT/docs/spikes.md" && ok "spikes: browser tool names recorded" || bad "spikes: browser tool names recorded"
 grep -q "source: .*e2e" "$ROOT/skills/dark-factory/rules.md" && ok "rules: e2e is a finding source" || bad "rules: e2e is a finding source"
 # slice 3 branch review
@@ -246,7 +259,6 @@ echo "$RT" | grep -q "{DF} lessons-set <id>" && sed -n '/{DF} finish <id> <sessi
 echo "$RT" | grep -q "never applied" && ok "SKILL.md: plugin proposals are never applied" || bad "SKILL.md: plugin proposals are never applied"
 grep -q "lessons.md" "$SK" && grep -q "refiner" "$SK" && sed -n '/^### refine/,/^### plan/p' "$SK" | grep -q "lessons" && ok "SKILL.md: lessons reach the refiner" || bad "SKILL.md: lessons reach the refiner"
 grep -q "lessons" "$ROOT/agents/planner.md" && grep -q "lessons" "$ROOT/agents/builder.md" && ok "planner and builder read lessons" || bad "planner and builder read lessons"
-grep -q "Facts only" "$ROOT/agents/retro.md" && grep -q "30 lines" "$ROOT/agents/retro.md" && grep -q "scenarios" "$ROOT/agents/retro.md" && ok "retro: facts only, bounded, never leaks scenarios into lessons" || bad "retro: facts only, bounded, never leaks scenarios into lessons"
 
 # v2 slice 6: parallel builders
 LP=$(sed -n '/^### Parallel waves/,/^## Review/p' "$SK")
@@ -260,7 +272,6 @@ sed -n '/^### preflight/,/^### signoff/p' "$SK" | grep -q "install.commands" && 
 # slice 5 branch review
 echo "$RT" | grep -q "unless the run is pausing" && ok "SKILL.md: a paused run's retro leaves its stage alone" || bad "SKILL.md: a paused run's retro leaves its stage alone"
 echo "$RT" | grep -q "{DF} state-hash" && ok "SKILL.md: the retro's writes are checked" || bad "SKILL.md: the retro's writes are checked"
-grep -q "qa-r" "$ROOT/agents/retro.md" && ok "retro: never reads QA outputs" || bad "retro: never reads QA outputs"
 sed -n '/^## Resume/,$p' "$SK" | grep -q "At .retro." && ok "SKILL.md: resume reruns an interrupted retro" || bad "SKILL.md: resume reruns an interrupted retro"
 sed -n '/\*\*Ship (stage/,/^## Resume/p' "$SK" | grep -q "skip to step 3" && bad "SKILL.md: ship step points at finish" || ok "SKILL.md: ship step points at finish"
 
