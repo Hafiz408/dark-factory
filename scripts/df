@@ -23,9 +23,13 @@ conf_set() {
       case "$3" in ''|*[!0-9]*) die "conf-set: $2 must be an integer";; esac ;;
     status=active|status=waiting_permission|status=paused|status=done|status=unresolved|status=aborted) ;;
     status=*) die "conf-set: invalid status '$3'";;
-    stage=intake|stage=route|stage=refine|stage=plan|stage=preflight|stage=signoff|stage=slice|stage=loop|stage=integrate|stage=review|stage=qa|stage=e2e|stage=retro|stage=ship|stage=done) ;; # integrate: v0.1 name for review
+    stage=intake|stage=route|stage=refine|stage=plan|stage=preflight|stage=signoff|stage=build|stage=check|stage=slice|stage=loop|stage=integrate|stage=review|stage=qa|stage=e2e|stage=retro|stage=ship|stage=merge|stage=postmerge|stage=done) ;; # v0.2 stages (slice loop review qa e2e) and v0.1 integrate kept for old runs
     stage=*) die "conf-set: invalid stage '$3'";;
     ship_confirmed=yes|ship_confirmed=no) ;;
+    ship_mode=merge|ship_mode=pr|ship_mode=local) ;;
+    ship_mode=*) die "conf-set: ship_mode must be merge, pr or local";;
+    merged=yes|merged=local) ;;
+    merged=*) die "conf-set: merged must be yes or local";;
     ship_confirmed=*) die "conf-set: ship_confirmed must be yes or no";;
     track=unrouted|track=bugfix|track=feature|track=build) ;;
     lane=fast|lane=full) ;;
@@ -154,7 +158,7 @@ cmd_validate() { # df validate <run-id>
     [ -n "$(conf_get "$c" $k)" ] || die "$c: missing $k"
   done
   case "$(conf_get "$c" track)" in unrouted|bugfix|feature|build) ;; *) die "$c: bad track";; esac
-  case "$(conf_get "$c" stage)" in intake|route|refine|plan|preflight|signoff|slice|loop|integrate|review|qa|e2e|retro|ship|done) ;; *) die "$c: bad stage";; esac
+  case "$(conf_get "$c" stage)" in intake|route|refine|plan|preflight|signoff|build|check|slice|loop|integrate|review|qa|e2e|retro|ship|merge|postmerge|done) ;; *) die "$c: bad stage";; esac
   case "$(conf_get "$c" status)" in active|waiting_permission|paused|done|unresolved|aborted) ;; *) die "$c: bad status";; esac
   git cat-file -e "$(conf_get "$c" root_base_sha)^{commit}" 2>/dev/null || die "$c: root_base_sha not found"
   for f in "$rd"/chunks/*.md; do
@@ -394,7 +398,7 @@ cmd_finish() { # df finish <run-id> [session]: end state is written together, th
   [ -f "$c" ] || die "no such run: $1"
   # Only a run that came through QA clean may finish; anything else pauses and stays resumable.
   # QA must have passed: e2e or later. (A v0.1 run at integrate goes through review, QA and e2e first.)
-  case "$(conf_get "$c" stage)" in e2e|retro|ship|done) ;; *) die "finish: run has not completed QA (stage $(conf_get "$c" stage))";; esac
+  case "$(conf_get "$c" stage)" in e2e|retro|ship|merge|postmerge|done) ;; *) die "finish: run has not completed QA (stage $(conf_get "$c" stage))";; esac
   case "$(conf_get "$c" status)" in active|done|unresolved) ;; *) die "finish: run is $(conf_get "$c" status): $(conf_get "$c" waiting_on)";; esac
   for f in "$rd"/chunks/*.md; do
     [ -e "$f" ] || continue
@@ -620,6 +624,23 @@ cmd_sub_join() { # df sub-join <run-id> <chunk-id>: cherry-pick the chunk's comm
   cmd_sub_drop "$1" "$2"
 }
 
+ship_target() { # ship_target <run.conf>: the PR's base branch on origin (ship_base, else base_ref)
+  local target
+  target=$(conf_get "$1" ship_base)
+  if [ -z "$target" ]; then
+    target=$(conf_get "$1" base_ref)
+    case $target in ""|detached) die "ship: no base branch; set ship_base";; esac
+    case $target in
+      origin/*) target=${target#origin/} ;;
+      */*) ! git remote | grep -qxF -- "${target%%/*}" || die "ship: base_ref '$target' is on another remote; set ship_base" ;;
+    esac
+  fi
+  case $target in -*) die "ship: base branch must not start with '-'";; esac
+  [ "$(git check-ref-format --branch "$target" 2>/dev/null)" = "$target" ] || die "ship: invalid base branch '$target'"
+  GIT_TERMINAL_PROMPT=0 git ls-remote --exit-code --heads origin "refs/heads/$target" >/dev/null 2>&1 || die "ship: base branch '$target' not found on origin"
+  echo "$target"
+}
+
 cmd_ship() { # df ship <run-id> <title> <body-file>: push the run branch and open a PR; prints the PR URL
   local rd c wt branch target sha url body pout
   [ $# -eq 3 ] || die "usage: df ship <run-id> <title> <body-file>"
@@ -644,18 +665,7 @@ cmd_ship() { # df ship <run-id> <title> <body-file>: push the run branch and ope
   case $3 in -*) die "ship: body file path must not start with '-'";; esac
   [ -f "$3" ] || die "ship: body file not found: $3"
   ! { printf '%s\n' "$2"; cat "$3"; } | strict_secret || die "ship: title or body looks like it contains a secret"
-  target=$(conf_get "$c" ship_base)
-  if [ -z "$target" ]; then
-    target=$(conf_get "$c" base_ref)
-    case $target in ""|detached) die "ship: no base branch; set ship_base";; esac
-    case $target in
-      origin/*) target=${target#origin/} ;;
-      */*) ! git remote | grep -qxF -- "${target%%/*}" || die "ship: base_ref '$target' is on another remote; set ship_base" ;;
-    esac
-  fi
-  case $target in -*) die "ship: base branch must not start with '-'";; esac
-  [ "$(git check-ref-format --branch "$target" 2>/dev/null)" = "$target" ] || die "ship: invalid base branch '$target'"
-  GIT_TERMINAL_PROMPT=0 git ls-remote --exit-code --heads origin "refs/heads/$target" >/dev/null 2>&1 || die "ship: base branch '$target' not found on origin"
+  target=$(ship_target "$c") || exit 1
   body=$(cd "$(dirname "$3")" && pwd)/$(basename "$3")
   sha=$(git -C "$wt" rev-parse --verify "refs/heads/$branch") || die "ship: branch '$branch' not found"
   # Push only the branch this run built: the one checked out in its worktree, at its head, never the target.
@@ -676,6 +686,96 @@ cmd_ship() { # df ship <run-id> <title> <body-file>: push the run branch and ope
   case $url in https://?*) ;; *) die "ship: gh pr create did not print an https:// URL";; esac
   conf_set "$c" pr_url "$url"
   echo "$url"
+}
+
+merge_sha() { # merge_sha <run.conf>: the recorded merge commit, refused unless it is a plain hex sha
+  local s; s=$(conf_get "$1" merge_sha)
+  case $s in ''|*[!0-9a-f]*) die "no merge commit recorded";; esac
+  echo "$s"
+}
+
+cmd_merge() { # df merge <run-id>: wait for the PR's checks, then merge it (never --admin); exit 3 when it must not merge
+  local c url t pid n=0 out m mout sha
+  c="$(run_dir "${1:-}")/run.conf"; [ -f "$c" ] || die "no such run: ${1:-}"
+  url=$(conf_get "$c" pr_url); case $url in https://?*) ;; *) die "merge: no PR recorded; ship first";; esac
+  [ "$(conf_get "$c" merged)" != yes ] || { conf_get "$c" merge_sha; return 0; }
+  command -v gh >/dev/null 2>&1 || die "merge: gh is not on PATH"
+  t=${DF_CHECKS_TIMEOUT:-1200}; case $t in ''|*[!0-9]*) die "merge: DF_CHECKS_TIMEOUT must be an integer";; esac
+  out=$(mktemp)
+  GH_PROMPT_DISABLED=1 gh pr checks "$url" --watch --interval 10 >"$out" 2>&1 & pid=$!
+  # ponytail: polled once a second, since macOS has no coreutils timeout.
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$n" -ge "$t" ]; then
+      kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true; rm -f "$out"
+      echo "merge: checks still running after ${t}s"; return 3
+    fi
+    sleep 1; n=$((n + 1))
+  done
+  if ! wait "$pid" && ! grep -qi "no checks reported" "$out"; then rm -f "$out"; echo "merge: checks failed"; return 3; fi
+  rm -f "$out"
+  for m in --squash --merge --rebase; do # the first method the repo allows
+    if mout=$(GH_PROMPT_DISABLED=1 gh pr merge "$url" "$m" 2>&1); then
+      conf_set "$c" merged yes
+      sha=$(GH_PROMPT_DISABLED=1 gh pr view "$url" --json mergeCommit --jq .mergeCommit.oid 2>/dev/null) || true
+      case $sha in ''|*[!0-9a-f]*) die "merge: merged, but gh did not report the merge commit";; esac
+      conf_set "$c" merge_sha "$sha"; echo "$sha"; return 0
+    fi
+    printf '%s' "$mout" | grep -qi "not allowed" || break
+  done
+  echo "merge: could not merge: $(printf '%s\n' "$mout" | tail -1)"; return 3
+}
+
+cmd_local_merge() { # df local-merge <run-id>: fast-forward the base branch in the main folder; exit 2 (one plain line) when it must not
+  local c m br base cur
+  c="$(run_dir "${1:-}")/run.conf"; [ -f "$c" ] || die "no such run: ${1:-}"
+  [ "$(conf_get "$c" merged)" != local ] || { conf_get "$c" merge_sha; return 0; }
+  m=$(main_root); br=$(conf_get "$c" branch); base=$(conf_get "$c" base_ref)
+  # The user's own folder: touched only when it is clean and on the branch the run started from.
+  [ -z "$(git -C "$m" status --porcelain)" ] || { echo "your folder has unsaved changes"; return 2; }
+  cur=$(git -C "$m" symbolic-ref -q --short HEAD || echo "no branch")
+  [ "$cur" = "$base" ] || { echo "your folder is on $cur, not $base"; return 2; }
+  git -C "$m" merge -q --ff-only "refs/heads/$br" >/dev/null 2>&1 || { echo "cannot fast-forward"; return 2; }
+  conf_set "$c" merged local; conf_set "$c" merge_sha "$(git -C "$m" rev-parse HEAD)"
+  conf_get "$c" merge_sha
+}
+
+cmd_postmerge() { # df postmerge <run-id>: put the merged result in place and print the folder to re-test it in
+  local c wt sha
+  c="$(run_dir "${1:-}")/run.conf"; [ -f "$c" ] || die "no such run: ${1:-}"
+  case "$(conf_get "$c" merged)" in
+    yes) sha=$(merge_sha "$c") || exit 1; wt=$(conf_get "$c" worktree)
+      GIT_TERMINAL_PROMPT=0 git -C "$wt" fetch -q origin || die "postmerge: could not fetch origin"
+      git -C "$wt" checkout -q --detach "$sha" || die "postmerge: could not check out $sha"
+      echo "$wt" ;;
+    local) main_root ;;
+    *) die "postmerge: the run is not merged" ;;
+  esac
+}
+
+cmd_revert_pr() { # df revert-pr <run-id>: open a PR that reverts the merge (never pushes the target); prints its URL
+  local c wt sha target b url id=""
+  c="$(run_dir "${1:-}")/run.conf"; [ -f "$c" ] || die "no such run: ${1:-}"
+  url=$(conf_get "$c" revert_url); case $url in https://?*) echo "$url"; return 0;; esac
+  [ "$(conf_get "$c" merged)" = yes ] || die "revert-pr: the run was not merged through a PR"
+  sha=$(merge_sha "$c") || exit 1; wt=$(conf_get "$c" worktree); b="df-revert/$1"
+  [ -z "$(git -C "$wt" status --porcelain)" ] || die "revert-pr: worktree has uncommitted changes"
+  target=$(ship_target "$c") || exit 1
+  [ "$(git check-ref-format --branch "$b" 2>/dev/null)" = "$b" ] && [ "$b" != "$target" ] || die "revert-pr: bad branch name '$b'"
+  GIT_TERMINAL_PROMPT=0 git -C "$wt" fetch -q origin "+refs/heads/$target:refs/remotes/origin/$target" || die "revert-pr: could not fetch origin"
+  git -C "$wt" checkout -q -B "$b" "refs/remotes/origin/$target" || die "revert-pr: could not create $b"
+  [ -n "$(git -C "$wt" config user.email)" ] || id="-c user.name=dark-factory -c user.email=df@localhost"
+  # A merge commit has two parents: revert it against the first (the target before the merge).
+  set -- "$1" "$sha"; [ "$(git -C "$wt" rev-list --parents -n 1 "$sha" | wc -w)" -le 2 ] || set -- "$1" -m 1 "$sha"
+  if ! git -C "$wt" $id revert --no-edit "${@:2}" >/dev/null 2>&1; then
+    git -C "$wt" revert --abort >/dev/null 2>&1 || true; die "revert-pr: the merge does not revert cleanly onto $target"
+  fi
+  # The refspec names only the revert branch: the target is never pushed.
+  GIT_TERMINAL_PROMPT=0 git -C "$wt" push -q origin "refs/heads/$b:refs/heads/$b" >/dev/null 2>&1 || die "revert-pr: push failed"
+  url=$(cd "$wt" && GH_PROMPT_DISABLED=1 gh pr create --base "$target" --head "$b" --title "Revert run $1" \
+    --body "Reverts $(conf_get "$c" pr_url): the tests failed after the merge.") || die "revert-pr: could not open the PR; $b is pushed"
+  url=$(printf '%s\n' "$url" | tail -1)
+  case $url in https://?*) ;; *) die "revert-pr: gh pr create did not print an https:// URL";; esac
+  conf_set "$c" revert_url "$url"; echo "$url"
 }
 
 cmd_status() { # df status [run-id]: regenerate and print progress.md (no id: the only run)
@@ -833,6 +933,10 @@ case "$cmd" in
   list) cmd_list;;
   clean) cmd_clean "$@";;
   ship) cmd_ship "$@";;
+  merge) cmd_merge "$@";;
+  local-merge) cmd_local_merge "$@";;
+  postmerge) cmd_postmerge "$@";;
+  revert-pr) cmd_revert_pr "$@";;
   sweep) cmd_sweep;;
   fixed) cmd_fixed "$@";;
   finish) cmd_finish "$@";;
@@ -856,5 +960,5 @@ case "$cmd" in
   fm-get) fm_get "$@";;
   fm-set) fm_set "$@";;
   write) atomic "$@";;
-  *) die "usage: df {start|validate|profile-pin|verdict|gate|lock|snapshot|check-diff|canary-scan|srchash|redcheck|commit|scrub|status|list|clean|fixed|finish|ship|sweep|lessons-set|metrics|state-hash|rundir-hash|spawn-log|bump|estimate|budget|pause|unpause|wave|sub-add|sub-join|sub-drop|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
+  *) die "usage: df {start|validate|profile-pin|verdict|gate|lock|snapshot|check-diff|canary-scan|srchash|redcheck|commit|scrub|status|list|clean|fixed|finish|ship|merge|local-merge|postmerge|revert-pr|sweep|lessons-set|metrics|state-hash|rundir-hash|spawn-log|bump|estimate|budget|pause|unpause|wave|sub-add|sub-join|sub-drop|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
 esac
