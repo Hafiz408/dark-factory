@@ -64,6 +64,11 @@ Smallest fix that works (bugfix and feature):
 Step rules:
 - One concern per step: at most 8 files and 5 done-criteria. Fewer, larger steps beat many
   tiny ones. No separate "add tests" or "regression guard" step: each step brings its tests.
+- Every done-criterion is behaviour that does not exist before its step (its new tests must
+  fail on the code before it). Edge cases and validation belong in the step that builds the
+  feature, never in a later "edge cases" step.
+- When a step adds a command, endpoint, flag or config that the README documents for similar
+  ones, the step's scope includes the README and a done-criterion says so.
 - `depends_on` must be acyclic and reference only lower ids. Do not invent dependencies.
 - Follow the track profile for what step 01 must be.
 - If no test runner exists, step 00 adds the smallest runner and says so.

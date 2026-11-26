@@ -338,7 +338,7 @@ cmd_srchash() { # df srchash <worktree> <base_sha>: hash of every non-test, non-
 }
 
 cmd_redcheck() { # df redcheck <worktree> <base_sha> <test-command>: 0 when the changed tests fail without the other changes; 1 they pass; 2 no tests changed; 4 infra
-  local wt=${1:-} base=${2:-} tests p
+  local wt=${1:-} base=${2:-} tests p cmd
   infra() { echo "df: redcheck: $*" >&2; exit 4; } # exit 4: redcheck could not run; not a verdict on the tests
   [ $# -eq 3 ] || infra "usage: df redcheck <worktree> <base_sha> <test-command>"
   git -C "$wt" rev-parse -q --verify "$base^{commit}" >/dev/null || infra "base $base not found"
@@ -356,7 +356,9 @@ cmd_redcheck() { # df redcheck <worktree> <base_sha> <test-command>: 0 when the 
   ( cd "$wt" && git ls-files -o -i --exclude-standard --directory ) | sed 's,/$,,' | grep -v / | while IFS= read -r p; do
     [ -e "$RC_TMP/w/$p" ] || ln -s "$wt/$p" "$RC_TMP/w/$p"
   done
-  if ( cd "$RC_TMP/w" && bash -c "$3" ) 1>&2; then echo "redcheck: new tests pass without the change"; return 1; fi
+  # A command that names the worktree by absolute path (cd, PYTHONPATH) must run the old-code copy instead.
+  cmd=$3; cmd=${cmd//"$(physpath "$wt")"/"$RC_TMP/w"}; cmd=${cmd//"$wt"/"$RC_TMP/w"}
+  if ( cd "$RC_TMP/w" && bash -c "$cmd" ) 1>&2; then echo "redcheck: new tests pass without the change"; return 1; fi
   echo "redcheck: ok, new tests fail without the change"
 }
 

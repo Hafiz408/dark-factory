@@ -252,4 +252,5 @@ a=$(echo "$SO" | grep -n "The ending" | head -1 | cut -d: -f1); d=$(echo "$SO" |
 [ -n "$a" ] && [ -n "$d" ] && [ -n "$p" ] && [ "$a" -lt "$d" ] && [ "$d" -lt "$p" ] && ok "sign-off: ending before Details, profile inside Details" || bad "sign-off: ending before Details, profile inside Details"
 grep -q "agent tokens, excluding this conversation" "$SH" && grep -q "agent tokens, excluding this conversation" "$ROOT/scripts/df" && ok "final note: agent tokens labelled" || bad "final note: agent tokens labelled"
 
+grep -q "never in a later" "$ROOT/agents/planner.md" && grep -q "README documents" "$ROOT/agents/planner.md" && ok "planner: no tests-only step, README in scope" || bad "planner: no tests-only step, README in scope"
 finish

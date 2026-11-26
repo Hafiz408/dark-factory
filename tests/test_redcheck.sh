@@ -22,6 +22,8 @@ echo '. src/calc.sh; [ "$(add 2 3)" = 5 ]' > tests/test_calc.sh
 assert_eq "0" "$(rc_of 'bash tests/test_calc.sh')" "redcheck_red_ok"
 assert_eq "redcheck: ok, new tests fail without the change" "$(cat "$T/out")" "redcheck_red_ok: message"
 assert_eq "add() { echo \$((\$1 + \$2)); }" "$(cat src/calc.sh)" "the worktree keeps its change"
+# eval round 3: the test command named the worktree by absolute path, so the old-code copy ran the new code
+assert_eq "0" "$(rc_of "cd $R && bash $R/tests/test_calc.sh")" "redcheck_rewrites_worktree_path"
 
 # a test that passes without the change, committed this time
 echo '[ 1 = 1 ]' > tests/test_calc.sh; echo 'helper' > src/new.sh
