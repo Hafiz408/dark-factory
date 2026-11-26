@@ -142,4 +142,13 @@ assert_eq "0" "$("$DF" conf-get "$rd2/run.conf" qa_round)" "start records qa_rou
 printf 'Use Bearer authentication for the API\n' > "$T/b1"; assert_ok "the word Bearer is not redacted" "$DF" scrub "$T/b1"
 printf 'Authorization: Bearer abcdefghij0123456789xyz\n' > "$T/b2"; assert_fail "a bearer token is redacted" "$DF" scrub "$T/b2"
 
+# evaluation: status says when no session is running the run; the run id is optional with one run
+R5=$(mkrepo); echo x > "$R5/in.txt"; i5=$(cd "$R5" && "$DF" start "$R5/in.txt")
+assert_contains "not running" "$(cd "$R5" && "$DF" status "$i5")" "status says an active run with no lock is not running"
+(cd "$R5" && "$DF" lock "$i5" acquire s5)
+case "$(cd "$R5" && "$DF" status "$i5")" in *"not running"*) bad "a run with a fresh lock is not called not running";; *) ok "a run with a fresh lock is not called not running";; esac
+rd5=$(cd "$R5" && "$DF" run-dir "$i5"); printf 'session=s5\nheartbeat=%s\n' $(( $(date +%s) - 1200 )) > "$rd5/lock"
+assert_contains "no activity for 20 min" "$(cd "$R5" && "$DF" status "$i5")" "status flags a quiet lock"
+assert_contains "Run $i5" "$(cd "$R5" && "$DF" status)" "status without an id picks the only run"
+
 finish

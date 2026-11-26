@@ -28,6 +28,8 @@ conf_set() {
     ship_confirmed=yes|ship_confirmed=no) ;;
     ship_confirmed=*) die "conf-set: ship_confirmed must be yes or no";;
     track=unrouted|track=bugfix|track=feature|track=build) ;;
+    lane=fast|lane=full) ;;
+    lane=*) die "conf-set: lane must be fast or full";;
     track=*) die "conf-set: invalid track '$3'";;
   esac
   { grep -v "^$2=" "$1" 2>/dev/null || true; echo "$2=$3"; } | atomic "$1"; }
@@ -555,8 +557,14 @@ cmd_ship() { # df ship <run-id> <title> <body-file>: push the run branch and ope
   echo "$url"
 }
 
-cmd_status() { # df status <run-id>: regenerate and print progress.md
-  local rd c out f
+cmd_status() { # df status [run-id]: regenerate and print progress.md (no id: the only run)
+  local rd c out f id=${1:-} n hb age
+  if [ -z "$id" ]; then
+    n=$(ls -d "$(state_root)"/*/run.conf 2>/dev/null | wc -l | tr -d ' ')
+    [ "$n" = 1 ] || die "status: give a run id (runs: $(cmd_list | cut -d' ' -f1 | tr '\n' ' '))"
+    id=$(basename "$(dirname "$(ls -d "$(state_root)"/*/run.conf)")")
+  fi
+  set -- "$id"
   rd=$(run_dir "$1"); c="$rd/run.conf"
   DF_NO_PROFILE_CHECK=1 cmd_validate "$1"   # status is read-only: a profile problem is reported, not fatal
   out="Run $1   track: $(conf_get "$c" track)   stage: $(conf_get "$c" stage)   status: $(conf_get "$c" status)"
@@ -565,6 +573,16 @@ cmd_status() { # df status <run-id>: regenerate and print progress.md
   needs permission: $(conf_get "$c" waiting_on)" ;;
     paused) out="$out
   waiting on: $(conf_get "$c" waiting_on)" ;;
+    active)
+      # A session that died (usage limit, crash, closed laptop) leaves the run active: say so.
+      if [ "$(cmd_lock "$1" check)" != live ]; then out="$out
+  not running (no live session): resume to continue"
+      else
+        hb=$(sed -n 's/^heartbeat=//p' "$rd/lock"); case "$hb" in ''|*[!0-9]*) hb=$(date +%s);; esac
+        age=$(( ($(date +%s) - hb) / 60 ))
+        [ "$age" -lt 15 ] || out="$out
+  no activity for $age min: if no session is running it, resume once the lock goes stale (1 h) or with --force"
+      fi ;;
   esac
   for f in "$rd"/chunks/*.md; do
     [ -e "$f" ] || continue
