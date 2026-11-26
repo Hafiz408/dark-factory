@@ -12,7 +12,7 @@ Write `{RD}/report.md`, plain words first:
   listed last, marked "not confirmed", with the reason.
 - `## How it was checked`: hidden checks passed (x of y, manual ones listed), tests added and
   the full suite result, the full app tests result (or `e2e: not configured`, never described
-  as a pass), check rounds used.
+  as a pass), check rounds used, any differential check with its number of cases tried.
 - `## Anything left`: open low findings (the "what to delete" list), assumptions taken,
   failures that were already there before the run, manual checks for the user.
 - `## Technical changes`: modules touched, new dependencies, schema, config, migrations.
@@ -38,6 +38,7 @@ pausing run stops here (back to Pausing in SKILL.md).
 
 `{DF} conf-set {RD}/run.conf stage ship`. A paused run, or one where `{DF} fixed <id>` exits
 non-zero, is never offered a PR or a merge: go to 5. Mode = `ship_mode` (default `merge`).
+- `branch`, or `pr` without `origin` or `gh`: nothing is pushed or merged; go to 5.
 - `merge` or `pr`, when `git -C {WT} remote get-url origin` and `gh auth status` both exit 0
   (judge by exit status alone, never by what the URL looks like):
   `{DF} conf-set {RD}/run.conf ship_confirmed yes`; write the report's first three sections to
@@ -68,12 +69,11 @@ merge, offer: "Say `undo` and I will move `<target>` back" (then
 
 ## 5. Finish and clean up
 
-1. Collect for the note: agents = `spawn` rows in `{RD}/spawns.tsv` (resumes counted
-   separately), minutes = now minus `signoff_at` (in its own command), and the estimate line
-   from `log.md`.
+1. Collect for the note: minutes = now minus `signoff_at` (in its own command), and the
+   estimate line from `log.md`.
 2. `{DF} finish <id> <session-id>` (sets done, or `unresolved` for a bugfix that changes no
    source, and releases the lock). If it prints `NOT FIXED`, put that line on top of the report.
-   Then `{DF} metrics <id>`.
+   Then `{DF} metrics <id>`: its line gives agents started and resumed, and agent tokens.
 3. Only after a merge whose post-merge test is green, clean up without asking: copy
    `report.md` to `reports/<id>.md` in the parent of `{RD}`; then after a PR merge run
    `{DF} clean <id> --branch`; after a local merge run `git -C <main clone> worktree remove {WT}`
@@ -87,5 +87,6 @@ merge, offer: "Say `undo` and I will move `<target>` back" (then
 In order: the NOT FIXED sentence when it applies (the reported problem is still there and what
 a person must decide); what changed (the report's first section); how it was checked; where
 it is now (merged into `<target>`, the PR link, or the branch and working copy path); the
-post-merge result; time and agents used against the estimate; this run's plugin proposals (one
-line each, or none); where the report is.
+post-merge result; time and agents used, and "agent tokens, excluding this conversation"
+(the metrics line), against the estimate; this run's plugin proposals (one line each, or
+none); where the report is.

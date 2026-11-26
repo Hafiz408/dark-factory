@@ -5,6 +5,8 @@
 - Expected vs actual behaviour, in observable terms.
 - Blast radius: who is affected, since when, anything that changed recently.
 - Is there an error message, log or stack trace? Ask for it verbatim.
+- Scope default: fix the root cause for every input that reaches the same faulty code path,
+  not only the reported shape. Never offer "only the reported pattern" as the default.
 
 ## Plan shape
 1. Root-cause hypothesis with the file and function it points to, and the evidence.

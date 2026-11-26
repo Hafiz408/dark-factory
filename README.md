@@ -60,8 +60,8 @@ flowchart LR
 Yellow is where you are asked something. Nothing is asked after sign-off, except when a
 command needs your permission or a budget cap is hit.
 
-- **Questions.** One refiner reads your request and the repo, and asks at most 8 questions.
-  After your answers it writes the spec.
+- **Questions.** One refiner reads your request and the repo, asks at most 8 questions and
+  drafts the spec from their defaults; it is asked again only when an answer differs.
 - **Plan and hidden checks.** A planner splits the work into steps; separately, a QA author
   writes test scenarios the builder never sees, so the tests can't be shaped by the code.
 - **Build.** Steps that touch different files and don't depend on each other run side by side
@@ -99,6 +99,11 @@ Chosen on the sign-off screen, so the rest runs unattended.
 | `approve` (default: merge) | Opens a PR, waits for its checks (up to about 20 min), merges (squash if allowed), re-tests the merged code | Merges into your branch on this computer, then re-tests |
 | `approve, no merge` | Opens the PR and stops | Leaves the work on its branch |
 | `approve, local` | Merges on this computer only, never pushes | Same |
+| `approve, branch` | Leaves the work on its branch, nothing pushed | Same |
+
+If the repo's own rules (`AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING*`) say assistants must not
+merge, the default becomes `no merge` (or `branch` when pushing is forbidden), the sign-off
+screen quotes the rule, and merging needs `approve, merge`.
 
 It never force-pushes, never uses `--admin`, and never merges red: failing or slow checks
 leave the PR open and say why. A local merge happens only when your folder is clean and on

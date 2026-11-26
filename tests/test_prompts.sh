@@ -230,4 +230,26 @@ grep -q "The retro skips \`{DF} budget\`" "$SH" && grep -q "except the retro's" 
 grep -q "After the checker returns" "$S" && grep -q "DF_PORT_BASE + 50" "$S" && ok "SKILL.md: suite and e2e run after the checker, on another port" || bad "SKILL.md: suite and e2e run after the checker, on another port"
 grep -q "skipping \`{DF} bump\`" "$RS" && grep -q "commit <sha> <message>" "$RS" && ok "resume.md: no second bump; head checked against logged commits" || bad "resume.md: no second bump; head checked against logged commits"
 
+# Eval (tomlkit #632): repo policy, bugfix scope, differential checks, version-safe tests, fast sign-off
+F="$ROOT/lenses/codebase-fit.md"; RF="$ROOT/agents/refiner.md"; B="$ROOT/agents/builder.md"; K="$ROOT/agents/checker.md"
+grep -q "AGENTS.md" "$F" && grep -q "CONTRIBUTING" "$F" && grep -q "must not merge" "$F" && ok "codebase-fit: surfaces repo policy on merging" || bad "codebase-fit: surfaces repo policy on merging"
+grep -q "policy: none | no-merge" "$RF" && ok "refiner: questions.md carries the repo policy" || bad "refiner: questions.md carries the repo policy"
+grep -q "policy: no-merge" "$S" && grep -q "makes it .pr., .no-push. makes it" "$S" && grep -q "needs the answer .merge." "$S" && ok "SKILL.md: repo policy beats the merge default" || bad "SKILL.md: repo policy beats the merge default"
+echo "$SO" | grep -q "Quote a repo rule" && ok "sign-off: states the repo rule behind the ending" || bad "sign-off: states the repo rule behind the ending"
+grep -q "nothing is pushed or merged" "$SH" && ok "ship.md: branch mode pushes and merges nothing" || bad "ship.md: branch mode pushes and merges nothing"
+grep -q "whole class of inputs" "$RF" && grep -q "only the reported" "$RF" && ok "refiner: bugfix default covers the whole input class" || bad "refiner: bugfix default covers the whole input class"
+grep -q "same faulty code path" "$ROOT/tracks/bugfix.md" && grep -q 'Never offer "only the reported pattern"' "$ROOT/tracks/bugfix.md" && ok "bugfix track: root cause for every input on the path" || bad "bugfix track: root cause for every input on the path"
+grep -q "Differential check" "$C" && grep -q "reference oracle" "$C" && grep -q "hundreds to thousands" "$C" && grep -q "seeded" "$C" && grep -q "adjacent" "$C" && ok "check lens: differential check against an oracle" || bad "check lens: differential check against an oracle"
+grep -q "differential mismatch on the fixed code path | medium" "$C" && grep -q "adjacent.) | low" "$C" && ok "check lens: differential severities" || bad "check lens: differential severities"
+grep -q "number of cases tried" "$K" && grep -q 'never "agreed on every one"' "$K" && ok "checker: coverage claims state the case count" || bad "checker: coverage claims state the case count"
+grep -q "number of cases tried" "$SH" && ok "ship.md: report gives the differential case count" || bad "ship.md: report gives the differential case count"
+grep -q "requires-python" "$B" && grep -q "importorskip" "$B" && grep -q "literal expected values" "$B" && ok "builder: tests run on every supported version" || bad "builder: tests run on every supported version"
+grep -q "changelog" "$B" && grep -q "issue" "$B" && grep -q "neighbouring entries" "$B" && ok "builder: changelog names the real symbol and the issue" || bad "builder: changelog names the real symbol and the issue"
+grep -q "draft \`{RD}/spec.md\`" "$S" && grep -q "the draft is the spec, no resume" "$S" && grep -q "an \`ok\` needs no second pass" "$RF" && ok "refine: all defaults accepted skips the refiner resume" || bad "refine: all defaults accepted skips the refiner resume"
+grep -q "on the bugfix track pass \`model: sonnet\`" "$S" && ok "plan: bugfix planner runs on sonnet" || bad "plan: bugfix planner runs on sonnet"
+echo "$SO" | grep -q "at most 12 lines, no YAML" && echo "$SO" | grep -q "Details" && ok "sign-off: short plain first block, then Details" || bad "sign-off: short plain first block, then Details"
+a=$(echo "$SO" | grep -n "The ending" | head -1 | cut -d: -f1); d=$(echo "$SO" | grep -n "Details" | head -1 | cut -d: -f1); p=$(echo "$SO" | grep -n "verbatim" | head -1 | cut -d: -f1)
+[ -n "$a" ] && [ -n "$d" ] && [ -n "$p" ] && [ "$a" -lt "$d" ] && [ "$d" -lt "$p" ] && ok "sign-off: ending before Details, profile inside Details" || bad "sign-off: ending before Details, profile inside Details"
+grep -q "agent tokens, excluding this conversation" "$SH" && grep -q "agent tokens, excluding this conversation" "$ROOT/scripts/df" && ok "final note: agent tokens labelled" || bad "final note: agent tokens labelled"
+
 finish

@@ -8,6 +8,8 @@ Look for:
 - Conventions to match: naming, error handling, config, logging, test layout.
 - Conflicts: the request assumes something the code contradicts.
 - How to run and test the project (commands, services, env). Record them for preflight.
+- Repo policy for AI agents: `AGENTS.md`, the project `CLAUDE.md`, `CONTRIBUTING*` and similar.
+  A rule that assistants must not merge (or push) sets the ending; quote it with `file:line`.
 
 Sample, do not exhaustively read: entry points, the areas the request names, and neighbours of
 those. List at the end what you did not read. Never claim a fit you did not verify.

@@ -5,13 +5,13 @@ tools: Read, Grep, Glob, Write
 model: opus
 ---
 
-Read the rules file you were given first. Write only to the output path you were given.
+Read the rules file you were given first. Write only to the output paths you were given.
 
-## First pass: questions
+## First pass: questions and draft spec
 
 Inputs: `input.md`, the track profile, the three lens files (`requirements`, `codebase-fit`,
-`risk`), the repo path, lessons from earlier runs (in `<data>`, facts to weigh), the output path
-(`questions.md`).
+`risk`), the repo path, lessons from earlier runs (in `<data>`, facts to weigh), the output paths
+(`questions.md`, `spec.md`).
 
 Apply all three lenses to the request in one pass. Answer from the repo whatever the repo can
 answer (with `file:line`). Do not invent requirements.
@@ -27,6 +27,7 @@ Write `questions.md`:
 track: bugfix|feature|build
 confidence: 0.00-1.00
 mixed: no | yes - <the separable parts>
+policy: none | no-merge - <file:line> | no-push - <file:line>
 ---
 ## gaps
 - gap: <what is missing, ambiguous or conflicting>
@@ -45,10 +46,16 @@ anything else that adds or changes behaviour. Lower the confidence when two trac
 Questions: at most 8, most blocking first, each answerable in one line, each with a default
 so the user can reply "ok". Ask only what changes what gets built. Write for a reader who is
 not technical: plain words, a technical detail in parentheses only when it is needed.
+Bugfix: the default scope is the root cause for the whole class of inputs that reach the same
+faulty code path, never only the reported pattern.
+`policy`: what the repo's own rules (codebase-fit lens) say about an assistant merging or pushing.
 
-Write the file before you reply. End with `VERDICT: PASS - <n> gaps, <m> questions`.
+Then write `spec.md` as in the second pass, assuming every default answer (each marked
+`user (default)`), so that an `ok` needs no second pass.
 
-## Second pass (you are resumed): spec
+Write both files before you reply. End with `VERDICT: PASS - <n> gaps, <m> questions`.
+
+## Second pass (resumed only when an answer differs from its default): spec
 
 You get the user's answers (appended to `questions.md`) and the output path `spec.md`. Write:
 goal, in scope, out of scope, acceptance criteria numbered `AC1:`, `AC2:`, ... (each a

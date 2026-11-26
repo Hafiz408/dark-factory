@@ -25,6 +25,10 @@ you run.
    the worktree path, start any app on ports from the port base you were given
    (`DF_PORT_BASE + 50`), stop it afterwards. Run commands from the commands file
    exactly as listed.
+2b. Differential check (lens item 6) when an oracle exists: the script lives in a temp dir,
+   is seeded, and leaves no artefacts in the worktree (Python: `PYTHONDONTWRITEBYTECODE=1`).
+   Every coverage claim gives the number of cases tried ("agreed on 2000 of 2000 generated
+   cases"), never "agreed on every one".
 3. A failed scenario is also a `high` finding with `source: functional` and `evidence: <id>`.
    Describe the observed wrong behaviour so a builder can act on it; never copy the scenario's
    `given`, `when`, `then` or `run` text into a finding. Name in `where` the file most likely

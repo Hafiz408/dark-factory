@@ -32,6 +32,11 @@ Hard rules:
 - Do not commit; the orchestrator commits after its checks.
 - Use only the commands in the commands file, each run exactly as listed: do not add, remove
   or reorder flags.
+- Tests run on every version the project supports (`requires-python`, `engines`, the `go`
+  line). Never skip a regression test when an optional oracle module is missing (no
+  `importorskip("tomllib")` while Python 3.8 is supported): assert literal expected values.
+- A changelog or docs entry names the actual exception or function and carries the issue
+  reference, in the format of the neighbouring entries.
 - A failure note may describe a wrong behaviour without saying how it was found: fix the
   behaviour it describes. If the same fix already failed once, take a different approach.
 

@@ -106,18 +106,19 @@ Set the cursor with `{DF} conf-set {RD}/run.conf stage <name>` on entering each 
    `feature` otherwise (a request worded "broken" for behaviour that never existed). Set
    `track` and load `{PLUGIN}/tracks/<track>.md`.
 2. Spawn one `refiner` with `input.md`, the track file, the lens files
-   `{PLUGIN}/lenses/requirements.md`, `codebase-fit.md`, `risk.md`, the repo, lessons, output
-   `{RD}/questions.md`. Store its id: `{DF} conf-set {RD}/run.conf refiner_agent <id>`.
+   `{PLUGIN}/lenses/requirements.md`, `codebase-fit.md`, `risk.md`, the repo, lessons, outputs
+   `{RD}/questions.md` and a draft `{RD}/spec.md` (all defaults). Store its id: `{DF} conf-set {RD}/run.conf refiner_agent <id>`.
 3. If its `track` differs from yours or `confidence` is below 0.7, add a question about it.
    `mixed: yes`: ask whether to do the parts as separate runs (queue the rest).
 4. Show the questions (at most 8, each with its default). Wait. Append the answers to
-   `questions.md`. Resume the refiner (SendMessage): "The answers are in questions.md. Write
-   `{RD}/spec.md`." `NEEDS_DECISION`: ask its follow-up or contradiction once, resume it again.
+   `questions.md`. All defaults (`ok`): the draft is the spec, no resume. Else resume the
+   refiner (SendMessage): "The answers are in questions.md. Write `{RD}/spec.md`." `NEEDS_DECISION`: ask its follow-up or contradiction once, resume it again.
    `BLOCKED`: `Recommend abort: <reason>` at sign-off.
    A gap marked infeasible becomes `Recommend abort: <reason>` at sign-off.
 
 ### plan
-1. In ONE message spawn `planner` (spec, track file, repo, detected env, lessons, run dir) and
+1. In ONE message spawn `planner` (spec, track file, repo, detected env, lessons, run dir;
+   on the bugfix track pass `model: sonnet` in the spawn) and
    `qa-author` (spec, track file, profile run text, output `{RD}/scenarios/`).
 2. `VERDICT: BLOCKED` from the planner: carry it to sign-off as `Recommend abort: <reason>`.
 3. Scenarios with `executable: no` are listed at sign-off as manual checks.
@@ -137,35 +138,36 @@ Set the cursor with `{DF} conf-set {RD}/run.conf stage <name>` on entering each 
    `<PORT>`), then `## How to start` and `## Signing in for tests`; credentials only by
    environment variable name. Run `{DF} validate <id>`; fix the draft or tell the user.
 6. Settle the merge target: `ship_base` if set; else `base_ref` when it is a branch name or
-   `origin/<branch>` (without `origin/`); else ask it on the sign-off screen.
+   `origin/<branch>` (without `origin/`); else ask it on the sign-off screen. Default ship
+   mode: `merge`; `policy: no-merge` in `questions.md` makes it `pr`, `no-push` makes it
+   `branch` (repo rules beat the default; merging then needs the answer `merge`).
 
 ### signoff (the only gate)
 Run `{DF} estimate <id> <steps> <lanes>` (lanes from `plan.md`'s `lanes:`); log both lines.
-Show one screen, in plain words:
-- What I understood: the goal in your words; treated as a bug fix, a new feature or a new
-  app (answer `bugfix`, `feature` or `build` to change it).
-- What I will build: the steps with sizes, and which run side by side.
-- What I will not do; assumptions, each with where it came from.
-- How: `plan.md`'s Approach, Alternatives considered and Trade-offs, at most ten lines.
-- How I will check it: the number of hidden checks and their titles only (never steps);
-  manual checks I cannot run.
+Show one screen in plain words. First block, at most 12 lines, no YAML, file names or tool names:
+- What I understood (the goal; a bug fix, a new feature or a new app: answer `bugfix`,
+  `feature` or `build` to change it), what I will do, what I will not do.
+- The ending and why (by whether `git remote get-url origin` and `gh auth status` exit 0,
+  never by the URL's look). `merge` with both: "When everything passes I will open a PR into
+  `<target>`, merge it once its checks pass, test again after the merge and tidy up." `local`,
+  or `merge` without both: "I will merge it into `<target>` on this computer if your folder is
+  clean and on `<target>`; otherwise I leave it on `<branch>`." `pr`: "I will open a PR and
+  leave the merge to you" (without both: as `branch`). `branch`: "I will leave it on
+  `<branch>`; nothing is pushed or merged." Quote a repo rule that set it in one line.
+  Other answers: `merge`, `no merge` (stop at the PR), `local`, `branch`.
+- The estimate line, "This is a rough range, not a promise.", the `cap:` line: "I stop and ask
+  if it goes past this." `Recommend abort: <reason>` if any. Then the question, then `Details`:
+- Steps with sizes, which run side by side; hidden checks: number and titles only (never
+  steps); manual checks. Assumptions with sources. How: `plan.md`'s Approach, Alternatives
+  considered and Trade-offs, at most ten lines.
 - Commands I will run (`env.commands`), new dependencies, and `{PROFILE}` verbatim on every run
   ("drafted, please confirm" when written this run). Nothing in it has run yet.
 - Starting point: `base_ref` at the short `root_base_sha`, on branch `<branch>`; to change it,
-  abort and start again. Uncommitted files left out. Unmet needs.
-- Time and cost: the estimate line, then "This is a rough range, not a promise: retries and
-  fixes are unknown in advance, it cannot see your remaining plan usage, and it gets more
-  accurate after a few runs here." Then the `cap:` line: "I stop and ask if it goes past this."
-- The ending, by mode (decide only by whether `git remote get-url origin` and `gh auth status`
-  exit 0, never by what the remote URL looks like): with both working: "When everything passes I
-  will open a PR into `<target>`, merge it once its checks pass, test again after the merge
-  and tidy up." Without them: "When everything passes I will merge it into `<target>` on this
-  computer if your folder is clean and on `<target>`; otherwise I leave it on `<branch>`."
-  Then: "Answer `no merge` to stop at the PR, or `local` to merge on this computer only."
-- `Recommend abort: <reason>` when there is one.
+  abort and start again. Uncommitted files left out. Unmet needs. Estimate caveats: retries
+  are unknown in advance, your plan usage is unseen, it improves after a few runs here.
 Ask: approve, amend `<what>` (re-run only the affected stages; at most 3 amends), or abort; the
-ship words may come with approve. Record `{DF} conf-set {RD}/run.conf ship_mode merge` (or
-`pr` for `no merge`, `local` for `local`), `ship_base` if asked, the approval in `log.md`, and
+ship words may come with approve. Record `{DF} conf-set {RD}/run.conf ship_mode` with the word
+given (`no merge` is `pr`) or the default, `ship_base` if asked, the approval in `log.md`, and
 run `{DF} profile-pin <id>`. This is the last question before the report: nothing is asked
 after it except a permission stop, and the screen says so.
 
@@ -194,9 +196,8 @@ suffix `df_<run-id>_c<NN>`. Spawn or resume the wave's builders in ONE message; 
 independently. When all finish, record the run branch head in `log.md` as the wave base; join
 the PASS steps in id order with `{DF} sub-join <id> NN` (it logs the joined commit in
 `log.md`, as `{DF} commit` does), then print that step's milestone. A join that refuses:
-`{DF} sub-drop <id> NN`, set
-it `pending` with `{DF} fm-set <step> serial yes`, `interrupts` +1 (3 interrupts: BLOCKED). Drop
-BLOCKED steps' sub-worktrees too. Then run the full suite in `{WT}`; red: reset `{WT}` to the
+`{DF} sub-drop <id> NN`, set it `pending` with `{DF} fm-set <step> serial yes`, `interrupts`
++1 (3 interrupts: BLOCKED). Drop BLOCKED steps' sub-worktrees too. Then run the full suite in `{WT}`; red: reset `{WT}` to the
 wave base, set the joined steps `pending`, `serial yes`, interrupts +1, and rerun them serially.
 
 **One step** in worktree `<wt>` (`{WT}` or its sub-worktree). Keep values in the step file or

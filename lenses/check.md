@@ -21,6 +21,13 @@ breaks it). No evidence, no blocking finding.
    option's meaning changed) where one shared function they all route through would do,
    unless the spec or `plan.md` justifies it; name that function.
 
+6. **Differential check** (`source: correctness`). When a reference oracle exists (a stdlib or
+   well-known implementation of the same format or behaviour, a spec's examples, the code at
+   `root_base_sha` for paths the change should not alter), generate hundreds to thousands of
+   inputs with a short seeded script and compare. A mismatch on the fixed code path is medium
+   (evidence: the input and both outputs); any other mismatch is low, tagged `adjacent`.
+   State the number of cases tried; never claim agreement on every case from a few examples.
+
 ## Severity rubric
 
 | Finding | Severity |
@@ -29,5 +36,7 @@ breaks it). No evidence, no blocking finding.
 | Exploitable injection, auth bypass, secret committed | critical |
 | Wrong behaviour on a reachable input; public interface changed with a consumer not updated | high |
 | A real defect with limited reach; reinvented stdlib; fix wider than its cause | medium |
+| A differential mismatch on the fixed code path | medium |
+| A differential mismatch elsewhere (`adjacent`) | low |
 | Criterion met but no test would fail if it stopped being met | low |
 | Duplication confined to test helpers or fixtures; naming; small dead flexibility | low |

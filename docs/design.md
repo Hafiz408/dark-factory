@@ -28,7 +28,7 @@ the v0.3 response:
 | Branch review + QA + plan-coverage + adjudicate | most real findings came from branch review | One `checker`: whole-branch review and every hidden scenario, resumed for re-checks |
 | Findings without proof blocked | same issue medium on one try, low on the next | `df gate` downgrades medium+ findings without an `evidence:` line to low; df's own findings carry `evidence: df <check>` |
 | Opt-in `parallel=on` | rarely used | Automatic waves of up to 3 disjoint steps |
-| Ended at a branch, PR only on a yes at the end | user had to come back | Ship mode chosen at sign-off: merge (default), `pr`, `local`; re-test after merge |
+| Ended at a branch, PR only on a yes at the end | user had to come back | Ship mode chosen at sign-off: merge (default unless repo rules forbid it), `pr`, `local`, `branch`; re-test after merge |
 | 14 infra retries in 3 runs (roles not writing output) | eval logs | Roles run in the foreground only; prompts end with the exact output path; a missing file is retried, never filled in |
 | No spend limit | runs ran long | Agent and time caps shown at sign-off, enforced before every spawn |
 
@@ -60,7 +60,7 @@ intake -> refine -> plan -> preflight -> signoff -> slice -> build -> check -> s
 - **signoff (the only gate).** One plain screen: goal, steps and which run side by side, what
   it won't do, assumptions, approach and alternatives, check titles (never their content),
   commands, starting point, estimate and cap, and the ending for the chosen ship mode. The
-  user answers approve (optionally with `no merge` or `local`), amend (max 3) or abort.
+  user answers approve (optionally with `merge`, `no merge`, `local` or `branch`), amend (max 3) or abort.
   Nothing is asked after this except a permission stop.
 - **slice.** Move steps into `chunks/`, validate, record the e2e baseline.
 
