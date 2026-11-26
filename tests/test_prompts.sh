@@ -19,11 +19,14 @@ for a in $AGENTS; do
   grep -q "VERDICT" "$f" && ok "agent $a: states a verdict" || bad "agent $a: states a verdict"
 done
 
-# read-only roles must not have Write or Edit
+# read-only roles may Write their own output file (checked by rundir-hash), never Edit
 for a in qa-functional reviewer retro; do
   t="$(fm "$ROOT/agents/$a.md" tools)"
-  [ "$a" = retro ] && t=$(echo "$t" | sed 's/Write//')
-  case "$t" in *Edit*|*Write*|*MultiEdit*) bad "agent $a: read-only tools";; *) ok "agent $a: read-only tools";; esac
+  case "$t" in *Edit*) bad "agent $a: read-only tools (no Edit)";; *) ok "agent $a: read-only tools (no Edit)";; esac
+  case "$t" in *Write*) ok "agent $a: can write its output file";; *) bad "agent $a: can write its output file";; esac
+done
+for a in qa-functional reviewer; do
+  grep -q "Write only to the findings output path" "$ROOT/agents/$a.md" && ok "agent $a: writes only its findings file" || bad "agent $a: writes only its findings file"
 done
 # builder and tester are not given scenario access by instruction
 for a in builder tester; do
@@ -282,5 +285,20 @@ echo "$L" | grep -q "plan-coverage" && ok "SKILL.md: fast lane skips the separat
 sed -n '/^### signoff/,/^### slice/p' "$SK" | grep -q "Lane:" && ok "SKILL.md: sign-off shows the lane and how to switch" || bad "SKILL.md: sign-off shows the lane and how to switch"
 grep -q "/dark-factory:dark-factory" "$ROOT/README.md" && ok "README: real command name" || bad "README: real command name"
 grep -q "^## Quickstart" "$ROOT/README.md" && grep -qi "sibling" "$ROOT/README.md" && grep -qi "minutes" "$ROOT/README.md" && ok "README: quickstart, disk footprint and time" || bad "README: quickstart, disk footprint and time"
+
+# v0.2: read-only roles are checked for writes elsewhere in the run dir
+SK="$ROOT/skills/dark-factory/SKILL.md"
+sed -n '/^## The loop/,/^Details you must follow/p' "$SK" | grep -q "{DF} rundir-hash" && ok "SKILL.md: loop panel takes a run-dir hash" || bad "SKILL.md: loop panel takes a run-dir hash"
+grep '^- \*\*Read-only violation' -A3 "$SK" | grep -q "rundir-hash" && ok "SKILL.md: read-only violation covers the run dir" || bad "SKILL.md: read-only violation covers the run dir"
+sed -n '/^## Review (stage/,/^### Pausing/p' "$SK" | grep -q "{DF} rundir-hash" && ok "SKILL.md: review panel takes a run-dir hash" || bad "SKILL.md: review panel takes a run-dir hash"
+sed -n '/^## QA (stage/,/^## E2E/p' "$SK" | grep -q "{DF} rundir-hash" && ok "SKILL.md: QA takes a run-dir hash" || bad "SKILL.md: QA takes a run-dir hash"
+grep -qi "transcrib" "$SK" && bad "SKILL.md: never transcribes a role's reply" || ok "SKILL.md: never transcribes a role's reply"
+grep -q "no valid output file" "$SK" && ok "SKILL.md: a role with no output file is an infra failure" || bad "SKILL.md: a role with no output file is an infra failure"
+# v0.2: spawn log and sign-off estimate
+grep -q "{DF} spawn-log <id> <role> <seconds> <tokens>" "$SK" && grep -q "{RD}/spawns.tsv" "$SK" && ok "SKILL.md: every spawn is logged" || bad "SKILL.md: every spawn is logged"
+SO=$(sed -n '/^### signoff/,/^### slice/p' "$SK")
+echo "$SO" | grep -q "Estimate" && echo "$SO" | grep -q "{DF} estimate <id> <chunk count>" && ok "SKILL.md: sign-off shows an estimate" || bad "SKILL.md: sign-off shows an estimate"
+echo "$SO" | grep -q "not a promise" && echo "$SO" | grep -qi "retries, review rounds and QA fixes" && echo "$SO" | grep -q "remaining plan usage" && echo "$SO" | grep -q "more accurate after a few runs" && ok "SKILL.md: estimate carries its disclaimer" || bad "SKILL.md: estimate carries its disclaimer"
+sed -n '/^## Quickstart/,/^## Use/p' "$ROOT/README.md" | grep -qi "estimate" && sed -n '/^## Quickstart/,/^## Use/p' "$ROOT/README.md" | grep -q "not a promise" && ok "README: quickstart explains the estimate and its caveat" || bad "README: quickstart explains the estimate and its caveat"
 
 finish

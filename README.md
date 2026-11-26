@@ -26,6 +26,9 @@ claude --plugin-dir /path/to/dark-factory
 
 1. Answer "ok" to the base-branch question and to the batch of clarifying questions (each has a default).
 2. Read the sign-off screen and answer "approve". Stay for this part: commands may ask for permission.
+   The screen shows an estimate, such as `estimate: 34-61 min, ~39 agents`. It is a rough range, not a promise:
+   retries, review rounds and QA fixes are unknown in advance, and it cannot see your remaining plan usage.
+   It starts from default figures and becomes more accurate after a few runs in the same repo.
 3. Leave it. Small fixes take about 15-30 minutes, features and builds 30-120 minutes, and a run uses many
    subagents, so it spends a lot more of your usage than asking Claude directly. For a one-line fix, just ask Claude.
 4. You get a branch in a sibling git worktree, `../<repo>-df-<run-id>`, with one commit per chunk and a
@@ -66,7 +69,8 @@ state is on disk.
 - **It learns per repo.** After each run a retro writes facts about the repo that would have
   saved an attempt (`../.df-<repo>/lessons.md`, at most 30 lines, fed to later runs) and
   suggestions for the plugin itself (`proposals.md`, never applied for you). `metrics.tsv`
-  keeps one row per run so you can see whether attempts go down.
+  keeps one row per run (including how many agents it spawned and the tokens they reported) so you can
+  see whether attempts go down, and feeds the sign-off estimate.
 - **A run that cannot get clean pauses.** It tells you what is open and never reports a pass.
 - **Resume** after a crash, closed laptop or expired login, losing at most one attempt.
 - **A PR on request.** A run that came through QA and e2e asks "Push and open a PR?"; only "yes"

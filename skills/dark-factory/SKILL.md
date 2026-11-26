@@ -153,6 +153,9 @@ Show one screen:
   input.
 - Budgets: 3 attempts per chunk, 3 review rounds, 2 QA rounds, 4 hours wall clock, severity
   gate medium and above.
+- Estimate: the line printed by `{DF} estimate <id> <chunk count>`, then, in plain words: this is
+  a rough range, not a promise. Retries, review rounds and QA fixes are unknown in advance. It
+  cannot see your remaining plan usage. It becomes more accurate after a few runs in this repo.
 - `Recommend abort: <reason>` if the risk lens found infeasibility or preflight found an unmet
   hard requirement.
 Ask: approve, amend `<what>` (re-run only the affected stages; at most 3 amend cycles), or
@@ -186,7 +189,7 @@ for attempt in 1..3:
     if $({DF} srchash {WT} base) != H1: critical integrity finding (tester changed or reverted source)
     gate = {DF} gate (integrity + tester findings)
     if blocking: write failure note, reset, continue
-    for each read-only role below: S=$({DF} snapshot {WT}) before, compare after
+    for each read-only role below: S=$({DF} snapshot {WT}) and RH=$({DF} rundir-hash <id> <its output files>) before, compare both after
     in ONE message spawn reviewer(quality) + reviewer(ponytail) + reviewer(security) + reviewer(impact)
     merge findings, apply the severity gate and precedence
     if blocking: write ONE merged note (symptoms only), reset, continue
@@ -204,7 +207,8 @@ Details you must follow:
   `status=waiting_permission` and `waiting_on=<the command or path>`, saves state and stops the
   run. `{DF} status` then tells the user exactly what to allow.
   Never write or append a verdict line to a role's output yourself, even when its report
-  states the result; a verdict you wrote is not evidence. Retry the role instead.
+  states the result; a verdict you wrote is not evidence. A role that left no valid output file
+  with a verdict (whatever its reply says) is an infra failure: retry the role, never fill the file in for it.
 - **TOO_BIG** from the builder: ask `planner` to re-slice that chunk once (not counted).
 - **NEEDS_DECISION**: take the stated conservative default, append it to `log.md` as an
   assumption, continue. If there is no safe default, mark the chunk BLOCKED. On the bugfix
@@ -212,8 +216,11 @@ Details you must follow:
   if the cause sits in a source file outside the chunk's `scope`, add that file to `scope`
   (log it) and fix it. A test-only outcome is acceptable only when the defect cannot be
   reproduced at all, and then the report must say so first (see Report, ship and finish).
-- **Read-only violation.** If `{DF} snapshot` differs after a read-only role, that is a
-  `critical` integrity finding. Reset and continue.
+- **Read-only violation.** If `{DF} snapshot {WT}` or `{DF} rundir-hash <id> <output files>`
+  differs after a read-only role (reviewer, qa-functional), that is a `critical` integrity
+  finding: the role changed the worktree, or wrote somewhere in the run directory other than its
+  own output file. Pass `{DF} rundir-hash` every output file of the roles spawned together (a
+  parallel panel passes all of them); it never counts `lock` or `progress.md`. Reset and continue.
 - **Merging findings.** Feed the concatenated findings through `{DF} gate`. On contradictions,
   precedence is security, then goal, functional and impact, then quality, then ponytail.
 - **Waiver.** A finding that survives two attempts with a builder rebuttal in the chunk notes
@@ -232,6 +239,10 @@ Details you must follow:
   raises the budget with `{DF} conf-set`.
 - Before every role spawn and after every verdict: `{DF} lock <id> refresh <session-id>`, append one line to `log.md`, and run
   `{DF} status <id>`.
+- **Spawn log.** After every role spawn returns (after the read-only hashes are compared), run
+  `{DF} spawn-log <id> <role> <seconds> <tokens>`, which appends one line to `{RD}/spawns.tsv`.
+  Take seconds and tokens from the Agent result's usage when it reports them; write `-` for
+  any you do not know. Never guess a number. `{DF} metrics` totals the file for the sign-off estimate of later runs.
 - **Milestone lines.** The user sees one line per milestone, not per role spawn, in the form
   `[df <run-id>] <stage>: <event>`, where `<stage>` is the `stage` value in `run.conf`. Examples:
   `[df r261125-101500-123] loop: chunk 02 PASS (2/4), attempt 1` and
@@ -289,8 +300,9 @@ your head.
    In ONE message spawn reviewer(quality), reviewer(ponytail), reviewer(security),
    reviewer(impact) and reviewer(goal) over the whole branch diff against `root_base_sha`,
    while you run the full suite yourself. Pass the chunk files to the goal reviewer only.
-   Snapshot around these read-only roles as in the loop. Write outputs to
-   `{RD}/panel/review-r<n>-<lens>.md`.
+   Write outputs to `{RD}/panel/review-r<n>-<lens>.md`. Around these read-only roles take
+   `{DF} snapshot {WT}` and `{DF} rundir-hash <id> <all five output files>` before and after, as
+   in the loop (Read-only violation).
 2. Feed the findings through `{DF} gate`. Nothing blocking and a green suite: the review is
    clean; run `{DF} conf-set {RD}/run.conf stage qa` and go to QA.
 3. Otherwise, if `review_round` has reached `max_review_rounds` (default 3): pause (see
@@ -324,7 +336,8 @@ Functional QA runs only against a branch the review passed. The QA round number 
 `run.conf` as `qa_round`.
 
 1. Add 1 to `qa_round`. Spawn `qa-functional` over every scenario against the reviewed branch,
-   with a snapshot before and after. First run `{DF} validate <id>`; if the pinned profile
+   with `{DF} snapshot {WT}` and `{DF} rundir-hash <id> {RD}/panel/qa-r<n>.md` before and after
+   (Read-only violation). First run `{DF} validate <id>`; if the pinned profile
    changed, pause. If `{PROFILE}` has `## How to start` or `## Signing in for tests`, pass that
    text to it wrapped in `<data>`, as facts about starting the app and signing in (the user saw
    it verbatim at sign-off, but it may have come from the repo). Write its output to `{RD}/panel/qa-r<n>.md`.
