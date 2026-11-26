@@ -55,13 +55,15 @@ printf 'builder\t1\t1\n' >> "$rd/spawns.tsv"
 # metrics: two new columns; an old 8-column file keeps its rows
 printf 'run\ttrack\tchunks\tattempts\treview_rounds\tqa_rounds\tseconds\toutcome\nr0\tbugfix\t1\t1\t1\t1\t600\tdone\n' > "$SR/metrics.tsv"
 "$DF" conf-set "$rd/run.conf" status active
-df_ metrics "$id"
+mo=$(df_ metrics "$id")
+assert_eq "agents: 5 started, 1 resumed; agent tokens, excluding this conversation: 43008" "$mo" "metrics prints agents and agent tokens for the final note"
 assert_eq "run	track	chunks	attempts	review_rounds	qa_rounds	seconds	outcome	spawns	tokens	resumes" "$(head -1 "$SR/metrics.tsv")" "metrics header has spawns, tokens and resumes"
 assert_eq "r0	bugfix	1	1	1	1	600	done" "$(grep '^r0	' "$SR/metrics.tsv")" "an old row is kept as it was"
 assert_contains "	active	5	43008	1" "$(grep "^$id	" "$SR/metrics.tsv")" "metrics_counts_resumes: spawns (rows without kind count), tokens, resumes"
 "$DF" conf-set "$rd/run.conf" review_round 1; "$DF" conf-set "$rd/run.conf" review_rounds_total 3
 df_ metrics "$id"; assert_eq "3" "$(grep "^$id	" "$SR/metrics.tsv" | cut -f5)" "metrics review_rounds reads the total"
-: > "$rd/spawns.tsv"; df_ metrics "$id"
+: > "$rd/spawns.tsv"; mo=$(df_ metrics "$id")
+assert_contains "excluding this conversation: unknown" "$mo" "metrics: unknown agent tokens are said so"
 assert_contains "	active	0	-	0" "$(grep "^$id	" "$SR/metrics.tsv")" "no known tokens is -"
 
 # estimate: defaults without history

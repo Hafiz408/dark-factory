@@ -26,8 +26,8 @@ conf_set() {
     stage=intake|stage=route|stage=refine|stage=plan|stage=preflight|stage=signoff|stage=build|stage=check|stage=slice|stage=loop|stage=integrate|stage=review|stage=qa|stage=e2e|stage=retro|stage=ship|stage=merge|stage=postmerge|stage=done) ;; # v0.2 stages (slice loop review qa e2e) and v0.1 integrate kept for old runs
     stage=*) die "conf-set: invalid stage '$3'";;
     ship_confirmed=yes|ship_confirmed=no) ;;
-    ship_mode=merge|ship_mode=pr|ship_mode=local) ;;
-    ship_mode=*) die "conf-set: ship_mode must be merge, pr or local";;
+    ship_mode=merge|ship_mode=pr|ship_mode=local|ship_mode=branch) ;;
+    ship_mode=*) die "conf-set: ship_mode must be merge, pr, local or branch";;
     merged=yes|merged=local) ;;
     merged=*) die "conf-set: merged must be yes or local";;
     ship_confirmed=*) die "conf-set: ship_confirmed must be yes or no";;
@@ -572,6 +572,8 @@ EOF
   { printf 'run\ttrack\tchunks\tattempts\treview_rounds\tqa_rounds\tseconds\toutcome\tspawns\ttokens\tresumes\n'
     [ -f "$m" ] && tail -n +2 "$m" | grep -v "^$1	" || true
     printf '%s\n' "$row"; } | atomic "$m"
+  [ "$tok" = - ] && tok="unknown" # the orchestrator's own tokens are not in spawns.tsv
+  echo "agents: $sp started, $rs resumed; agent tokens, excluding this conversation: $tok"
 }
 
 # Parallel builders (off by default). A wave is the pending chunks whose dependencies all
@@ -671,6 +673,7 @@ cmd_ship() { # df ship <run-id> <title> <body-file>: push the run branch and ope
   rd=$(run_dir "$1"); c="$rd/run.conf"
   [ -f "$c" ] || die "no such run: $1"
   ship_pin_check "$c" ship
+  [ "$(conf_get "$c" ship_mode)" != branch ] || die "ship: ship_mode is branch; nothing is pushed"
   url=$(conf_get "$c" pr_url)
   if [ -n "$url" ]; then
     [ -n "$(conf_get "$c" pushed_sha)" ] || die "ship: a pr_url is recorded that df ship did not open; nothing pushed"
@@ -726,7 +729,7 @@ cmd_merge() { # df merge <run-id>: wait up to DF_CHECKS_WAIT s for the PR's chec
   url=$(conf_get "$c" pr_url); case $url in https://?*) ;; *) die "merge: no PR recorded; ship first";; esac
   [ "$(conf_get "$c" merged)" != yes ] || { conf_get "$c" merge_sha; return 0; }
   ship_pin_check "$c" merge
-  [ "$(conf_get "$c" ship_mode)" != pr ] || die "merge: ship_mode is pr; the PR stays open"
+  case $(conf_get "$c" ship_mode) in pr|branch) die "merge: ship_mode is $(conf_get "$c" ship_mode); nothing is merged";; esac
   psha=$(conf_get "$c" pushed_sha); case $psha in ''|*[!0-9a-f]*) die "merge: no pushed sha recorded; ship first";; esac
   command -v gh >/dev/null 2>&1 || die "merge: gh is not on PATH"
   w=${DF_CHECKS_WAIT:-90}; g=${DF_NO_CHECKS_GRACE:-60}
@@ -770,6 +773,7 @@ cmd_local_merge() { # df local-merge <run-id>: fast-forward the base branch in t
   c="$(run_dir "${1:-}")/run.conf"; [ -f "$c" ] || die "no such run: ${1:-}"
   [ "$(conf_get "$c" merged)" != local ] || { conf_get "$c" merge_sha; return 0; }
   ship_pin_check "$c" local-merge
+  case $(conf_get "$c" ship_mode) in pr|branch) echo "ship mode is $(conf_get "$c" ship_mode), so it stays on its branch"; return 2;; esac
   m=$(main_root); br=$(conf_get "$c" branch)
   base=$(ship_target "$c" local 2>/dev/null) || { echo "no branch to merge into (set ship_base)"; return 2; }
   # The user's own folder: touched only when it is clean and on the branch the run started from.

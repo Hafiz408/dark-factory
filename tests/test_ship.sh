@@ -142,6 +142,8 @@ refuse() { # refuse <desc> <run> <title> <body> [VAR=val ...]
 S=$(newrun); SCF="$SC/$S/run.conf"; swt=$(df conf-get "$SCF" worktree); df conf-set "$SCF" base_ref main
 df conf-set "$SCF" ship_confirmed no;   refuse "confirmed no" "$S" t "$T/body.md"
 df conf-set "$SCF" ship_confirmed yes
+df conf-set "$SCF" ship_mode branch;     refuse "ship_mode branch (repo forbids pushing)" "$S" t "$T/body.md"
+df conf-set "$SCF" ship_mode merge
 df conf-set "$SCF" stage qa;            refuse "stage qa" "$S" t "$T/body.md"
 df conf-set "$SCF" stage ship
 df conf-set "$SCF" status paused;       refuse "status paused" "$S" t "$T/body.md"
@@ -357,7 +359,7 @@ refuse "an unpushed secret below the run's base" "$Z" t "$T/body.md"
 git -C "$C" checkout -q main
 
 # v0.3: merge after green checks, never --admin; local merge; post-merge checkout; revert PR
-for kv in ship_mode=merge ship_mode=pr ship_mode=local stage=build stage=check stage=merge stage=postmerge merged=yes merged=local; do
+for kv in ship_mode=merge ship_mode=pr ship_mode=local ship_mode=branch stage=build stage=check stage=merge stage=postmerge merged=yes merged=local; do
   assert_ok "conf-set accepts $kv" df conf-set "$T/m.conf" "${kv%%=*}" "${kv#*=}"
 done
 assert_fail "conf-set refuses ship_mode push" df conf-set "$T/m.conf" ship_mode push
@@ -395,6 +397,8 @@ mrg GH_CHECKS_RC=1 "GH_CHECKS_OUT=$NC" DF_CHECKS_WAIT=0 DF_NO_CHECKS_GRACE=100 >
 assert_ok "merge_no_checks_grace: without pushed_at the first call is recorded" test -n "$(df conf-get "$GC" checks_first_seen)"
 df conf-set "$GC" ship_mode pr
 assert_eq "1" "$(mrg GH_MERGE_SHA=$MS)" "merge refuses ship_mode pr"
+df conf-set "$GC" ship_mode branch
+assert_eq "1" "$(mrg GH_MERGE_SHA=$MS)" "merge refuses ship_mode branch"
 df conf-set "$GC" ship_mode merge
 assert_eq "3" "$(mrg GH_MERGE_RC=1)" "merge a PR the host will not merge: exit 3"
 assert_contains "merge: could not merge" "$(cat "$T/mo")" "and says why"
@@ -433,6 +437,10 @@ assert_eq "$h" "$(git -C "$L" rev-parse main)" "local_merge_refuses_dirty: main 
 rm "$L/u.txt"; git -C "$L" checkout -q -b other
 assert_eq "2:your folder is on other, not main" "$(lm "$LA"):$(cat "$T/lo")" "local_merge_refuses_other_branch"
 git -C "$L" checkout -q main
+for sm in pr branch; do "$DF" conf-set "$SL/$LA/run.conf" ship_mode $sm
+  assert_eq "2:ship mode is $sm, so it stays on its branch" "$(lm "$LA"):$(cat "$T/lo")" "local_merge_refuses_ship_mode_$sm"; done
+assert_eq "$h" "$(git -C "$L" rev-parse main)" "local_merge_refuses_ship_mode: main untouched"
+"$DF" conf-set "$SL/$LA/run.conf" ship_mode local
 assert_eq "0" "$(lm "$LA")" "local_merge_ff: exit 0"
 la=$(git -C "$L" rev-parse "refs/heads/$(cat "$SL/$LA/run.conf" | sed -n 's/^branch=//p')")
 assert_eq "$la:local:$la" "$(git -C "$L" rev-parse main):$(sed -n 's/^merged=//p' "$SL/$LA/run.conf"):$(sed -n 's/^merge_sha=//p' "$SL/$LA/run.conf")" "local_merge_ff: main moved, merged=local recorded"
