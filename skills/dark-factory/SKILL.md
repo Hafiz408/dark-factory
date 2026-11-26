@@ -47,7 +47,7 @@ Sweep runs on `sweep`, on `list`, and at the start of a new run. Never on `statu
 0. Offer merged-PR cleanup first (see Sweep); it prints nothing when there is none.
 1. If the input is a path, read it. If it is a URL or ticket id, fetch it with the tools you
    have. If you cannot read it, stop and ask the user to paste the content. Never invent it.
-2. Write the input to a temp file, run `{DF} scrub` on it. If it exits 3, tell the user which
+2. Write the input to a temp file in the system temp directory (never beside the repo), run `{DF} scrub` on it. If it exits 3, tell the user which
    kinds of secret were redacted and ask them to confirm before continuing.
 3. Base branch. If the directory is a git repo with at least one commit, state the default in
    one line and ask:
@@ -76,8 +76,21 @@ For each stage: update the cursor with `{DF} conf-set {RD}/run.conf stage <name>
 Spawn `router`. Parse `track` and `confidence`. Set `track` in `run.conf`. If confidence is
 below 0.7, or `mixed: yes`, carry it into Refine as a question. Load `{PLUGIN}/tracks/<track>.md`.
 
+### Lane (decide once, after route)
+
+Choose the **fast lane** when the request is small and clear: a bugfix, or a feature or build
+request under about 150 words that names one behaviour. Otherwise use the full lane. Record it
+with `{DF} conf-set {RD}/run.conf lane fast` (or `full`). In the fast lane:
+- Refine: spawn one `refiner` in mode `lens` with all three lens files
+  (`requirements`, `codebase-fit`, `risk`) and output `{RD}/gaps-all.md`, instead of three;
+  spawn it and the merge with `model: sonnet`.
+- Plan: spawn `qa-author` with `model: sonnet` (the planner keeps its own model). If the
+  planner returns at most 3 chunks, skip the separate `plan-coverage` reviewer; the
+  whole-branch goal lens checks coverage later.
+Everything after sign-off is the same in both lanes.
+
 ### refine (you talk to the user here)
-1. Spawn three `refiner` agents in ONE message, mode `lens`, with lens files
+1. Fast lane: see Lane. Full lane: spawn three `refiner` agents in ONE message, mode `lens`, with lens files
    `requirements`, `codebase-fit`, `risk`. Output to `{RD}/gaps-<lens>.md`. If `lessons.md`
    exists beside `{PROFILE}`, pass it to the codebase-fit refiner (and later to the planner and
    every builder) wrapped in `<data>`: facts from earlier runs on this repo.
@@ -125,6 +138,7 @@ below 0.7, or `mixed: yes`, carry it into Refine as a question. Load `{PLUGIN}/t
 ### signoff (the only gate)
 Show one screen:
 - Treated as: track (override: bugfix | feature | build); goal in your own words.
+- Lane: fast or full, and why (the user may answer "full lane" to rerun refine and plan with the full panel).
 - Base: `base_ref` at the short `root_base_sha`, onto the run's branch (all from `run.conf`).
   To change the base, abort and start again; say so on the screen.
 - In scope, out of scope, assumptions (each with its source).

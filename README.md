@@ -16,11 +16,30 @@ claude plugin install dark-factory@dark-factory --scope project
 
 Try without installing: clone the repo, then `claude --plugin-dir ./dark-factory`.
 
+## Quickstart
+
+```
+cd your-repo            # or an empty directory, for a build from an idea
+claude --plugin-dir /path/to/dark-factory
+> /dark-factory:dark-factory Add a --json flag to the export command
+```
+
+1. Answer "ok" to the base-branch question and to the batch of clarifying questions (each has a default).
+2. Read the sign-off screen and answer "approve". Stay for this part: commands may ask for permission.
+3. Leave it. Small fixes take about 15-30 minutes, features and builds 30-120 minutes, and a run uses many
+   subagents, so it spends a lot more of your usage than asking Claude directly. For a one-line fix, just ask Claude.
+4. You get a branch in a sibling git worktree, `../<repo>-df-<run-id>`, with one commit per chunk and a
+   `report.md`. Your own checkout is not touched. Run state lives in `../.df-<repo>/` (also a sibling).
+   In an empty directory the run first does `git init` with an empty commit, and the code is in that sibling
+   worktree: merge its branch (`git merge df/<run-id>`) to bring it into your directory.
+5. If it asks "Push and open a PR?", only "yes" pushes. `/dark-factory:dark-factory status` shows where a run
+   is, and says "not running" if the session died (resume to continue).
+
 ## Use
 
 ```
-/dark-factory <idea, PRD, ticket text, bug report, or a path>
-/dark-factory list | status [run-id] | resume [run-id] | clean <run-id> | sweep
+/dark-factory:dark-factory <idea, PRD, ticket text, bug report, or a path>
+/dark-factory:dark-factory list | status [run-id] | resume [run-id] | clean <run-id> | sweep
 ```
 
 It first confirms the base branch ("ok" keeps the one you are on). You then answer one batch of

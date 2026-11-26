@@ -274,4 +274,13 @@ sed -n '/^## Resume/,$p' "$SK" | grep -q "when it is" && sed -n '/^## Resume/,$p
 RT3=$(sed -n '/\*\*Retro (stage/,/\*\*Ship (stage/p' "$SK")
 grep -q "status paused\`; run" "$SK" && bad "SKILL.md: no hand-set paused status left" || ok "SKILL.md: no hand-set paused status left"
 
+# evaluation: fast lane, README
+grep -q "^### Lane" "$SK" && grep -q "fast lane" "$SK" && ok "SKILL.md: has a fast lane" || bad "SKILL.md: has a fast lane"
+L=$(sed -n '/^### Lane/,/^### /p' "$SK")
+echo "$L" | grep -q "model: sonnet" && echo "$L" | grep -q "one .refiner." && ok "SKILL.md: fast lane uses one refiner and sonnet" || bad "SKILL.md: fast lane uses one refiner and sonnet"
+echo "$L" | grep -q "plan-coverage" && ok "SKILL.md: fast lane skips the separate plan-coverage pass for small plans" || bad "SKILL.md: fast lane skips the separate plan-coverage pass for small plans"
+sed -n '/^### signoff/,/^### slice/p' "$SK" | grep -q "Lane:" && ok "SKILL.md: sign-off shows the lane and how to switch" || bad "SKILL.md: sign-off shows the lane and how to switch"
+grep -q "/dark-factory:dark-factory" "$ROOT/README.md" && ok "README: real command name" || bad "README: real command name"
+grep -q "^## Quickstart" "$ROOT/README.md" && grep -qi "sibling" "$ROOT/README.md" && grep -qi "minutes" "$ROOT/README.md" && ok "README: quickstart, disk footprint and time" || bad "README: quickstart, disk footprint and time"
+
 finish
