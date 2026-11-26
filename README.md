@@ -1,143 +1,156 @@
 # Dark Factory
 
-Give it a bug report, feature request, PRD or an idea. It asks only what the repo can't
-answer, you sign off once, then a team of subagents builds, tests and QAs in a loop with nobody
-in the middle. You get a git branch and a report, and at the end it asks whether to push the branch and
-open a PR. It pushes only on a yes, and it never merges.
+**It asks the questions Claude would otherwise silently assume, you approve once, and it builds,
+checks, merges and re-tests the work without you watching.**
 
-Claude Code plugin. v0.2, open source. macOS, Linux, WSL.
+Give it a bug report, a feature request, a PRD or a plain idea. You answer a few questions
+(each has a default), approve one screen, and walk away. You come back to merged, tested code
+and a short note in plain words saying what changed and how it was checked.
 
-## Install
+Claude Code plugin. v0.3, open source, MIT. macOS, Linux, WSL.
+
+> **When not to use it**
+> - A one-line fix or a quick question: just ask Claude. It is faster and cheaper.
+> - You want to steer every step as it happens. Dark Factory asks everything up front, then works alone.
+> - You need a sandbox. It runs with your permissions; the guard hook is a seat belt, not a cage.
+> - Native Windows (use WSL).
+
+## Quickstart
 
 ```bash
 claude plugin marketplace add Hafiz408/dark-factory
 claude plugin install dark-factory@dark-factory --scope project
 ```
 
-Try without installing: clone the repo, then `claude --plugin-dir ./dark-factory`.
-
-## Quickstart
+Then, inside your project (or an empty folder, to build something new):
 
 ```
-cd your-repo            # or an empty directory, for a build from an idea
-claude --plugin-dir /path/to/dark-factory
 > /dark-factory:dark-factory Add a --json flag to the export command
 ```
 
-1. Answer "ok" to the base-branch question and to the batch of clarifying questions (each has a default).
-2. Read the sign-off screen and answer "approve". Stay for this part: commands may ask for permission.
-   The screen shows an estimate, such as `estimate: 34-61 min, ~39 agents`. It is a rough range, not a promise:
-   retries, review rounds and QA fixes are unknown in advance, and it cannot see your remaining plan usage.
-   It starts from default figures and becomes more accurate after a few runs in the same repo.
-3. Leave it. Small fixes take about 15-30 minutes, features and builds 30-120 minutes, and a run uses many
-   subagents, so it spends a lot more of your usage than asking Claude directly. For a one-line fix, just ask Claude.
-4. You get a branch in a sibling git worktree, `../<repo>-df-<run-id>`, with one commit per chunk and a
-   `report.md`. Your own checkout is not touched. Run state lives in `../.df-<repo>/` (also a sibling).
-   In an empty directory the run first does `git init` with an empty commit, and the code is in that sibling
-   worktree: merge its branch (`git merge df/<run-id>`) to bring it into your directory.
-5. If it asks "Push and open a PR?", only "yes" pushes. `/dark-factory:dark-factory status` shows where a run
-   is, and says "not running" if the session died (resume to continue).
+1. Say `ok` to the starting branch, then answer the questions (`ok` takes every default).
+2. Read the sign-off screen and say `approve`. Stay a moment: commands it will run may ask
+   for permission now, so nothing stalls later.
+3. Leave it. It prints one line per milestone, like `[df r261127-101500-123] step 2 of 4 done`.
 
-## Use
-
-```
-/dark-factory:dark-factory <idea, PRD, ticket text, bug report, or a path>
-/dark-factory:dark-factory list | status [run-id] | resume [run-id] | clean <run-id> | sweep
-```
-
-It first confirms the base branch ("ok" keeps the one you are on). You then answer one batch of
-questions (at most 8, each with a default) and approve once, on a sign-off screen that shows the
-approach, the alternatives considered, the trade-offs and the to-do list. After that you see one
-line per milestone, `[df <run-id>] <stage>: <event>`. One run executes per repo at a time; others wait until it finishes or pauses. `resume` works from a new session: all
-state is on disk.
-
-## What you get
-
-- **Routed work.** `bugfix`, `feature` or `build` is picked for you and changes how it plans.
-- **A branch** (`df/<run-id>`, or the name you give) in a separate git worktree, one commit per passing chunk.
-- **`report.md`:** functional changes first, then high-level technical changes, then what was
-  left (with severity), assumptions, and one plain line saying whether the branch is green. A bugfix that changed no source says **NOT FIXED**.
-- **Review before QA.** Four read-only review lenses per chunk (quality, over-engineering,
-  security, impact), then a whole-branch review that also checks the goal was met. Medium or
-  above blocks. Hidden QA scenarios run only once that review is clean.
-- **End-to-end check.** Each repo gets a profile beside the clone (`../.df-<repo>/profile.md`,
-  never committed) naming its e2e command and how to start the app. After QA the run checks
-  that nothing which passed before now fails. Without one, the report says "e2e: not
-  configured".
-- **Parallel builders, opt-in.** With `parallel=on`, chunks that touch disjoint files build at
-  the same time in their own sub-worktrees and are cherry-picked back in order. Off by default.
-- **It learns per repo.** After each run a retro writes facts about the repo that would have
-  saved an attempt (`../.df-<repo>/lessons.md`, at most 30 lines, fed to later runs) and
-  suggestions for the plugin itself (`proposals.md`, never applied for you). `metrics.tsv`
-  keeps one row per run (including how many agents it spawned and the tokens they reported) so you can
-  see whether attempts go down, and feeds the sign-off estimate.
-- **A run that cannot get clean pauses.** It tells you what is open and never reports a pass.
-- **Resume** after a crash, closed laptop or expired login, losing at most one attempt.
-- **A PR on request.** A run that came through QA and e2e asks "Push and open a PR?"; only "yes"
-  does it (needs `gh`, signed in). `sweep` offers to remove the worktree and local branch once
-  that PR is merged. It never merges, never force-pushes, and never deletes a remote branch.
+Try it without installing: clone this repo, then `claude --plugin-dir ./dark-factory`.
 
 ## How it works
 
 ```mermaid
 flowchart LR
-    A([Your request]) --> R[Route]
-    R --> F[Refine<br/>gap questions]
-    F --> P[Plan<br/>chunks + hidden QA scenarios]
-    P --> PF[Preflight<br/>deps, commands, baseline]
-    PF --> S{{Sign-off}}
-    S --> L[[Loop per chunk]]
-    L --> I[Review<br/>whole branch, until clean]
-    I --> QA[QA<br/>hidden scenarios]
-    QA -->|fails| I
-    QA --> E[E2E<br/>repo's own suite vs baseline]
-    E -->|new failure| I
-    E --> SH{{Push + PR?}}
-    SH --> O([Branch + report, PR on yes])
+    A([Your request]) --> Q[Questions<br/>only what the repo can't answer]
+    Q --> P[Plan + hidden checks<br/>written separately]
+    P --> S{{Sign-off<br/>you approve once}}
+    S --> B[[Build<br/>steps in parallel lanes]]
+    B --> C[One independent checker<br/>review + hidden checks]
+    C -->|problems| B
+    C --> PR[PR, merge,<br/>re-test after merge]
+    PR --> N([Plain final note])
 
     classDef you fill:#fde68a,stroke:#b45309,color:#000
-    class F,S,SH you
+    class Q,S you
 ```
 
-Yellow is where you are asked something. Everything after sign-off is unattended.
+Yellow is where you are asked something. Nothing is asked after sign-off, except when a
+command needs your permission or a budget cap is hit.
 
-Each chunk gets up to three attempts:
+- **Questions.** One refiner reads your request and the repo, and asks at most 8 questions.
+  After your answers it writes the spec.
+- **Plan and hidden checks.** A planner splits the work into steps; separately, a QA author
+  writes test scenarios the builder never sees, so the tests can't be shaped by the code.
+- **Build.** Steps that touch different files and don't depend on each other run side by side
+  (up to 3 lanes). Each lane has one builder that keeps its context across steps and fixes.
+  Each step must pass mechanical checks before it counts:
 
 ```mermaid
 flowchart TD
-    B[Builder<br/>one chunk] --> C[Integrity checks<br/>scope, existing tests untouched,<br/>no leaked scenarios]
-    C --> T[Tester<br/>tests must fail without the change]
-    T --> G{Gate}
-    G -->|clean| Q
-    subgraph Q [Review panel, parallel, read-only]
-        direction LR
-        Q1[Quality]
-        Q2[Ponytail<br/>over-engineering]
-        Q3[Security]
-        Q4[Impact]
-    end
-    G -->|medium+| N[One merged note,<br/>reset to base]
-    Q -->|medium+| N
-    Q -->|clean| D([Commit: chunk PASS])
-    N -->|attempts 1 to 2| B
-    N -->|attempt 3| X([BLOCKED])
+    B[Builder writes the test first,<br/>then the code] --> D[Scope check:<br/>only planned files, existing tests untouched]
+    D --> R[New tests must fail<br/>without the change]
+    R --> T[Suite, lint, typecheck]
+    T --> H{Risky step?<br/>auth, payments, secrets,<br/>deletes, migrations}
+    H -->|yes| SR[Security review]
+    H -->|no| G{Pass?}
+    SR --> G
+    G -->|yes| OK([Step done])
+    G -->|no, attempts 1-2| B
+    G -->|attempt 3| X([Stuck: re-plan once, else pause])
 ```
 
-- The planner and the QA author work from the spec independently, so the tests can't be shaped
-  by the implementation.
-- The orchestrator keeps nothing in memory. Run state lives in `../.df-<repo>/<run-id>/`.
-- A guard hook blocks `git push`, deletes outside the worktree and pipe-to-shell during a run.
-  A seat belt, not a sandbox.
+- **Checker.** One fresh agent reviews the whole change (goal met, correctness, impact on
+  existing code, security, over-engineering) and runs every hidden check. A serious finding
+  must come with evidence (a failing command, a failing check, or a line plus an input that
+  breaks it); one without evidence does not block. Findings go back to the builder that
+  wrote the code; at most 2 fix rounds, then it pauses.
+- **Ending.** It writes `report.md`, opens a PR, merges it once the PR's checks pass, then
+  tests again on the merged code.
 
-## Evidence
+## Ship modes
 
-Run on eight real codebases (nine issues) plus two specs built from scratch, across Python, JavaScript, Go and
-Rust (3k to 98k lines; bug, feature and build tracks), each graded by a hidden test the factory
-never saw. One run each; one task did not finish. Every failure
-and what changed because of it is in `docs/evaluation.md` and `docs/field-test.md`.
+Chosen on the sign-off screen, so the rest runs unattended.
 
-No guarantee of correct output, no sandbox, prompt injection mitigated and not solved, native
-Windows unsupported, each live scenario run once, token cost not measured.
+| You say | With GitHub (`origin` + `gh auth`) | Without GitHub |
+|---|---|---|
+| `approve` (default: merge) | Opens a PR, waits for its checks (up to 20 min), merges (squash if allowed), re-tests the merged code | Merges into your branch on this computer, then re-tests |
+| `approve, no merge` | Opens the PR and stops | Leaves the work on its branch |
+| `approve, local` | Merges on this computer only, never pushes | Same |
+
+It never force-pushes, never uses `--admin`, and never merges red: failing or slow checks
+leave the PR open and say why. A local merge happens only when your folder is clean and on
+the target branch (fast-forward only); otherwise the work stays on its branch with one line
+saying how to bring it in. If the re-test after merging fails, the note says so first and
+offers `revert` (opens a revert PR) or `undo` (moves a local merge back).
+
+## Budget cap
+
+The sign-off screen shows a rough estimate (`estimate: 7-14 min, ~6-8 agents`) and a cap
+(`cap: up to 12 agents and 21 min`), by default 1.5x the high end. Past either, the run pauses
+instead of spending more. Raise it with
+`scripts/df conf-set <state-dir>/run.conf max_agents <n>` (or `budget_seconds`, or
+`max_review_rounds`) and `resume`. Estimates start from default figures and use this repo's
+past runs once there are a few.
+
+## Status, resume, cleanup
+
+```
+/dark-factory:dark-factory status [run-id]    where a run is ("not running" if its session died)
+/dark-factory:dark-factory resume [run-id]    continue after a crash, closed laptop or expired login
+/dark-factory:dark-factory list | sweep | clean <run-id>
+```
+
+- Work happens in a separate copy beside your repo, `../<repo>-df-<run-id>`. Your own folder
+  is not touched, except by a local merge you approved.
+- Run state lives in `../.df-<repo>/<run-id>/`, never committed. One run executes per repo at
+  a time. `resume` works from a new session: everything is on disk.
+- After a merge that re-tests green, it removes the working copy and local branch by itself
+  and keeps the report in `../.df-<repo>/reports/<run-id>.md`. `sweep` offers the same cleanup
+  for runs whose PR merged later; `clean` removes a run's working copy and state but keeps
+  its branch.
+- After a run with a retry, a fix round or a pause, a short retro writes repo facts to
+  `../.df-<repo>/lessons.md` (used by later runs) and suggestions for the plugin (shown to
+  you, never applied).
+- A guard hook blocks `git push`, recursive deletes outside the run's copy, pipe-to-shell and
+  migrations against real databases while a run is live.
+
+## Results, honestly
+
+Same tasks, same evaluators, compared with asking plain Claude Code directly. Score is the
+evaluators' overall rating out of 10.
+
+| Task | Dark Factory | Plain Claude | Score |
+|---|---|---|---|
+| Bugfix (real library issue) | v0.2: 22 min, 32 agents, ~1M tokens | 3 min | 3/10 |
+| Feature (small app) | v0.2: 62 min, 76 agents, ~2.7M tokens | 4 min | 4/10 |
+| Newcomer (non-technical user, new tool) | v0.2: 47 min, 78 agents, ~2.4M tokens | 77 s | 4/10 |
+| All three | **v0.3: re-evaluation pending** | | |
+
+v0.2 got the right answer but cost far more than plain Claude for near-identical results.
+v0.3 is the response: one checker instead of review panels, mechanical checks instead of an
+agent per step, resumed builders, parallel lanes, and the full PR, merge and re-test cycle.
+Its numbers replace that row once measured. Earlier field runs: `docs/evaluation.md`,
+`docs/field-test.md`.
+
+No guarantee of correct output, no sandbox, prompt injection mitigated and not solved.
 
 ## Development
 
@@ -145,4 +158,4 @@ Windows unsupported, each live scenario run once, token cost not measured.
 bash tests/run.sh
 ```
 
-Design: `docs/design.md`. Product name is decided before this goes public.
+Design: `docs/design.md`.
