@@ -37,6 +37,11 @@ df_ spawn-log "$id" builder 7 7 spawn; df_ spawn-log "$id" builder 7 7 spawn
 assert_eq "5" "$(grep -c '' "$rd/spawns.tsv")" "spawn_log_dedupes: an identical row within 5 s is one spawn"
 assert_eq "checker	30	900	resume" "$(sed -n 3p "$rd/spawns.tsv" | cut -f1-4)" "spawn-log row is role, seconds, tokens, kind, epoch"
 assert_fail "spawn-log refuses an unknown kind" df_ spawn-log "$id" builder 1 1 rerun
+P=$(mktemp -d); printf 'builder\t2\t2\tspawn\tx[$(touch %s/pwn)]\n' "$P" >> "$rd/spawns.tsv"
+df_ spawn-log "$id" builder 2 2 spawn
+assert_fail "spawn_log_rejects_non_numeric_epoch: nothing is evaluated" test -e "$P/pwn"
+assert_eq "builder	2	2	spawn" "$(tail -1 "$rd/spawns.tsv" | cut -f1-4)" "spawn_log_rejects_non_numeric_epoch: the row is logged"
+sed -i.bak '/pwn/d' "$rd/spawns.tsv"; rm -f "$rd/spawns.tsv.bak"; sed -i.bak '$d' "$rd/spawns.tsv"; rm -f "$rd/spawns.tsv.bak"
 printf 'builder\t1\t1\n' >> "$rd/spawns.tsv"
 
 # metrics: two new columns; an old 8-column file keeps its rows

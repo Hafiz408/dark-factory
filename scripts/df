@@ -430,7 +430,7 @@ cmd_rundir_hash() { # df rundir-hash <run-id> <allowed-output-file>...: hash of 
 # router, tester, qa-functional: v0.2 roles, still accepted so an old run can log while it finishes.
 ROLES=" refiner planner qa-author builder checker reviewer retro router tester qa-functional "
 cmd_spawn_log() { # df spawn-log <run-id> <role> <seconds> <tokens> [spawn|resume]: one line per spawn or resume in spawns.tsv
-  local rd v k=${5:-spawn} now last
+  local rd v k=${5:-spawn} now last ts
   [ $# -eq 4 ] || [ $# -eq 5 ] || die "usage: df spawn-log <run-id> <role> <seconds> <tokens> [spawn|resume]"
   rd=$(run_dir "$1"); [ -f "$rd/run.conf" ] || die "no such run: $1"
   case "$ROLES" in *" $2 "*) ;; *) die "spawn-log: unknown role '$2'";; esac
@@ -439,7 +439,8 @@ cmd_spawn_log() { # df spawn-log <run-id> <role> <seconds> <tokens> [spawn|resum
   now=$(date +%s)
   # The same row logged twice within 5 s is one spawn logged twice (a retried tool call), not two spawns.
   last=$( [ ! -f "$rd/spawns.tsv" ] || tail -1 "$rd/spawns.tsv")
-  case "$last" in "$2	$3	$4	$k	"*) [ $((now - ${last##*	})) -gt 5 ] || return 0;; esac
+  ts=${last##*	} # spawns.tsv is writable by roles: the epoch is checked before any arithmetic touches it
+  case "$last:$ts" in "$2	$3	$4	$k	"*:*[!0-9]*|*:) ;; "$2	$3	$4	$k	"*) [ $((now - ts)) -gt 5 ] || return 0;; esac
   printf '%s\t%s\t%s\t%s\t%s\n' "$2" "$3" "$4" "$k" "$now" >> "$rd/spawns.tsv"
 }
 
