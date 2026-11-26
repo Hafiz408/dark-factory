@@ -25,6 +25,8 @@ If `{DF} fixed <id>` exits non-zero (a bugfix branch that changes no source), th
 
 Run it only when the run had a retry (an attempt above 1, an infra retry), a fix round
 (`review_round` above 1) or a pause. Otherwise skip to 3. Set `stage retro` unless pausing.
+The retro skips `{DF} budget` (a pause at a cap runs it), and it never pauses the run: when it
+fails, log it, skip lessons and go on.
 Take `{DF} state-hash` and `{DF} snapshot {WT}`; spawn `retro` with the run directory, the
 current `lessons.md` beside `{PROFILE}` and outputs `{RD}/retro.md`, `{RD}/lessons-new.md`,
 `{RD}/proposals-new.md`; take both hashes again. Changed: a `critical` integrity finding, skip
@@ -40,14 +42,18 @@ non-zero, is never offered a PR or a merge: go to 5. Mode = `ship_mode` (default
   `{DF} conf-set {RD}/run.conf ship_confirmed yes`; write the report's first three sections to
   `{RD}/pr-body.md`; `{DF} ship <id> "<goal, under 70 characters>" {RD}/pr-body.md` prints the
   PR URL (milestone line). A refusal: relay it, keep the branch, go to 5. `pr`: go to 5.
-  `merge`: `{DF} conf-set {RD}/run.conf stage merge`; `{DF} merge <id>` waits for the PR's
-  checks and merges. Exit 3 (checks failed or still running): set `stage ship` again, leave
-  the PR open, say why in plain words, go to 5.
+  `merge`: `{DF} conf-set {RD}/run.conf stage merge`; `{DF} merge <id>` waits up to 90 s for
+  the PR's checks and merges. Exit 4 (checks still running): run it again, up to 13 calls in
+  all (about 20 min); still 4: the checks did not finish. That, or exit 3 (checks failed, or
+  the host would not merge): set `stage ship` again, leave the PR open, say why in plain
+  words, go to 5.
 - `local`, or `merge` without `origin` or `gh`: log `git -C <main clone> rev-parse <target>`
   as the pre-merge sha; `{DF} conf-set {RD}/run.conf stage merge`; `{DF} local-merge <id>`.
   Exit 2: set `stage ship` again, relay its reason line, keep the branch, and give one plain line to bring it in
   later ("when your folder is clean and on `<target>`, run `git merge <branch>`"); go to 5.
 `{DF} ship`, `{DF} merge` and `{DF} local-merge` are the only ways anything is pushed or merged.
+They refuse (exit 1) when `ship_mode`, `ship_base` or `base_ref` changed since sign-off: relay
+it, keep the branch, go to 5.
 Never push by hand, never force, never `--admin`, never merge red.
 
 ## 4. Post-merge test (stage `postmerge`)
@@ -62,7 +68,7 @@ merge, offer: "Say `undo` and I will move `<target>` back" (then
 ## 5. Finish and clean up
 
 1. Collect for the note: agents = `spawn` rows in `{RD}/spawns.tsv` (resumes counted
-   separately), minutes = now minus `started` (in its own command), and the estimate line
+   separately), minutes = now minus `signoff_at` (in its own command), and the estimate line
    from `log.md`.
 2. `{DF} finish <id> <session-id>` (sets done, or `unresolved` for a bugfix that changes no
    source, and releases the lock). If it prints `NOT FIXED`, put that line on top of the report.

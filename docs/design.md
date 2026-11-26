@@ -26,7 +26,7 @@ the v0.3 response:
 | Separate tester agent | extra spawn per chunk | Builder writes tests first; `df redcheck` proves they fail without the change |
 | Fresh builder per chunk and per fix | lost context and cache | One builder per lane, resumed for later steps and fixes |
 | Branch review + QA + plan-coverage + adjudicate | most real findings came from branch review | One `checker`: whole-branch review and every hidden scenario, resumed for re-checks |
-| Findings without proof blocked | same issue medium on one try, low on the next | `df gate` downgrades medium+ findings without an `evidence:` line to low |
+| Findings without proof blocked | same issue medium on one try, low on the next | `df gate` downgrades medium+ findings without an `evidence:` line to low; df's own findings carry `evidence: df <check>` |
 | Opt-in `parallel=on` | rarely used | Automatic waves of up to 3 disjoint steps |
 | Ended at a branch, PR only on a yes at the end | user had to come back | Ship mode chosen at sign-off: merge (default), `pr`, `local`; re-test after merge |
 | 14 infra retries in 3 runs (roles not writing output) | eval logs | Roles run in the foreground only; prompts end with the exact output path; a missing file is retried, never filled in |
@@ -83,14 +83,15 @@ Per step, up to 3 attempts, all deterministic except the optional security revie
 2. `df check-diff`: files outside `scope` (high); existing tests changed without
    `touches_tests` (critical); empty diff. `df canary-scan`: a leaked scenario token (critical;
    scenarios regenerated, fresh builder).
-3. `df commit`, then `df redcheck`: new or changed tests must fail with the step's source
-   changes reverted and pass with them. A step with no testable behaviour declares `no_tests:`.
+3. `df commit` (which logs `commit <sha> <message>` to `log.md`; resume checks the branch
+   head against these lines), then `df redcheck`: new or changed tests must fail with the
+   step's source changes reverted and pass with them (exit 4: it could not run, infra). A step with no testable behaviour declares `no_tests:`.
 4. Suite, lint, typecheck from `env.commands`; a failure not in `baseline.md` is high.
 5. `risk: high` (auth, payments, secrets, data deletion, migrations, shell/SQL string
    building, new dependency): one read-only `reviewer` with `lenses/security.md`.
 6. `df gate`: medium or above blocks. Blocking: one failure note to the same builder (symptoms
    only), soft reset, next attempt. After attempt 3: hard reset, BLOCKED, one re-plan per run;
-   still blocked, its dependents are SKIPPED.
+   still blocked, every step depending on it, directly or not, is SKIPPED.
 
 ## 5. Check
 
@@ -101,8 +102,8 @@ Any BLOCKED or SKIPPED step pauses the run before the check. Otherwise, per roun
   over-engineering; then every executable hidden scenario. Every medium+ finding needs
   evidence: a failing command and output, a failing scenario id, or `file:line` plus an input
   that breaks it.
-- Meanwhile the orchestrator runs the full suite and the profile's `e2e_cmd` (starting and
-  stopping the app if needed). A test that passed at baseline and fails now is high. No
+- After the checker returns, the orchestrator runs the full suite and the profile's `e2e_cmd`
+  (starting and stopping the app if needed); the checker's own app uses `DF_PORT_BASE + 50`. A test that passed at baseline and fails now is high. No
   `e2e_cmd`: the report says `e2e: not configured`, never a pass.
 - Clean and green: ship. Otherwise each finding becomes a fix step `FX-<k>` owned by the step
   whose scope holds the file, run by that step's resumed builder. The checker is resumed to
@@ -119,9 +120,12 @@ Any BLOCKED or SKIPPED step pauses the run before the check. Otherwise, per roun
 2. **Retro** (haiku), only after a retry, a fix round or a pause: `lessons.md` for this repo
    (applied to later runs) and `proposals.md` for the plugin (listed, never applied).
 3. **Ship.** `merge`/`pr` with `origin` and `gh auth`: `df ship` pushes the run branch and opens
-   the PR. `merge`: `df merge` waits for PR checks (`gh pr checks --watch`, 20 min,
-   `DF_CHECKS_TIMEOUT`; no checks = proceed), then merges with the first allowed method of
-   squash, merge, rebase. Failing or pending checks: PR left open, reason given. `local`, or
+   the PR. `merge`: `df merge` waits for PR checks (`gh pr checks --watch`) at most
+   `DF_CHECKS_WAIT` (90 s) per call and exits 4 while they run; `ship.md` calls it up to 13
+   times (about 20 min). No checks counts as a pass only once it has lasted
+   `DF_NO_CHECKS_GRACE` (60 s) since the push. It merges with the first allowed method of
+   squash, merge, rebase, with `--match-head-commit` at the pushed sha. Failing or unfinished
+   checks: PR left open, reason given. `local`, or
    `merge` without GitHub: `df local-merge` fast-forwards the target in the main clone only
    when it is clean and on the base branch; otherwise the branch is kept with one line on how
    to merge it. `pr` without GitHub keeps the branch.
@@ -135,7 +139,9 @@ Any BLOCKED or SKIPPED step pauses the run before the check. Otherwise, per roun
    changed, how it was checked, where it is, post-merge result, time and agents vs estimate.
 
 `df ship`, `df merge`, `df local-merge` and `df revert-pr` are the only paths that push or
-merge. Never force, never `--admin`, never merge red.
+merge. `df profile-pin` (sign-off) records `ship_pin`, a hash of `ship_mode`, `ship_base` and
+`base_ref`; ship, merge and local-merge refuse when it no longer matches, and `df ship` never
+reuses a `pr_url` it did not open (one without `pushed_sha`). Never force, never `--admin`, never merge red.
 
 ## 7. Roles and models
 
@@ -153,7 +159,8 @@ Roles never spawn roles. Every role's last output line is
 `VERDICT: PASS | FAIL | NEEDS_DECISION | BLOCKED | TOO_BIG | SCENARIO_INVALID - <reason>`,
 checked by `df verdict`. A missing or invalid verdict, timeout or context overflow is an infra
 failure, retried up to 2 times and not counted as an attempt. Read-only roles are bracketed
-by `df snapshot` (status, diff, index and stash) and `df rundir-hash`; any change is a
+by `df snapshot` (status, diff, index and stash) and `df rundir-hash` (the inputs that steer
+later work: `scenarios/`, `chunks/`, spec, plan, `run.conf`, questions); any change is a
 critical integrity finding.
 
 Removed since v0.2: agents `router`, `tester`, `qa-functional`; lenses quality, ponytail,
@@ -164,7 +171,8 @@ impact, goal, plan-coverage, adjudicate (folded into `check.md`).
 `df estimate <id> <steps> <lanes>` prints a time and agent range (defaults until the repo has
 2+ finished runs in `metrics.tsv`, then medians per step) and sets the caps, unless already
 set: `max_agents` = 1.5x (high agent estimate), `budget_seconds` = 1.5x (high minutes).
-`df budget` runs before every spawn or resume and exits 3 when a cap is reached; only spawns
+`df budget` runs before every spawn or resume (not the retro's, which a pause runs) and exits 3
+when a cap is reached; time counts from sign-off (`signoff_at`, as do the metrics seconds); only spawns
 count toward `max_agents` (a resume keeps its agent). The run then pauses; the user raises the
 value with `df conf-set` and resumes. Other limits: 3 attempts per step, 3 interrupts per step,
 3 review rounds, 6 steps per builder, 3 amends, 3 lanes.

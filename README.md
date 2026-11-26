@@ -96,7 +96,7 @@ Chosen on the sign-off screen, so the rest runs unattended.
 
 | You say | With GitHub (`origin` + `gh auth`) | Without GitHub |
 |---|---|---|
-| `approve` (default: merge) | Opens a PR, waits for its checks (up to 20 min), merges (squash if allowed), re-tests the merged code | Merges into your branch on this computer, then re-tests |
+| `approve` (default: merge) | Opens a PR, waits for its checks (up to about 20 min), merges (squash if allowed), re-tests the merged code | Merges into your branch on this computer, then re-tests |
 | `approve, no merge` | Opens the PR and stops | Leaves the work on its branch |
 | `approve, local` | Merges on this computer only, never pushes | Same |
 
@@ -109,7 +109,8 @@ offers `revert` (opens a revert PR) or `undo` (moves a local merge back).
 ## Budget cap
 
 The sign-off screen shows a rough estimate (`estimate: 7-14 min, ~6-8 agents`) and a cap
-(`cap: up to 12 agents and 21 min`), by default 1.5x the high end. Past either, the run pauses
+(`cap: up to 12 agents and 21 min`), by default 1.5x the high end. Time counts from sign-off, not
+while you answer questions. Past either, the run pauses
 instead of spending more. Raise it with
 `scripts/df conf-set <state-dir>/run.conf max_agents <n>` (or `budget_seconds`, or
 `max_review_rounds`) and `resume`. Estimates start from default figures and use this repo's

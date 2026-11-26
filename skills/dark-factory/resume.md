@@ -11,8 +11,10 @@ diff since the step's `base_sha`) and store the new id.
 2. Pick a new session id; `{DF} lock <id> acquire <session-id>`. A refusal: the run is live in
    another session; stop (the user may pass `--force`, which releases the lock first).
 3. `{DF} validate <id>`. On failure show the message and stop. Never repair state silently.
-4. Confirm the worktree and branch exist and the branch head matches the last commit in
-   `log.md`. If not, offer to recreate from the last logged commit, or abort.
+4. Confirm the worktree and branch exist and the branch head is `root_base_sha` or a sha on a
+   `commit <sha> <message>` line of `log.md` (`{DF} commit` and `{DF} sub-join` write them; an
+   earlier one means an attempt was undone). If not, offer to reset to the last such commit,
+   or abort.
 5. Base drift: if the base moved since `root_base_sha`, log it and say so in the report; do not
    rebase. The base is the commit `base_ref` points to now; when
    `base_ref` is absent or `detached`, `HEAD` of the main clone; when it is not a branch name
@@ -23,7 +25,7 @@ diff since the step's `base_sha`) and store the new id.
    from the step that paused; if the counter still equals its cap, pause again and say so.
    Status `waiting_permission`: set `status active` once the user says it is allowed.
 7. An interrupted wave (a step file whose `sub_worktree` is not `null`): `{DF} sub-drop <id> NN`,
-   set it `pending`, `interrupts` +1; reset `{WT}` to the last commit in `log.md`.
+   set it `pending`, `interrupts` +1; reset `{WT}` to the last `commit` line in `log.md` (none: `root_base_sha`).
 8. By stage (a v0.2 run's stage maps as: `loop` is `build`; `integrate`, `review`, `qa` and
    `e2e` are `check`):
    - before `signoff`: re-ask only unanswered questions, then continue the stages.
@@ -31,9 +33,9 @@ diff since the step's `base_sha`) and store the new id.
      `git -C {WT} clean -fd`), `interrupts` +1 (3: BLOCKED), and rerun from attempt 1 of the
      remaining attempts. Then carry on with the lanes.
    - `check`: if the profile has `e2e_needs_app: yes`, run `stop_cmd` first (an app may still
-     run). Finish any fix step that is `running` or `pending`, then redo the current round:
-     when `review_round` is above 0, set it one lower with `{DF} conf-set`, so `{DF} bump`
-     brings it back (0 means the round never started). Ignore that round's partial outputs.
+     run). Finish any fix step that is `running` or `pending`, then redo the current round
+     `review_round` from its step 1, skipping `{DF} bump` (bump only starts a new round, so the
+     total is not counted twice; 0 means no round started: begin round 1 as usual). Ignore that round's partial outputs.
      A v0.2 run has no checker yet: round 1 spawns it.
    - `retro`: run the retro again from its start (`ship.md` section 2).
    - `ship`: never ask again. `pr_url` recorded or `ship_confirmed yes`: run `{DF} ship` again

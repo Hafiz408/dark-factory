@@ -225,4 +225,9 @@ grep -q "{DF} finish" "$SH" && f=$(grep -n "{DF} finish <id>" "$SH" | head -1 | 
 grep -q "never offered" "$SH" && ok "ship.md: a paused or not-fixed run is never shipped" || bad "ship.md: a paused or not-fixed run is never shipped"
 grep -q "{DF} sweep" "$S" && ok "SKILL.md: merged-PR sweep kept" || bad "SKILL.md: merged-PR sweep kept"
 
+grep -q "Exit 4 (checks still running): run it again, up to 13 calls" "$SH" && ok "ship.md: merge is called again while checks run" || bad "ship.md: merge is called again while checks run"
+grep -q "The retro skips \`{DF} budget\`" "$SH" && grep -q "except the retro's" "$S" && ok "the retro is exempt from the budget, so a cap pause cannot loop" || bad "the retro is exempt from the budget, so a cap pause cannot loop"
+grep -q "After the checker returns" "$S" && grep -q "DF_PORT_BASE + 50" "$S" && ok "SKILL.md: suite and e2e run after the checker, on another port" || bad "SKILL.md: suite and e2e run after the checker, on another port"
+grep -q "skipping \`{DF} bump\`" "$RS" && grep -q "commit <sha> <message>" "$RS" && ok "resume.md: no second bump; head checked against logged commits" || bad "resume.md: no second bump; head checked against logged commits"
+
 finish
