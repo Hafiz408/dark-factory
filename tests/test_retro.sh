@@ -28,7 +28,7 @@ printf -- '---\nid: FX-1\nstatus: PASS\nattempts: 1\nscope: [a]\n---\n' > "$rd/c
 "$DF" conf-set "$rd/run.conf" status paused
 bash -c "cd '$R' && '$DF' metrics '$id'"
 M="$SR/metrics.tsv"
-assert_eq "run	track	chunks	attempts	review_rounds	qa_rounds	seconds	outcome" "$(head -1 "$M")" "metrics.tsv has a header"
+assert_eq "run	track	chunks	attempts	review_rounds	qa_rounds	seconds	outcome	spawns	tokens" "$(head -1 "$M")" "metrics.tsv has a header"
 row=$(grep "^$id	" "$M")
 assert_contains "$id	feature	2	3	2	1	" "$row" "metrics row counts chunks, attempts and rounds"
 assert_contains "	paused" "$row" "metrics row records the outcome"

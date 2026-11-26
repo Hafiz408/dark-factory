@@ -410,8 +410,50 @@ cmd_state_hash() { # df state-hash: one hash over the shared per-repo files, to 
   done | sha
 }
 
+cmd_rundir_hash() { # df rundir-hash <run-id> <allowed-output-file>...: hash of the run dir except those files, lock and progress.md
+  local rd p a skip
+  rd=$(run_dir "${1:-}"); [ -f "$rd/run.conf" ] || die "no such run: ${1:-}"
+  [ $# -ge 2 ] || die "usage: df rundir-hash <run-id> <allowed-output-file>..."
+  shift
+  ( cd "$rd" && find . -type f | sed 's,^\./,,' | sort | while IFS= read -r p; do
+      skip=0
+      for a in lock progress.md "$@"; do [ "$p" != "${a#"$rd"/}" ] || skip=1; done
+      [ $skip = 1 ] || { printf '%s ' "$p"; sha < "$p"; }
+    done | sha )
+}
+
+ROLES=" router refiner planner qa-author builder tester qa-functional reviewer retro "
+cmd_spawn_log() { # df spawn-log <run-id> <role> <seconds> <tokens>: one line per role spawn in spawns.tsv
+  local rd v
+  [ $# -eq 4 ] || die "usage: df spawn-log <run-id> <role> <seconds> <tokens>"
+  rd=$(run_dir "$1"); [ -f "$rd/run.conf" ] || die "no such run: $1"
+  case "$ROLES" in *" $2 "*) ;; *) die "spawn-log: unknown role '$2'";; esac
+  for v in "$3" "$4"; do case "$v" in -) ;; ''|*[!0-9]*) die "spawn-log: seconds and tokens must be integers or -";; esac; done
+  printf '%s\t%s\t%s\n' "$2" "$3" "$4" >> "$rd/spawns.tsv"
+}
+
+cmd_estimate() { # df estimate <run-id> <chunks>: a rough time and agent range for the sign-off screen
+  local m
+  case "${2:-}" in ''|*[!0-9]*|0) die "usage: df estimate <run-id> <chunks> (chunks a positive integer)";; esac
+  m="$(state_root)/metrics.tsv"; [ -f "$m" ] || m=/dev/null
+  # ponytail: metrics.tsv has no per-stage times, so the default fixed overhead (12.5 min, 8 agents) is
+  # taken off each finished run and the rest is per chunk. Record stage times if this proves too coarse.
+  ID="$1" N="$2" awk -F'\t' '
+    function med(a, k,   i, j, t) { for (i = 2; i <= k; i++) for (j = i; j > 1 && a[j-1] > a[j]; j--) { t = a[j]; a[j] = a[j-1]; a[j-1] = t }
+      return k % 2 ? a[(k+1)/2] : (a[k/2] + a[k/2+1]) / 2 }
+    function r(x) { return int(x + 0.5) }
+    NR > 1 && $1 != ENVIRON["ID"] && ($8 == "done" || $8 == "unresolved") && $3 > 0 && $7 ~ /^[0-9]+$/ {
+      p[++k] = ($7 / 60 - 12.5) / $3; if (p[k] < 1) p[k] = 1
+      if ($9 ~ /^[0-9]+$/) { q[++s] = ($9 - 8) / $3; if (q[s] < 1) q[s] = 1 } }
+    END { n = ENVIRON["N"]
+      if (k >= 2) { pm = med(p, k); lo = 10 + n * pm * 0.8; hi = 15 + n * pm * 1.25; src = "based on " k " earlier runs in this repo" }
+      else { lo = 10 + n * 4 * 1.3 + 3 + 5; hi = 15 + n * 8 * 1.3 + 5 + 10; src = "default figures, no history yet" }
+      ag = (k >= 2 && s >= 2) ? 8 + n * med(q, s) : 8 + n * 6 * 1.3 + 5 + 3
+      printf "estimate: %d-%d min, ~%d agents (%s)\n", r(lo), r(hi), r(ag), src }' "$m"
+}
+
 cmd_metrics() { # df metrics <run-id>: one row per run in <state-root>/metrics.tsv, replaced on re-run
-  local rd c m f chunks=0 att=0 a row
+  local rd c m f chunks=0 att=0 a row sp tok
   rd=$(run_dir "$1"); c="$rd/run.conf"; m="$(state_root)/metrics.tsv"
   [ -f "$c" ] || die "no such run: $1"
   case "$(conf_get "$c" started)" in ''|*[!0-9]*) die "metrics: started in $c is not a number";; esac
@@ -419,9 +461,15 @@ cmd_metrics() { # df metrics <run-id>: one row per run in <state-root>/metrics.t
     [ -e "$f" ] || continue
     chunks=$((chunks + 1)); a=$(fm_get "$f" attempts); case "$a" in ''|*[!0-9]*) a=0;; esac; att=$((att + a))
   done
-  row=$(printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' "$1" "$(conf_get "$c" track)" "$chunks" "$att" \
-    "$(conf_get "$c" review_round)" "$(conf_get "$c" qa_round)" "$(( $(date +%s) - $(conf_get "$c" started) ))" "$(conf_get "$c" status)")
-  { printf 'run\ttrack\tchunks\tattempts\treview_rounds\tqa_rounds\tseconds\toutcome\n'
+  sp=0; tok=-
+  if [ -f "$rd/spawns.tsv" ]; then
+    sp=$(grep -c '' "$rd/spawns.tsv" || true)
+    tok=$(awk -F'\t' '$3 ~ /^[0-9]+$/ { t += $3; k = 1 } END { print k ? t : "-" }' "$rd/spawns.tsv")
+  fi
+  row=$(printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' "$1" "$(conf_get "$c" track)" "$chunks" "$att" \
+    "$(conf_get "$c" review_round)" "$(conf_get "$c" qa_round)" "$(( $(date +%s) - $(conf_get "$c" started) ))" "$(conf_get "$c" status)" "$sp" "$tok")
+  # Rows written before v0.2 have 8 columns; they are kept as they are under the new header.
+  { printf 'run\ttrack\tchunks\tattempts\treview_rounds\tqa_rounds\tseconds\toutcome\tspawns\ttokens\n'
     [ -f "$m" ] && tail -n +2 "$m" | grep -v "^$1	" || true
     printf '%s\n' "$row"; } | atomic "$m"
 }
@@ -723,11 +771,14 @@ case "$cmd" in
   pause) cmd_pause "$@";;
   unpause) cmd_unpause "$@";;
   state-hash) cmd_state_hash;;
+  rundir-hash) cmd_rundir_hash "$@";;
+  spawn-log) cmd_spawn_log "$@";;
+  estimate) cmd_estimate "$@";;
   run-dir) run_dir "$@";;
   conf-get) conf_get "$@";;
   conf-set) conf_set "$@";;
   fm-get) fm_get "$@";;
   fm-set) fm_set "$@";;
   write) atomic "$@";;
-  *) die "usage: df {start|validate|profile-pin|verdict|gate|lock|snapshot|check-diff|canary-scan|srchash|commit|scrub|status|list|clean|fixed|finish|ship|sweep|lessons-set|metrics|state-hash|pause|unpause|wave|sub-add|sub-join|sub-drop|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
+  *) die "usage: df {start|validate|profile-pin|verdict|gate|lock|snapshot|check-diff|canary-scan|srchash|commit|scrub|status|list|clean|fixed|finish|ship|sweep|lessons-set|metrics|state-hash|rundir-hash|spawn-log|estimate|pause|unpause|wave|sub-add|sub-join|sub-drop|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
 esac
