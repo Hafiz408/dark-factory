@@ -29,9 +29,14 @@ Then, inside your project (or an empty folder, to build something new):
 ```
 
 1. Say `ok` to the starting branch, then answer the questions (`ok` takes every default).
-2. Read the sign-off screen and say `approve`. Stay a moment: commands it will run may ask
-   for permission now, so nothing stalls later.
-3. Leave it. It prints one line per milestone, like `[df r261127-101500-123] step 2 of 4 done`.
+2. Read the sign-off screen and say `approve`. It shows an estimate such as
+   `estimate: 7-14 min, ~6-8 agents`: a rough range, not a promise, and a cap the run will not
+   exceed. Stay a moment: commands it will run may ask for permission now, so nothing stalls later.
+3. Leave it, usually for minutes, not hours. It prints one line per milestone, like
+   `[df r261127-101500-123] step 2 of 4 done`.
+4. It works in a sibling folder (`../<repo>-df-<run-id>`), so your own checkout is untouched
+   until the merge. At the end you get a plain note: what changed, how it was checked, and
+   where it is now (merged, or a PR link, or a branch).
 
 Try it without installing: clone this repo, then `claude --plugin-dir ./dark-factory`.
 

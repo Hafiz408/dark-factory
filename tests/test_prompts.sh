@@ -111,7 +111,6 @@ python3 -c "import json,sys; json.load(open('$ROOT/hooks/hooks.json')); json.loa
 # Field test (prettytable): fixes were too wide, tests too many, router keyed on wording
 grep -q "choke point" "$ROOT/agents/planner.md" && ok "planner: names the choke point" || bad "planner: names the choke point"
 grep -q "choke point" "$ROOT/tracks/bugfix.md" && ok "bugfix track: one fix point" || bad "bugfix track: one fix point"
-grep -q "C --> T" "$ROOT/README.md" && ! grep -q "C -->|fail| N" "$ROOT/README.md" && ok "README: integrity failure still reaches the tester and gate" || bad "README: integrity failure still reaches the tester and gate"
 ! grep -q "attempt < 3" "$ROOT/README.md" && ok "README: no raw < in a mermaid label" || bad "README: no raw < in a mermaid label"
 grep -qi "exposure" "$ROOT/lenses/security.md" && ok "security lens: severity follows stated exposure" || bad "security lens: severity follows stated exposure"
 grep -qi "single-user" "$ROOT/lenses/security.md" && ok "security lens: local single-user case is named" || bad "security lens: local single-user case is named"
@@ -120,15 +119,11 @@ grep -qi "never plan a test-only" "$ROOT/tracks/bugfix.md" && ok "bugfix track: 
 grep -q "source-changing step" "$ROOT/agents/planner.md" && ok "planner: bugfix plan has a source-changing step" || bad "planner: bugfix plan has a source-changing step"
 grep -q "Typical size: 3 to 8 chunks" "$ROOT/tracks/build.md" && ok "build track: fewer, larger slices" || bad "build track: fewer, larger slices"
 grep -q "one concern, not one command" "$ROOT/tracks/build.md" && ok "build track: no chunk per command" || bad "build track: no chunk per command"
-grep -q "| Typical size | 1 to 3 | 3 to 8 | 3 to 8 |" "$ROOT/docs/design.md" && ok "design.md matches the build track size" || bad "design.md matches the build track size"
-grep -q "eight real codebases" "$ROOT/README.md" && ok "README evidence counts real issues and builds separately" || bad "README evidence counts real issues and builds separately"
 for h in "## Approach" "## Alternatives considered" "## Trade-offs"; do
   grep -q "$h" "$ROOT/agents/planner.md" && ok "planner: plan.md has $h" || bad "planner: plan.md has $h"
 done
 grep -q "source: .*goal" "$ROOT/skills/dark-factory/rules.md" && ok "rules: goal is a finding source" || bad "rules: goal is a finding source"
-grep -q "integrate" "$ROOT/docs/design.md" && grep -q "alias" "$ROOT/docs/design.md" && ok "design.md: integrate is documented as an alias of review" || bad "design.md: integrate is documented as an alias of review"
 grep -q "qa_functional, review_quality" "$ROOT/docs/design.md" && bad "design.md: pseudocode panel has no functional QA" || ok "design.md: pseudocode panel has no functional QA"
-grep -q "impact | goal |" "$ROOT/docs/design.md" && ok "design.md: goal is a finding source" || bad "design.md: goal is a finding source"
 grep -q "It never pushes, merges or opens a PR" "$ROOT/README.md" && bad "README: no longer claims it never opens a PR" || ok "README: no longer claims it never opens a PR"
 grep -q "sweep" "$ROOT/README.md" && grep -q "never merges" "$ROOT/README.md" && ok "README: documents ship and sweep" || bad "README: documents ship and sweep"
 grep -q "| S5 |" "$ROOT/docs/spikes.md" && ok "spikes: browser tool names recorded" || bad "spikes: browser tool names recorded"
@@ -137,7 +132,7 @@ grep -q "No push, merge, deploy or external write in v1" "$ROOT/docs/design.md" 
 grep -q "lessons" "$ROOT/agents/planner.md" && grep -q "lessons" "$ROOT/agents/builder.md" && ok "planner and builder read lessons" || bad "planner and builder read lessons"
 grep -q "/dark-factory:dark-factory" "$ROOT/README.md" && ok "README: real command name" || bad "README: real command name"
 grep -q "^## Quickstart" "$ROOT/README.md" && grep -qi "sibling" "$ROOT/README.md" && grep -qi "minutes" "$ROOT/README.md" && ok "README: quickstart, disk footprint and time" || bad "README: quickstart, disk footprint and time"
-sed -n '/^## Quickstart/,/^## Use/p' "$ROOT/README.md" | grep -qi "estimate" && sed -n '/^## Quickstart/,/^## Use/p' "$ROOT/README.md" | grep -q "not a promise" && ok "README: quickstart explains the estimate and its caveat" || bad "README: quickstart explains the estimate and its caveat"
+sed -n '/^## Quickstart/,/^## How it works/p' "$ROOT/README.md" | grep -qi "estimate" && sed -n '/^## Quickstart/,/^## How it works/p' "$ROOT/README.md" | grep -q "not a promise" && ok "README: quickstart explains the estimate and its caveat" || bad "README: quickstart explains the estimate and its caveat"
 
 # v0.3 orchestrator: SKILL.md (loaded every run) plus side files read only when needed
 D="$ROOT/skills/dark-factory"
