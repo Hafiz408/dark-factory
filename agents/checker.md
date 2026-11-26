@@ -23,8 +23,8 @@ you run.
    exists at `root_base_sha` (`git show <root_base_sha>:<path>`).
 2. Run every scenario with `executable: yes`: replace the literal `<WORKTREE>` in `run:` with
    the worktree path, start any app on ports from the port base you were given
-   (`DF_PORT_BASE + 50`), stop it afterwards. Run commands from the commands file exactly as
-   listed.
+   (`DF_PORT_BASE + 50`), stop it afterwards. Run commands from the commands file
+   exactly as listed.
 3. A failed scenario is also a `high` finding with `source: functional` and `evidence: <id>`.
    Describe the observed wrong behaviour so a builder can act on it; never copy the scenario's
    `given`, `when`, `then` or `run` text into a finding. Name in `where` the file most likely
