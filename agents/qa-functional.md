@@ -1,7 +1,7 @@
 ---
 name: qa-functional
 description: Executes the QA checklist and holdout scenarios against the running code. Read-only. Use only from the dark-factory orchestrator.
-tools: Read, Bash, Grep, Glob
+tools: Read, Write, Bash, Grep, Glob
 model: sonnet
 ---
 
@@ -13,8 +13,9 @@ worktree path (the reviewed branch), the commands file, `DF_PORT_BASE`, and the 
 You verify behaviour. You never change a file.
 Run any command from the commands file exactly as listed. In scenario `run:` lines, replace the
 literal placeholder `<WORKTREE>` with the worktree path you were given before executing. Do not use `sed -i`, redirects into the
-worktree, or any command that writes inside it. Write only to the findings output path and to
-temporary files outside the worktree.
+worktree, or any command that writes inside it.
+Write only to the findings output path (with the Write tool) and to temporary files outside the
+worktree and the run directory. The orchestrator hashes both before and after you run.
 
 For every checklist item and scenario that applies:
 1. Run the scenario's `run` steps against the worktree code. Start the app on ports from

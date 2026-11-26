@@ -119,7 +119,7 @@ for attempt in 1..MAX_ATTEMPTS (3):
     tester(chunk)                       -> findings
         a failing test is re-run once; green on re-run = flaky, finding low, listed
         any finding >= medium -> failure note, reset, continue
-    assert worktree unchanged by read-only roles (section 9)
+    assert worktree and run dir unchanged by read-only roles, except their own output files (section 9)
     parallel( review_quality, review_ponytail, review_security, review_impact )
         any finding >= medium -> one merged failure note (symptoms only), reset, continue
     commit "df(chunk NN): title"; status = PASS; break
@@ -270,7 +270,17 @@ and infra failures, and writes `retro.md`:
 - **Plugin proposals:** changes to prompts, lenses or rubrics the evidence supports. Never
   applied. Appended once per run to `proposals.md` and listed in the final message.
 - **Metrics:** `df metrics` writes one row per run to `metrics.tsv` (track, chunks, attempts,
-  review rounds, QA rounds, seconds, outcome), so "is it improving?" has numbers.
+  review rounds, QA rounds, seconds, outcome, spawns, tokens), so "is it improving?" has numbers.
+  Spawns and tokens come from `spawns.tsv`, one line per role spawn written by `df spawn-log`
+  (tokens and seconds from the Agent result's usage, `-` when unknown). Rows from before these two
+  columns keep their 8 columns under the new header.
+- **Estimate:** `df estimate <run-id> <chunks>` gives the sign-off screen one line,
+  `estimate: <lo>-<hi> min, ~<n> agents`. With at least 2 finished runs (`done` or `unresolved`) in
+  `metrics.tsv` it takes 12.5 min and 8 agents of fixed overhead off each run, scales the median
+  per-chunk remainder by the chunk count (minutes x0.8 to x1.25) and adds the overhead back
+  (10-15 min). Otherwise it uses defaults: overhead 10-15 min and 8 agents; per chunk 4-8 min and
+  6 agents plus 30%; one review round 3-5 min and 5 agents; QA, e2e and retro 5-10 min and 3 agents.
+  The screen says it is a rough range, not a promise, blind to retries and to remaining plan usage.
 
 All three files live in the state root beside the clone, with `profile.md`.
 
@@ -400,8 +410,9 @@ Scenario: `chunks`, `given`, `when`, `then`, `run`, `executable: yes|no`, canary
 
 Orchestrator-enforced integrity checks (not left to agent instructions):
 - Read-only roles: record `git status --porcelain` and a hash of `git diff` before and
-  after. Any change is a critical finding and is reverted. This closes the gap that Bash
-  stays available to reviewers.
+  after (`df snapshot`), and a hash of every file in the run directory except the roles' own
+  output files, `lock` and `progress.md` (`df rundir-hash`). Any change is a critical finding and
+  is reverted. This closes the gap that Bash and Write stay available to reviewers.
 - Test integrity: pre-existing test files modified or deleted vs `base_sha` and not in
   `touches_tests` is critical.
 - Scope: files changed outside `scope[]` is high.
@@ -451,8 +462,9 @@ README.md
 ```
 
 Models: router haiku; refiner, planner, qa-author opus; builder, tester, qa-functional,
-reviewer sonnet. Tools: qa-functional and reviewer have no Edit or Write (Bash remains, see
-section 9). Refiner, planner and qa-author write only to the state directory, by
+reviewer sonnet. Tools: qa-functional and reviewer have Write, to write their own findings file, and no
+Edit. They already have Bash, so Write adds no capability; what keeps them read-only is the
+snapshot and run-dir hash in section 9, not the tool list. Refiner, planner and qa-author write only to the state directory, by
 instruction and checked by the integrity diff.
 
 ## 12. Verification plan
