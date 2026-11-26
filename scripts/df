@@ -276,10 +276,15 @@ cmd_snapshot() { # df snapshot <worktree>: hash of everything a read-only role m
     } | sha )
 }
 
+changed_files() { # changed_files <worktree> <base_sha>: every file changed since base, committed or not, minus tool artefacts
+  ( cd "$1" && { git -c core.quotePath=false diff --no-renames --name-only "$2"; git -c core.quotePath=false ls-files -o --exclude-standard; } |
+    grep -Ev "$ARTEFACT_RE" | sort -u ) || true
+}
+
 cmd_check_diff() { # df check-diff <worktree> <base_sha> <chunk.md>: findings on stdout
   set -f
   local wt=$1 base=$2 ch=$3 files scope allow p g hit st rest ok a
-  files=$( cd "$wt" && { git -c core.quotePath=false diff --no-renames --name-only "$base"; git -c core.quotePath=false ls-files -o --exclude-standard; } | grep -Ev "$ARTEFACT_RE" | sort -u || true )
+  files=$(changed_files "$wt" "$base")
   if [ -z "$files" ]; then finding medium integrity "-" "empty diff for chunk"; return 0; fi
   scope=$(fm_get "$ch" scope | tr -d '[]' | tr ',' ' ')
   allow=$(fm_get "$ch" touches_tests | tr -d '[]' | tr ',' ' ')
@@ -310,12 +315,31 @@ EOF
 }
 
 cmd_srchash() { # df srchash <worktree> <base_sha>: hash of every non-test, non-artefact file changed since base
-  ( cd "$1" && {
-      git -c core.quotePath=false diff --no-renames --name-only "$2"
-      git -c core.quotePath=false ls-files -o --exclude-standard
-    } | sort -u | grep -Ev "$ARTEFACT_RE" | grep -Ev "$TEST_RE" | while IFS= read -r p; do
+  changed_files "$1" "$2" | { grep -Ev "$TEST_RE" || true; } | ( cd "$1" && while IFS= read -r p; do
       if [ -f "$p" ]; then printf '%s ' "$p"; sha < "$p"; else printf '%s deleted\n' "$p"; fi
     done | sha )
+}
+
+cmd_redcheck() { # df redcheck <worktree> <base_sha> <test-command>: 0 when the changed tests fail without the other changes
+  local wt=${1:-} base=${2:-} tests p
+  [ $# -eq 3 ] || die "usage: df redcheck <worktree> <base_sha> <test-command>"
+  git -C "$wt" rev-parse -q --verify "$base^{commit}" >/dev/null || die "redcheck: base $base not found"
+  tests=$(changed_files "$wt" "$base" | { grep -E "$TEST_RE" || true; })
+  [ -n "$(printf '%s\n' "$tests" | while IFS= read -r p; do [ ! -f "$wt/$p" ] || echo "$p"; done)" ] || { echo "redcheck: no tests changed"; return 2; }
+  RC_TMP=$(mktemp -d); RC_WT=$wt
+  trap 'git -C "$RC_WT" worktree remove --force "$RC_TMP/w" >/dev/null 2>&1; rm -rf "$RC_TMP"; git -C "$RC_WT" worktree prune' EXIT
+  git -C "$wt" worktree add -q --detach "$RC_TMP/w" "$base" || die "redcheck: could not create a temporary checkout"
+  # ponytail: base plus the changed test files is HEAD with every changed non-test file restored to base
+  # (and ones added since base gone). A file changed and then changed back since base is not seen.
+  printf '%s\n' "$tests" | while IFS= read -r p; do
+    if [ -f "$wt/$p" ]; then mkdir -p "$(dirname "$RC_TMP/w/$p")"; cp "$wt/$p" "$RC_TMP/w/$p"; else rm -f "$RC_TMP/w/$p"; fi
+  done
+  # Ignored top-level entries (node_modules, .venv, .env) are linked in, so tests fail for the change, not a missing install.
+  ( cd "$wt" && git ls-files -o -i --exclude-standard --directory ) | sed 's,/$,,' | grep -v / | while IFS= read -r p; do
+    [ -e "$RC_TMP/w/$p" ] || ln -s "$wt/$p" "$RC_TMP/w/$p"
+  done
+  if ( cd "$RC_TMP/w" && bash -c "$3" ) 1>&2; then echo "redcheck: new tests pass without the change"; return 1; fi
+  echo "redcheck: ok, new tests fail without the change"
 }
 
 cmd_commit() { # df commit <worktree> <message>: stage everything except tool artefacts, then commit
@@ -777,6 +801,7 @@ case "$cmd" in
   check-diff) cmd_check_diff "$@";;
   canary-scan) cmd_canary_scan "$@";;
   srchash) cmd_srchash "$@";;
+  redcheck) cmd_redcheck "$@";;
   commit) cmd_commit "$@";;
   scrub) cmd_scrub "$@";;
   status) cmd_status "$@";;
@@ -805,5 +830,5 @@ case "$cmd" in
   fm-get) fm_get "$@";;
   fm-set) fm_set "$@";;
   write) atomic "$@";;
-  *) die "usage: df {start|validate|profile-pin|verdict|gate|lock|snapshot|check-diff|canary-scan|srchash|commit|scrub|status|list|clean|fixed|finish|ship|sweep|lessons-set|metrics|state-hash|rundir-hash|spawn-log|bump|estimate|pause|unpause|wave|sub-add|sub-join|sub-drop|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
+  *) die "usage: df {start|validate|profile-pin|verdict|gate|lock|snapshot|check-diff|canary-scan|srchash|redcheck|commit|scrub|status|list|clean|fixed|finish|ship|sweep|lessons-set|metrics|state-hash|rundir-hash|spawn-log|bump|estimate|pause|unpause|wave|sub-add|sub-join|sub-drop|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
 esac
