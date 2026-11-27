@@ -38,11 +38,14 @@ echo "$input" | grep -Eq 'git[ ]+([^|;&"]*[ ])?push([ "]|\\|$)' && deny "git pus
 # recursive or forced rm: relative paths are fine; absolute paths must be inside an active worktree
 set -f
 while IFS= read -r seg; do
+  # Without -r/-R only single files can go; temporary ones are fine (checks create and delete them).
+  rec=0; for t in ${seg#rm}; do case "$t" in --recursive|-[!-]*[rR]*|-[rR]*) rec=1;; esac; done
   for t in ${seg#rm}; do
     case "$t" in -*) continue;; esac
     case "$t" in
       /*) ok=0
           case "$t" in */..|*/../*) deny "recursive delete outside the worktree";; esac
+          [ "$rec" = 1 ] || case "$t" in /tmp/?*|/private/tmp/?*|/var/folders/?*|/private/var/folders/?*) ok=1;; esac
           for w in $worktrees; do
             case "$t" in "$w"|"$w"/*) ok=1;; esac
             # a chunk's sub-worktree is <worktree>-c<NN> or <worktree>-cFX-<n>, nothing else
