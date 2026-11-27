@@ -34,7 +34,8 @@ not a repo lesson. Otherwise skip to 3. Set `stage retro` unless pausing.
 hashes; the retro ignores exit 3, since a pause at a cap runs it, and it never pauses the
 run: when it fails, log it, skip lessons and go on). Spawn `retro` with the run directory, the
 current `lessons.md` beside `{PROFILE}` and outputs `{RD}/retro.md`, `{RD}/lessons-new.md`,
-`{RD}/proposals-new.md`; then `{DF} post <id> retro - <tokens> spawn retro.md "<line>"`. Exit
+`{RD}/proposals-new.md`; then `{DF} post <id> retro - <tokens> spawn retro.md "<line>" <digest>`
+(the `ro:` digest pre printed). Exit
 10: a `critical` integrity finding, skip lessons. Else `{DF} lessons-set <id>` (relay a refusal
 in one line). Repo lessons apply to later runs automatically; plugin proposals are
 never applied, only listed in the report. A pausing run stops here (back to Pausing in SKILL.md).
@@ -50,7 +51,8 @@ merged result, runs `{DF} finish`, appends `## Time and agents` (the metrics lin
 estimate) to the report, and after a verified merge removes the working copy and local
 branch and archives the run to `reports/<id>/`. `branch`: nothing is pushed or merged. It
 prints one `land:` line, the metrics line and the report path. Exit codes:
-- 0: done (merged and verified, PR open, or on its branch). 8: NOT FIXED (a bugfix branch that
+- 0: done (merged and verified, PR open, or on its branch; a `tidy-up refused` note: fix what
+  it says, then `{DF} land` again, which completes the tidy-up). 8: NOT FIXED (a bugfix branch that
   changes no source; nothing shipped): put that line on top of the report.
 - 4: the checks are still running: run the same `{DF} land` again (df bounds each call and the
   whole wait).
@@ -58,6 +60,10 @@ prints one `land:` line, the metrics line and the report path. Exit codes:
   `{DF} land` again.
 - 2 (PR not opened), 3 (PR not merged: red checks, refused, or no result in time), 5 (local
   merge refused): the run is finished and kept on its branch; relay the line in plain words.
+- 9: refused: a step is not PASS or the branch changed after the final check passed. Nothing
+  was pushed; go back to Check (SKILL.md) for a new round, then land again.
+- 11: merged, but the merged result could not be re-tested: run `{DF} land` again; a second
+  11 has finished the run: say it merged but was not re-tested (never "not merged").
 - 6: the tests failed after the merge; the working copy is kept. Say so first in the final
   note. After a PR merge offer: "Say `revert` and I will open a PR that undoes it" (then
   `{DF} revert-pr <id>`, which never pushes to the target). After a local merge offer: "Say

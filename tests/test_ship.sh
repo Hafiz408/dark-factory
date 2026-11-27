@@ -42,7 +42,8 @@ SC="$T/.df-clone"
 echo in > "$T/in.txt"; echo body > "$T/body.md"
 df() { ( cd "$C" && "$DF" "$@" ); }
 # sign-off pins the ship settings; tests that set them by hand pin just before shipping or merging
-pin() { ( cd "$C" && "$DF" profile-pin "$1" >/dev/null 2>&1 ); }
+pin() { ( cd "$C" && "$DF" profile-pin "$1" >/dev/null 2>&1; [ -f "$SC/$1/run.conf" ] &&
+  "$DF" conf-set "$SC/$1/run.conf" check_pass_sha "$(git -C "$("$DF" conf-get "$SC/$1/run.conf" worktree)" rev-parse HEAD 2>/dev/null)" 2>/dev/null ) || true; }
 df() { case $1 in ship|merge|local-merge) pin "$2";; esac; ( cd "$C" && "$DF" "$@" ); }
 newrun() { # prints a run id at stage ship with one commit on its branch
   local id wt
@@ -439,7 +440,7 @@ assert_eq "$MS2" "$(git -C "$ORIGIN" rev-parse refs/heads/main)" "main on origin
 L=$(mkrepo); git -C "$L" branch -M main; SL="$(dirname "$L")/.df-$(basename "$L")"
 lrun() { local id wt; id=$(cd "$L" && "$DF" start "$T/in.txt"); wt=$(cd "$L" && "$DF" conf-get "$SL/$id/run.conf" worktree)
   echo "$id$1" > "$wt/l.txt"; git -C "$wt" add l.txt; git -C "$wt" commit -qm l; echo "$id"; }
-lm() { local rc=0; ( cd "$L" && "$DF" profile-pin "$1" >/dev/null && "$DF" local-merge "$1" ) >"$T/lo" 2>&1 || rc=$?; echo "$rc"; }
+lm() { local rc=0; ( cd "$L" && "$DF" profile-pin "$1" >/dev/null && "$DF" conf-set "$SL/$1/run.conf" check_pass_sha "$(git -C "$("$DF" conf-get "$SL/$1/run.conf" worktree)" rev-parse HEAD)" && "$DF" local-merge "$1" ) >"$T/lo" 2>&1 || rc=$?; echo "$rc"; }
 LA=$(lrun a); LB=$(lrun b); h=$(git -C "$L" rev-parse main)
 echo x > "$L/u.txt"
 assert_eq "2:your folder has unsaved changes" "$(lm "$LA"):$(cat "$T/lo")" "local_merge_refuses_dirty"

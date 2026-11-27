@@ -159,8 +159,13 @@ gate, the failing items):
    (applied to later runs) and `proposals.md` for the plugin (listed, never applied).
 Steps 3 to 5 are one re-entrant `df land <id> <session> "<title>"` call: it stops with one
 plain line and a distinct exit code (2 PR not opened, 3 PR not merged, 4 call again, 5 local
-merge refused, 6 red after the merge, 7 run the full app tests, 8 NOT FIXED); every stop but
-4 and 7 has finished the run and written the metrics into the report. Each call waits at most
+merge refused, 6 red after the merge, 7 run the full app tests, 8 NOT FIXED, 9 refused: a step
+is not PASS or the head is not the one the final check passed, 11 merged but not re-tested);
+every stop but 4, 7, 9 and a first 11 has finished the run and written the metrics into the
+report once. Run again after it finished, it completes a tidy-up that was refused. `df ship`
+and `df local-merge` refuse the same unchecked work when called alone. The pass is recorded
+(`check_pass_sha`) only by `df check-end`, or by `df check-gate` after the full app tests or a
+judged command. Each call waits at most
 `DF_LAND_WAIT` (300 s) for checks; the whole merge wait is bounded by `DF_MERGE_TIMEOUT`
 (20 min), kept in `run.conf` across calls.
 
@@ -209,9 +214,15 @@ Roles never spawn roles. Every role's last output line is
 checked by `df verdict`. A missing or invalid verdict, timeout or context overflow is an infra
 failure, retried up to 2 times and not counted as an attempt. Read-only roles are bracketed
 by hashes `df pre` stores and `df post`/`check-end` compare: `df snapshot` of the role's
-worktree (status, diff, index and stash), `df state-hash` and `df rundir-hash` (the inputs that steer
+worktree (status, diff, index and stash, with its HEAD), `df state-hash` and `df rundir-hash` (the inputs that steer
 later work: `scenarios/`, `chunks/`, spec, plan, `run.conf`, questions); any change is a
-critical integrity finding.
+critical integrity finding. The hashes fail closed (none stored, or no digest, is a
+violation) and are tamper-evident: `pre`/`check-start` print a digest of them that only the
+orchestrator holds and hands back. A worktree change is undone (reset to the recorded HEAD and
+clean, only in the run worktree or a step's own sub-worktree, only when it was clean); a
+change to run or shared files leaves a marker that refuses the next `pre`/`check-start` until
+the user resumes. Step worktrees are only the run's or `<worktree>-c<id>`; step ids must be
+their file names.
 
 Removed since v0.2: agents `router`, `tester`, `qa-functional`; lenses quality, ponytail,
 impact, goal, plan-coverage, adjudicate (folded into `check.md`).

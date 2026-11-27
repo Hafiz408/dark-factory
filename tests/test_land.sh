@@ -10,8 +10,8 @@ case "$1 $2" in
   "auth status") exit 0;;
   "pr create") [ "${GH_CREATE_RC:-0}" -eq 0 ] || exit 1; echo "https://example.test/pr/$$";;
   "pr checks") [ -z "${GH_CHECKS_SLEEP:-}" ] || exec sleep "$GH_CHECKS_SLEEP"; echo "${GH_CHECKS_OUT:-all checks passed}"; exit "${GH_CHECKS_RC:-0}";;
-  "pr merge") exit 0;;
-  "pr view") case "$*" in *mergeCommit*) echo "";; *"state,headRefOid"*) echo "MERGED none";; *) echo OPEN;; esac; exit 0;;
+  "pr merge") [ -z "${GH_BREAK_ORIGIN:-}" ] || mv "$GH_BREAK_ORIGIN" "$GH_BREAK_ORIGIN.gone"; exit 0;;
+  "pr view") case "$*" in *mergeCommit*) echo "${GH_MERGE_SHA:-}";; *"state,headRefOid"*) echo "MERGED none";; *) echo OPEN;; esac; exit 0;;
 esac
 GH
 chmod +x "$T/bin/gh"; export GH_LOG="$T/gh.log" PATH="$T/bin:$PATH"
@@ -24,8 +24,9 @@ newrun() { # newrun <repo> <ship word>: a run at stage check, signed off, with o
   local id wt rd
   id=$(df "$1" start "$T/in.txt"); rd=$(df "$1" run-dir "$id"); wt=$(df "$1" conf-get "$rd/run.conf" worktree)
   echo change > "$wt/c.txt"; git -C "$wt" add c.txt; git -C "$wt" commit -qm c
-  echo 'test -z "$DF_RED"' > "$rd/env.commands"; df "$1" conf-set "$rd/run.conf" base_ref main
+  echo 'test -z "$DF_RED" && { [ -z "$DF_STRAY" ] || touch stray.txt; }' > "$rd/env.commands"; df "$1" conf-set "$rd/run.conf" base_ref main
   df "$1" signoff "$id" $2 >/dev/null; df "$1" conf-set "$rd/run.conf" stage check
+  df "$1" conf-set "$rd/run.conf" check_pass_sha "$(git -C "$wt" rev-parse HEAD)"
   printf '# Report\n## What changed\n- c\n## Technical changes\n- c.txt\n' > "$rd/report.md"
   echo "$id"
 }
@@ -104,10 +105,50 @@ assert_ok "land_pr_refused: branch kept" git -C "$C" show-ref --verify -q "refs/
 # NOT FIXED: a bugfix branch that changes only tests ships nothing
 X=$(newrun "$C" merge); XC="$SC/$X/run.conf"; XW=$(df "$C" conf-get "$XC" worktree); XB=$(df "$C" conf-get "$XC" branch)
 git -C "$XW" reset -q --hard HEAD~1; mkdir -p "$XW/tests"; echo t > "$XW/tests/test_x.sh"; git -C "$XW" add tests; git -C "$XW" commit -qm t
-df "$C" conf-set "$XC" track bugfix
+df "$C" conf-set "$XC" track bugfix; df "$C" conf-set "$XC" check_pass_sha "$(git -C "$XW" rev-parse HEAD)"
 assert_eq "8" "$(land "$C" "$DF" land "$X" s1 "Fix x")" "land_not_fixed: exit 8"
 assert_eq "unresolved" "$(df "$C" conf-get "$XC" status)" "land_not_fixed: unresolved"
 assert_fail "land_not_fixed: nothing pushed" git -C "$ORIGIN" rev-parse -q --verify "refs/heads/$XB"
+
+# land ships only what the final check passed
+U=$(newrun "$C" merge); UC="$SC/$U/run.conf"; UW=$(df "$C" conf-get "$UC" worktree); UB=$(df "$C" conf-get "$UC" branch)
+echo later > "$UW/later.txt"; git -C "$UW" add later.txt; git -C "$UW" commit -qm "unchecked"
+assert_eq "9" "$(land "$C" "$DF" land "$U" s1 "Add c")" "land_refuses_unchecked_head: exit 9"
+assert_contains "changed since the final check" "$(cat "$T/out")" "land_refuses_unchecked_head: plain line"
+assert_fail "land_refuses_unchecked_head: nothing pushed" git -C "$ORIGIN" rev-parse -q --verify "refs/heads/$UB"
+assert_eq "active" "$(df "$C" conf-get "$UC" status)" "land_refuses_unchecked_head: run not finished"
+df "$C" conf-set "$UC" check_pass_sha "$(git -C "$UW" rev-parse HEAD)"; df "$C" conf-set "$UC" stage build
+assert_eq "9" "$(land "$C" "$DF" land "$U" s1 "Add c")" "land_refuses_stage_build"
+df "$C" conf-set "$UC" stage check; printf -- '---
+id: 02
+status: running
+attempts: 1
+scope: [x/**]
+---
+' > "$SC/$U/chunks/02.md"
+assert_eq "9" "$(land "$C" "$DF" land "$U" s1 "Add c")" "land_refuses_running_step"
+rm "$SC/$U/chunks/02.md"; df "$C" conf-set "$UC" check_pass_sha ""
+assert_eq "1" "$(land "$C" "$DF" ship "$U" t "$SC/$U/report.md")" "ship_refuses_unchecked: df ship alone"
+assert_fail "ship_refuses_unchecked: nothing pushed" git -C "$ORIGIN" rev-parse -q --verify "refs/heads/$UB"
+df "$C" lock "$U" release
+
+# a tidy-up that was refused is completed by running land again
+V=$(newrun "$C" merge); VW=$(df "$C" conf-get "$SC/$V/run.conf" worktree)
+assert_eq "0" "$(land "$C" DF_STRAY=1 "$DF" land "$V" s1 "Add c")" "land merges, but the tidy-up is refused"
+assert_contains "tidy-up refused" "$(cat "$T/out")" "land says the tidy-up was refused"
+rm -f "$VW/stray.txt"
+assert_eq "0" "$(land "$C" "$DF" land "$V" s1 "Add c")" "land_rerun_after_finish: exit 0"
+assert_fail "land_rerun_after_finish: tidy-up completed" test -d "$SC/$V"
+assert_eq "1" "$(grep -c '^## Time and agents' "$SC/reports/$V/report.md")" "land_rerun_after_finish: metrics written once"
+
+# merged, but the merged result could not be fetched: merged is never reported as not merged
+W=$(newrun "$C" merge)
+assert_eq "11" "$(land "$C" GH_BREAK_ORIGIN="$ORIGIN" "$DF" land "$W" s1 "Add c")" "land_merged_unverified: exit 11"
+mv "$ORIGIN.gone" "$ORIGIN"
+assert_contains "merged" "$(cat "$T/out")" "land_merged_unverified: says merged"
+case $(cat "$T/out") in *"not merged"*) bad "land_merged_unverified: never says not merged";; *) ok "land_merged_unverified: never says not merged";; esac
+assert_eq "active:yes" "$(df "$C" conf-get "$SC/$W/run.conf" status):$(df "$C" conf-get "$SC/$W/run.conf" merged)" "land_merged_unverified: recorded as merged, not finished"
+assert_eq "0" "$(land "$C" GH_MERGE_SHA="$(git -C "$ORIGIN" rev-parse main)" "$DF" land "$W" s1 "Add c")" "land_merged_unverified: a second call verifies it"
 
 # usage and refusals
 assert_eq "1" "$(land "$C" "$DF" land "$B" s1)" "land needs a title"

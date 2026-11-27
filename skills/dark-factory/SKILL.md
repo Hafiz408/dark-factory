@@ -33,18 +33,19 @@ holds the command for approval, which stalls an unattended run.
 - Before every spawn or resume that `step-start` or `check-start` does not cover:
   `{DF} pre <id> <session-id>` (budget check, lock refresh, spawn clock; exit 3: a cap is
   reached, pause, see Pausing). Read-only roles (reviewer, retro) add `--wt <their worktree>`
-  when it is not `{WT}`, then their output files, and df stores read-only hashes:
-  `{DF} pre <id> <session-id> retro.md lessons-new.md proposals-new.md`. Only the retro
-  ignores exit 3 (a pause at a cap runs it, so it must not loop).
+  when it is not `{WT}`, then their output files; df stores read-only hashes and prints
+  `ro: <digest>`, which you pass back: `{DF} pre <id> <session-id> retro.md lessons-new.md
+  proposals-new.md`. Only the retro ignores exit 3 (a pause at a cap runs it). Exit 10: a
+  read-only violation is still open: pause.
 - **Resume, not respawn.** Continue a builder, the checker, or the refiner (for the spec) with the
   SendMessage tool and its agent id (load it with ToolSearch `select:SendMessage` if needed).
   If SendMessage fails (unknown id, session restarted, context too large), spawn a fresh agent
   of that role with the same files on disk; log it.
 - After any other role returns, one call: `{DF} post <id> <role> - <tokens> spawn|resume
-  <output-file> "<one log line>"`. It logs the spawn (df measures the seconds) and the line,
-  compares the read-only hashes, and prints the verdict. Tokens from the result's usage, `-`
-  when unknown; never guess. Exit 10: a read-only role changed something (a `critical`
-  integrity finding, logged): treat that output as failed.
+  <output-file> "<one log line>" [<digest>]` (the digest for reviewer and retro). It logs the
+  spawn (df measures the seconds), compares the hashes and prints the verdict. Tokens from the
+  usage, `-` when unknown; never guess. Exit 10: the role changed something (a `critical`
+  finding, logged; df undid a worktree change): its output failed.
 - **Verdict validity.** A missing or invalid verdict (post exit 1, step-end or check-end exit
   4), a timeout or a context overflow is an infra failure: retry the role up to 2 times, not
   counted as an attempt. Never write or append a verdict line to a role's output: a role that
@@ -244,13 +245,15 @@ No assistant text accompanies a spawn here either: progress is only the `milesto
    free), the profile's `## How to start` and `## Signing in for tests` in `<data>`, the output
    path. Later rounds resume it: "Re-check the fix diff `<fix diff>` and scenarios <ids>;
    write `<output path>`."
-3. After the checker returns: `{DF} check-end <id> <agent-id> <tokens> spawn|resume` (hashes,
-   spawn log, `checker_agent`, every `env.commands` line, `e2e: not configured` when the profile
-   has no `e2e_cmd`, gate) prints the blocking findings and failed scenarios. Exit 0: clean. 2: blocking. 3: blocking with no fix
-   round left (`max_review_rounds`): pause. 4: infra (check-start again, same round; retry the
-   checker; check-end). 6: as in step-end. 10: the checker changed something: check-start
-   again and spawn a fresh checker. With an `e2e_cmd`: read `{PLUGIN}/skills/dark-factory/e2e.md`
-   and run the full app tests now, then `{DF} gate` its findings with the round's; milestone.
+3. After the checker returns: `{DF} check-end <id> <agent-id> <tokens> spawn|resume <digest>`
+   (the digest check-start printed; hashes, spawn log, `checker_agent`, every `env.commands`
+   line, `e2e: not configured` without an `e2e_cmd`, gate) prints the blocking findings and
+   failed scenarios. Exit 0: clean, the pass is recorded. 2: blocking. 3: blocking with no fix
+   round left (`max_review_rounds`): pause. 4: infra (check-start again,
+   same round; retry; check-end). 10: the checker changed something: check-start, fresh
+   checker. 6: judge the command as in step-end, then `{DF} check-gate <id>`. 7: read
+   `{PLUGIN}/skills/dark-factory/e2e.md`, run the full app tests, then `{DF} check-gate <id>`
+   (exits as check-end). Only a recorded pass can ship.
 4. A scenario marked `INVALID`: spawn `qa-author` once to rewrite it (else mark it
    `executable: no`), and re-run it next round.
 5. Nothing blocking: read `{PLUGIN}/skills/dark-factory/ship.md` and follow it.

@@ -20,7 +20,7 @@ diff since the step's `base_sha`) and store the new id.
    `base_ref` is absent or `detached`, `HEAD` of the main clone; when it is not a branch name
    (a sha, `HEAD~1`), skip.
 6. Status `paused` (only now, with the lock held): show `waiting_on`; `{DF} unpause <id>`
-   (credits the paused time). Set every BLOCKED and SKIPPED step back to `status pending` and
+   (credits the paused time and clears an open read-only violation the user has now heard about). Set every BLOCKED and SKIPPED step back to `status pending` and
    `attempts 0` with `{DF} fm-set`, log it, and build those first. Paused at a cap: continue
    from the step that paused. Paused at a cap: say in plain words what was used and ask
    "Allow about half as much again? (yes / no)"; on yes run `{DF} extend <id>` (agents or time) or

@@ -165,7 +165,7 @@ grep -q "{DF} land <id> <session-id>" "$SH" && grep -q "{DF} finish" "$SH" && ok
 grep -q "{DF} commit" $ALL && ok "SKILL.md commits through df commit" || bad "SKILL.md commits through df commit"
 grep -q "{DF} post <id> <role> -" "$S" && grep -q "df measures the" "$S" && grep -q "spawn|resume" "$S" && ok "SKILL.md: every spawn and resume is logged" || bad "SKILL.md: every spawn and resume is logged"
 grep -q "never guess" "$S" && ok "SKILL.md: spawn log never guesses" || bad "SKILL.md: spawn log never guesses"
-grep -q "{DF} pre <id> <session-id> retro.md lessons-new.md proposals-new.md" "$S" && grep -q -- "--wt <their worktree>" "$S" && grep -q "Exit 10" "$S" && ok "SKILL.md: read-only roles are hashed by pre and compared by post" || bad "SKILL.md: read-only roles are hashed by pre and compared by post"
+grep -q "retro.md lessons-new.md" "$S" && grep -q "ro: <digest>" "$S" && grep -q -- "--wt <their worktree>" "$S" && grep -q "Exit 10" "$S" && ok "SKILL.md: read-only roles are hashed by pre and compared by post" || bad "SKILL.md: read-only roles are hashed by pre and compared by post"
 grep -q "read-only roles' .post. first" "$S" && ok "SKILL.md: read-only posts first after a multi-spawn message" || bad "SKILL.md: read-only posts first after a multi-spawn message"
 # every df subcommand the skill calls must exist in scripts/df
 for sub in $(cat $ALL | grep -o '{DF} [a-z-]*' | awk '{print $2}' | sort -u); do
@@ -291,6 +291,9 @@ grep -q "repeat each .milestone:. line df prints" "$S" && grep -q 'milestone: \[
 grep -q "whose .title. is the plain reason" "$S" && grep -q "fixing: " "$ROOT/scripts/df" && grep -q "building step 1 of" "$ROOT/scripts/df" && grep -q "final check, round" "$ROOT/scripts/df" && ok "progress lines: step 1, each check round, each fix step with its reason" || bad "progress lines: step 1, each check round, each fix step with its reason"
 grep -q "attempt 2 or more" "$SH" && grep -q "check fix round alone does not run it" "$SH" && grep -q "attempt 2 or more" "$ROOT/agents/retro.md" && ok "retro: only after a pause or a retried step" || bad "retro: only after a pause or a retried step"
 grep -q "timeout: 600000" "$S" && grep -q "timeout: 600000" "$SH" && ok "long df calls run with a 10-minute tool timeout" || bad "long df calls run with a 10-minute tool timeout"
+grep -q "spawn|resume <digest>" "$S" && grep -q "<digest>\]" "$S" && grep -q "retro.md \"<line>\" <digest>" "$SH" && ok "read-only roles hand back the digest pre or check-start printed" || bad "read-only roles hand back the digest pre or check-start printed"
+grep -q "{DF} check-gate <id>" "$S" && grep -q "{DF} check-gate <id>" "$E2" && grep -q "Only a recorded pass can ship" "$S" && grep -q '^  check-gate)' "$ROOT/scripts/df" && ok "the full app tests and a judged command record the pass through check-gate" || bad "the full app tests and a judged command record the pass through check-gate"
+grep -q "^- 9: refused" "$SH" && grep -q "^- 11: merged, but" "$SH" && grep -q 'never "not merged"' "$SH" && grep -q "completes the tidy-up" "$SH" && ok "ship.md handles land 9, 11 and a refused tidy-up" || bad "ship.md handles land 9, 11 and a refused tidy-up"
 for gone in "{DF} snapshot" "{DF} rundir-hash" "{DF} estimate" "{DF} profile-pin" "{DF} bump" "{DF} ship <id>" "{DF} merge <id>" "{DF} local-merge" "{DF} postmerge" "ship_confirmed"; do
   grep -qF "$gone" $ALL && bad "old chain gone from the prompts: $gone" || ok "old chain gone from the prompts: $gone"
 done
