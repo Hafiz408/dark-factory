@@ -132,8 +132,10 @@ assert_fail "non-git dir refused" bash -c "cd '$N' && '$DF' start '$N/in.txt'"
 
 # build track in empty dir
 E=$(mktemp -d); echo "build a thing" > "$E/in.txt"
-id2=$(cd "$E" && DF_ALLOW_INIT=1 "$DF" start "$E/in.txt")
+id2=$(cd "$E" && DF_ALLOW_INIT=1 "$DF" start "$E/in.txt" 2>"$E/../init-err")
 assert_ok "git init plus initial commit works" git -C "$E" rev-parse HEAD
+assert_contains "started a new git repository" "$(cat "$E/../init-err")" "start_git_init_notice: said on stderr, stdout is the run id"
+assert_eq "yes" "$(cd "$E" && "$DF" conf-get "$("$DF" run-dir "$id2")/run.conf" git_init)" "start_git_init_notice: recorded in run.conf"
 assert_ok "worktree created for empty dir run" test -d "$(cd "$E" && "$DF" conf-get "$("$DF" run-dir "$id2")/run.conf" worktree)"
 
 # validation rejects corruption
