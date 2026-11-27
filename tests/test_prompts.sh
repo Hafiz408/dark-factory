@@ -290,6 +290,7 @@ done
 grep -q "repeat each .milestone:. line df prints" "$S" && grep -q 'milestone: \[df' "$ROOT/scripts/df" && ok "milestone lines come from df, repeated word for word" || bad "milestone lines come from df, repeated word for word"
 grep -q "whose .title. is the plain reason" "$S" && grep -q "fixing: " "$ROOT/scripts/df" && grep -q "building step 1 of" "$ROOT/scripts/df" && grep -q "final check, round" "$ROOT/scripts/df" && ok "progress lines: step 1, each check round, each fix step with its reason" || bad "progress lines: step 1, each check round, each fix step with its reason"
 grep -q "attempt 2 or more" "$SH" && grep -q "check fix round alone does not run it" "$SH" && grep -q "attempt 2 or more" "$ROOT/agents/retro.md" && ok "retro: only after a pause or a retried step" || bad "retro: only after a pause or a retried step"
+grep -q "timeout: 600000" "$S" && grep -q "timeout: 600000" "$SH" && ok "long df calls run with a 10-minute tool timeout" || bad "long df calls run with a 10-minute tool timeout"
 for gone in "{DF} snapshot" "{DF} rundir-hash" "{DF} estimate" "{DF} profile-pin" "{DF} bump" "{DF} ship <id>" "{DF} merge <id>" "{DF} local-merge" "{DF} postmerge" "ship_confirmed"; do
   grep -qF "$gone" $ALL && bad "old chain gone from the prompts: $gone" || ok "old chain gone from the prompts: $gone"
 done

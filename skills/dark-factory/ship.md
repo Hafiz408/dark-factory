@@ -43,7 +43,7 @@ never applied, only listed in the report. A pausing run stops here (back to Paus
 
 A paused run is never offered a PR or a merge (it pauses instead). Otherwise one call does the
 whole ending for the `ship_mode` chosen at sign-off:
-`{DF} land <id> <session-id> "<goal, under 70 characters>"`. It writes `pr-body.md` from the
+`{DF} land <id> <session-id> "<goal, under 70 characters>"`, with the Bash `timeout: 600000`. It writes `pr-body.md` from the
 report, pushes and opens the PR (`merge`, `pr`), waits for the PR's checks and merges, or
 merges locally (`local`, or `merge` without `origin` or `gh`), re-runs `env.commands` in the
 merged result, runs `{DF} finish`, appends `## Time and agents` (the metrics line and the

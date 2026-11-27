@@ -1224,7 +1224,8 @@ cmd_land() { # df land <run-id> <session-id> <pr-title>
     fi
     printf -- '- merged: %s\n' "$(conf_get "$c" merge_sha)" >> "$rd/log.md"
     conf_set "$c" stage postmerge
-    [ $(( $(date +%s) - t0 )) -lt "${DF_LAND_WAIT:-300}" ] || { echo "land: merged; run df land again for the test after the merge"; return 4; }
+    # One call is either the wait or the post-merge suite, never both, so it stays under a 10-minute tool timeout.
+    [ $(( $(date +%s) - t0 )) -lt "${DF_LAND_SUITE_AFTER:-120}" ] || { echo "land: merged; run df land again for the test after the merge"; return 4; }
   fi
   # postmerge
   rc=0; folder=$( (cmd_postmerge "$id") 2>&1 ) || rc=$?
@@ -1256,7 +1257,7 @@ land_end() { # land_end <run-id> <session-id> <line> [merged|local]: finish, met
   run_ctx "$id"
   ( cmd_finish "$id" "$2" ) 2>/dev/null || true
   m=$(cmd_metrics "$id")
-  { printf '\n## Time and agents\n\n%s\n' "$m"; grep -m1 '^estimate:' "$rd/log.md" || true; } >> "$rd/report.md"
+  { printf '\n## Time and agents\n\n%s\n' "$m"; grep '^estimate:' "$rd/log.md" | tail -1 || true; } >> "$rd/report.md"
   rp="$rd/report.md"
   if [ -n "${4:-}" ]; then
     if [ "$4" = merged ]; then line="done: merged and verified: $(conf_get "$c" pr_url)"

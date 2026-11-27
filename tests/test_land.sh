@@ -8,7 +8,7 @@ cat > "$T/bin/gh" <<'GH'
 { for a in "$@"; do printf '%s\n' "$a"; done; echo ---; } >> "$GH_LOG"
 case "$1 $2" in
   "auth status") exit 0;;
-  "pr create") echo "https://example.test/pr/$$";;
+  "pr create") [ "${GH_CREATE_RC:-0}" -eq 0 ] || exit 1; echo "https://example.test/pr/$$";;
   "pr checks") [ -z "${GH_CHECKS_SLEEP:-}" ] || exec sleep "$GH_CHECKS_SLEEP"; echo "${GH_CHECKS_OUT:-all checks passed}"; exit "${GH_CHECKS_RC:-0}";;
   "pr merge") exit 0;;
   "pr view") case "$*" in *mergeCommit*) echo "";; *"state,headRefOid"*) echo "MERGED none";; *) echo OPEN;; esac; exit 0;;
@@ -94,6 +94,20 @@ assert_eq "0" "$(land "$L" "$DF" land "$H" s1 "Add c")" "land_local: exit 0"
 assert_eq "change" "$(cat "$L/c.txt")" "land_local: main has the change"
 assert_fail "land_local: branch removed" git -C "$L" show-ref --verify -q "refs/heads/$HB"
 assert_ok "land_local: archived" test -f "$SL/reports/$H/report.md"
+
+# the PR cannot be opened: finished, kept on its branch
+N=$(newrun "$C" merge); NB=$(df "$C" conf-get "$SC/$N/run.conf" branch)
+assert_eq "2" "$(land "$C" GH_CREATE_RC=1 "$DF" land "$N" s1 "Add c")" "land_pr_refused: exit 2"
+assert_contains "kept on branch $NB" "$(cat "$T/out")" "land_pr_refused: plain line"
+assert_eq "done" "$(df "$C" conf-get "$SC/$N/run.conf" status)" "land_pr_refused: finished"
+assert_ok "land_pr_refused: branch kept" git -C "$C" show-ref --verify -q "refs/heads/$NB"
+# NOT FIXED: a bugfix branch that changes only tests ships nothing
+X=$(newrun "$C" merge); XC="$SC/$X/run.conf"; XW=$(df "$C" conf-get "$XC" worktree); XB=$(df "$C" conf-get "$XC" branch)
+git -C "$XW" reset -q --hard HEAD~1; mkdir -p "$XW/tests"; echo t > "$XW/tests/test_x.sh"; git -C "$XW" add tests; git -C "$XW" commit -qm t
+df "$C" conf-set "$XC" track bugfix
+assert_eq "8" "$(land "$C" "$DF" land "$X" s1 "Fix x")" "land_not_fixed: exit 8"
+assert_eq "unresolved" "$(df "$C" conf-get "$XC" status)" "land_not_fixed: unresolved"
+assert_fail "land_not_fixed: nothing pushed" git -C "$ORIGIN" rev-parse -q --verify "refs/heads/$XB"
 
 # usage and refusals
 assert_eq "1" "$(land "$C" "$DF" land "$B" s1)" "land needs a title"

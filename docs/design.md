@@ -37,54 +37,79 @@ v0.3 has not been re-evaluated yet; the README carries v0.2 numbers only.
 ## 3. Flow
 
 ```
-intake -> refine -> plan -> preflight -> signoff -> slice -> build -> check -> ship -> merge -> postmerge -> done
-                                                              (retro only after a retry, fix round or pause)
+intake -> refine -> plan -> preflight -> signoff -> build -> check -> ship -> merge -> postmerge -> done
+                                                     (retro only after a pause or a step that needed attempt 2+)
 ```
 
 - **intake.** Read or fetch the input (never invent it), `df scrub` secrets, confirm the base
   branch, `df start` (worktree `../<repo>-df-<id>`, branch `df/<id>`), take the run lock.
   `df start` refuses a second live run in the same repo. Empty directory + new app:
-  `git init` with an empty commit.
+  `git init` with an empty commit; `df start` says so on stderr and the user hears it in one
+  line before the questions.
 - **refine.** The orchestrator picks the track (`bugfix`, `feature`, `build`) on intent, not
   wording. One `refiner` applies the requirements, codebase-fit and risk lenses in one pass and
   writes at most 8 questions, each with a default. A track disagreement or low confidence
   becomes a question. After the answers the same refiner is resumed to write `spec.md`. The
   user's own acceptance criteria stay AC1..ACn in their order and wording; at most 5 derived
-  ones follow, marked `(derived)`, and user-facing counts use only the user's.
+  ones follow, marked `(derived)`, and user-facing counts use only the user's. Accepted answers
+  are a contract: each question's accepted answer (default or the user's) is its own criterion
+  tagged `(from Qn)`, in its full wording; the QA author covers each, and the checker reads
+  `questions.md` and treats a narrowed promise as high.
 - **plan.** The dependency install starts as a background shell command, then `planner` and
   `qa-author` spawn together from the spec (roles never run in the background). A feature with
   at most 5 user criteria that fits in 8 files is one step. The planner writes
   `plan.md` (approach, alternatives, trade-offs, `lanes:`) and steps with `scope`,
   `depends_on`, `risk`, `size`. The QA author writes hidden scenarios (with canary tokens) and a
-  checklist; the builder never sees them.
+  checklist; the builder never sees them. The planner runs on sonnet unless the spec touches
+  auth, payments, secrets, data deletion or migrations, or the repo has more than ~200 source
+  files (then opus).
 - **preflight.** Wait for the install; record `port_base`; record build, test, lint and typecheck commands in
   `env.commands` and run each once while the user is present (so permission prompts happen
-  now); baseline suite at `root_base_sha`; draft the repo profile (`e2e_cmd`, how to start
+  now); install the lint and type tools the project config declares, or say at sign-off that a
+  check cannot run; baseline suite at `root_base_sha`; draft the repo profile (`e2e_cmd`, how to start
   the app); settle the merge target.
 - **signoff (the only gate).** One plain screen: goal, steps and which run side by side, what
   it won't do, assumptions, approach and alternatives, check titles (never their content),
   commands, starting point, estimate and cap, and the ending for the chosen ship mode. The
   user answers approve (optionally with `merge`, `no merge`, `local` or `branch`), amend (max 3) or abort.
-  Nothing is asked after this except a permission stop.
-- **slice.** Move steps into `chunks/`, validate, record the e2e baseline.
+  Nothing is asked after this except a permission stop. The step list comes from `df steps`
+  (from the step files, in run order), so it cannot disagree with the plan. A profile with no
+  commands is one plain line, not a block. `df signoff` records the ending, pins the profile
+  and commands, moves the steps in, validates and sets stage `build`.
+
+## 3a. Orchestrator cost
+
+A measured run spent ~38% of its wall time (528 of 1381 s, 74 tool calls, ~29k output tokens
+after sign-off) in the orchestrator, mostly chains of df calls repeating long paths. Each
+deterministic chain is now one df call that takes the run id and finds the run dir and worktree
+itself: `steps`, `signoff`, `step-start`/`step-end` per attempt, `check-start`/`check-end` per
+round, `pre`/`post` for other roles, `land` for the ending. df measures each spawn's seconds
+from the last `pre` (or `step-start`/`check-start`), stores read-only hashes and compares them,
+and prints the `milestone:` lines the orchestrator repeats; no other assistant text is written
+between sign-off and the final note. Parallel waves and full app tests live in `wave.md` and
+`e2e.md`, read only when needed.
 
 ## 4. Build: lanes, waves, the step gate
 
 `df wave` prints up to 3 pending steps whose dependencies passed and whose scopes are disjoint
-(skipping steps marked `serial`). One step, or a plan of at most 3 steps, runs in the run
-worktree as lane 1. Two or more run as a parallel wave: each in its own sub-worktree
+(skipping steps marked `serial`); a plan of at most 3 steps gets one at a time, and when
+nothing parallel is ready it prints the lowest ready step. One step runs in the run worktree
+as lane 1. Two or more run as a parallel wave: each in its own sub-worktree
 (`df sub-add`), builders spawned in one message, PASS steps joined back in id order
 (`df sub-join`), then the full suite. A join conflict or a red suite after joining sends the
 step(s) back to `pending` with `serial yes`.
 
 Each lane has one `builder` (sonnet), resumed with SendMessage for its next step, retries and
-fixes; a fresh one after 6 steps or when a resume fails. Its id is stored as `lane<k>_agent`
-and in the step's `builder_agent`.
+fixes; a fresh one after 6 steps or when a resume fails. `df step-end` stores its id as
+`lane<k>_agent` and in the step's `builder_agent`, and counts its steps.
 
-Per step, up to 3 attempts, all deterministic except the optional security review:
+Per step, up to 3 attempts, all deterministic except the optional security review.
+`df step-start` checks the caps, refreshes the lock, sets `base_sha` (attempt 1) or undoes the
+failed attempt's commit, and counts the attempt; past 3 it resets the step and marks it BLOCKED.
 
-1. Builder writes the test first, then the code.
-2. One `df step-check` call runs the rest, so it costs one orchestrator turn:
+1. Builder writes the test first, then the code. Code that judges input tests every form its
+   format's specification documents; caching or loops over input get a scaling check.
+2. One `df step-end` call logs the spawn and runs `df step-check` (usable alone):
    - `check-diff`: files outside `scope` (high); existing tests changed without `touches_tests`
      (critical); empty diff. `canary-scan`: a leaked scenario token (critical; scenarios
      regenerated, fresh builder).
@@ -96,18 +121,24 @@ Per step, up to 3 attempts, all deterministic except the optional security revie
 3. `risk: high` (auth, payments, secrets, data deletion, migrations, shell/SQL string
    building, new dependency): one read-only `reviewer` with `lenses/security.md`.
 4. `df gate`: medium or above blocks. Blocking: one failure note to the same builder (symptoms
-   only), soft reset, next attempt. After attempt 3: hard reset, BLOCKED, one re-plan per run;
+   only), next `step-start` (soft reset), next attempt. After attempt 3: hard reset, BLOCKED, one re-plan per run;
    still blocked, every step depending on it, directly or not, is SKIPPED.
 
 ## 5. Check
 
-Any BLOCKED or SKIPPED step pauses the run before the check. Otherwise, per round:
+Any BLOCKED or SKIPPED step pauses the run before the check (`df check-start` exit 8).
+Otherwise, per round, `df check-start` (stage, round, validate, lock, hashes) and, after the
+checker, `df check-end` (hashes compared, spawn log, the suite, the `e2e: not configured` note,
+gate, the failing items):
 
 - One `checker` (opus, fresh context, read-only) with `lenses/check.md`: goal (every
   acceptance criterion and "Done when"), correctness, impact on existing callers, security,
   over-engineering; then every executable hidden scenario. Every medium+ finding needs
   evidence: a failing command and output, a failing scenario id, or `file:line` plus an input
-  that breaks it.
+  that breaks it. For parsers, validators and checkers a false alarm on valid input or a miss on
+  a documented form is high; without a reference implementation the checker builds valid
+  inputs from the format's own specification and states how many it tried. Any "all/every"
+  claim states its scope.
 - After the checker returns, the orchestrator runs the full suite and the profile's `e2e_cmd`
   (starting and stopping the app if needed); the checker gets `port_base` unchanged and runs its own app on `DF_PORT_BASE + 50`. A test that passed at baseline and fails now is high. No
   `e2e_cmd`: the report says `e2e: not configured`, never a pass.
@@ -123,12 +154,19 @@ Any BLOCKED or SKIPPED step pauses the run before the check. Otherwise, per roun
 1. **Report.** `report.md` leads with What changed (per met acceptance criterion), How it
    was checked, Anything left; then technical changes and per-step outcomes. A bugfix branch
    that changes no source starts with `NOT FIXED` and is never shipped.
-2. **Retro** (haiku), only after a retry, a fix round or a pause: `lessons.md` for this repo
+2. **Retro** (haiku), only after a pause or a step that needed attempt 2+ (not for a check fix
+   round alone): `lessons.md` for this repo
    (applied to later runs) and `proposals.md` for the plugin (listed, never applied).
+Steps 3 to 5 are one re-entrant `df land <id> <session> "<title>"` call: it stops with one
+plain line and a distinct exit code (2 PR not opened, 3 PR not merged, 4 call again, 5 local
+merge refused, 6 red after the merge, 7 run the full app tests, 8 NOT FIXED); every stop but
+4 and 7 has finished the run and written the metrics into the report. Each call waits at most
+`DF_LAND_WAIT` (300 s) for checks; the whole merge wait is bounded by `DF_MERGE_TIMEOUT`
+(20 min), kept in `run.conf` across calls.
+
 3. **Ship.** `merge`/`pr` with `origin` and `gh auth`: `df ship` pushes the run branch and opens
    the PR. `merge`: `df merge` waits for PR checks (`gh pr checks --watch`) at most
-   `DF_CHECKS_WAIT` (90 s) per call and exits 4 while they run; `ship.md` calls it up to 13
-   times (about 20 min). No checks counts as a pass only once it has lasted
+   `DF_CHECKS_WAIT` (90 s) per call and exits 4 while they run; `df land` calls it again. No checks counts as a pass only once it has lasted
    `DF_NO_CHECKS_GRACE` (60 s) since the push. It merges with the first allowed method of
    squash, merge, rebase, with `--match-head-commit` at the pushed sha and `--delete-branch`
    (run outside the clone, so only the remote branch goes). Failing or unfinished
@@ -159,18 +197,19 @@ reuses a `pr_url` it did not open (one without `pushed_sha`). Never force, never
 | Role | Model | Writes | Notes |
 |---|---|---|---|
 | refiner | opus | `questions.md`, then `spec.md` | resumed for the spec |
-| planner | opus | `plan.md`, `chunks-draft/` | also re-plans a BLOCKED step once, splits `TOO_BIG` |
+| planner | sonnet (opus for risky or large) | `plan.md`, `chunks-draft/` | also re-plans a BLOCKED step once, splits `TOO_BIG` |
 | qa-author | sonnet | `scenarios/` | spec only, before any code |
 | builder | sonnet | the worktree, its output file | one per lane, resumed |
 | checker | opus | its output file | read-only, resumed for re-checks |
 | reviewer | sonnet | its output file | security, `risk: high` steps only |
-| retro | haiku | retro, lessons, proposals | only when something went wrong |
+| retro | haiku | retro, lessons, proposals | only after a pause or attempt 2+ |
 
 Roles never spawn roles. Every role's last output line is
 `VERDICT: PASS | FAIL | NEEDS_DECISION | BLOCKED | TOO_BIG | SCENARIO_INVALID - <reason>`,
 checked by `df verdict`. A missing or invalid verdict, timeout or context overflow is an infra
 failure, retried up to 2 times and not counted as an attempt. Read-only roles are bracketed
-by `df snapshot` (status, diff, index and stash) and `df rundir-hash` (the inputs that steer
+by hashes `df pre` stores and `df post`/`check-end` compare: `df snapshot` of the role's
+worktree (status, diff, index and stash), `df state-hash` and `df rundir-hash` (the inputs that steer
 later work: `scenarios/`, `chunks/`, spec, plan, `run.conf`, questions); any change is a
 critical integrity finding.
 
@@ -179,10 +218,12 @@ impact, goal, plan-coverage, adjudicate (folded into `check.md`).
 
 ## 8. Budgets
 
-`df estimate <id> <steps> <lanes>` prints a time and agent range (defaults until the repo has
+`df steps` (through `df estimate`) prints a time and agent range (defaults until the repo has
 2+ finished runs in `metrics.tsv`, then medians per step) and sets the caps, unless already
-set: `max_agents` = 1.5x (high agent estimate), `budget_seconds` = 1.5x (high minutes).
-`df budget` runs before every spawn or resume (not the retro's, which a pause runs) and exits 3
+set. The caps are a runaway guard, not the estimate: `max_agents` = max(14, 2x the high agent
+estimate), `budget_seconds` = max(40 min, 3x the high minutes). The check round that re-checks
+an applied fix is exempt from the time cap (not the agent cap), so a healthy run is not left
+unmerged. `df budget` runs before every spawn or resume (the retro ignores it, since a pause runs it) and exits 3
 when a cap is reached; time counts from sign-off (`signoff_at`, as do the metrics seconds); only spawns
 count toward `max_agents` (a resume keeps its agent). The run then pauses; on `resume` the user
 says yes and `df extend` allows half as much again. A new session taking over a dead one credits

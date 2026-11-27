@@ -32,8 +32,9 @@ Then, inside your project (or an empty folder, to build something new):
 2. Read the sign-off screen and say `approve`. It shows an estimate such as
    `estimate: 7-14 min, ~6-8 agents`: a rough range, not a promise, and a cap the run will not
    exceed. Stay a moment: commands it will run may ask for permission now, so nothing stalls later.
-3. Leave it, usually for minutes, not hours. It prints one line per milestone, like
-   `[df r261127-101500-123] step 2 of 4 done`.
+3. Leave it, usually for minutes, not hours. It prints only milestone lines (when step 1
+   starts, each step done, each check round, each fix with its reason), like
+   `[df r261127-101500-123] step 2 of 4 done`, and nothing else.
 4. It works in a sibling folder (`../<repo>-df-<run-id>`), so your own checkout is untouched
    until the merge. At the end you get a plain note: what changed, how it was checked, and
    where it is now (merged, or a PR link, or a branch).
@@ -61,9 +62,12 @@ Yellow is where you are asked something. Nothing is asked after sign-off, except
 command needs your permission or a budget cap is hit.
 
 - **Questions.** One refiner reads your request and the repo, asks at most 8 questions and
-  drafts the spec from their defaults; it is asked again only when an answer differs.
+  drafts the spec from their defaults; it is asked again only when an answer differs. Every
+  answer you accept becomes its own requirement in the spec, word for word, and the final
+  check holds the work to it.
 - **Plan and hidden checks.** A planner splits the work into steps; separately, a QA author
-  writes test scenarios the builder never sees, so the tests can't be shaped by the code.
+  writes test scenarios the builder never sees, so the tests can't be shaped by the code. The
+  sign-off step list is printed straight from the plan's step files.
 - **Build.** Steps that touch different files and don't depend on each other run side by side
   (up to 3 lanes). Each lane has one builder that keeps its context across steps and fixes.
   Each step must pass mechanical checks before it counts:
@@ -115,9 +119,10 @@ offers `revert` (opens a revert PR) or `undo` (moves a local merge back).
 ## Budget cap
 
 The sign-off screen shows a rough estimate (`estimate: 7-14 min, ~6-8 agents`) and a cap
-(`cap: up to 12 agents and 21 min`), by default 1.5x the high end. Time counts from sign-off, not
-while you answer questions. Past either, the run pauses
-instead of spending more. Run
+(`cap: up to 16 agents and 54 min`). The cap is a safety limit well above the estimate (at
+least 14 agents and 40 minutes, or two and three times the high end), so a healthy run does not
+hit it; re-checking a fix that is already in place never stops for time. Time counts from
+sign-off, not while you answer questions. Past either, the run pauses instead of spending more. Run
 `/dark-factory:dark-factory resume`: it shows what was used and asks whether to allow about half
 as much again. Time spent stopped (a closed laptop, a usage limit) is not counted. Estimates start from default figures and use this repo's
 past runs once there are a few.
@@ -139,7 +144,7 @@ past runs once there are a few.
   `../.df-<repo>/reports/<run-id>/`. `sweep` offers the same cleanup
   for runs whose PR merged later; `clean` removes a run's working copy and state but keeps
   its branch.
-- After a run with a retry, a fix round or a pause, a short retro writes repo facts to
+- After a run that paused or had a step needing a second attempt, a short retro writes repo facts to
   `../.df-<repo>/lessons.md` (used by later runs) and suggestions for the plugin (shown to
   you, never applied).
 - A guard hook blocks `git push`, recursive deletes outside the run's copy, pipe-to-shell and

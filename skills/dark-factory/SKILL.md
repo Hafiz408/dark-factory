@@ -20,8 +20,9 @@ holds the command for approval, which stalls an unattended run.
   main clone). `{WT}`: the worktree, `{DF} conf-get {RD}/run.conf worktree`. `{PROFILE}`:
   `profile.md` in the parent of `{RD}`, one per repo, never committed; `lessons.md` beside it.
 - Compute anything dynamic (the current time, a sha) in its own command, then paste the value.
-- `{DF}` commands take the run id and find the run dir and worktree themselves; a file argument
-  may be relative to `{RD}`. Never chain df calls that one df call does.
+- `{DF}` commands take the run id and find the run dir and worktree; file arguments may be
+  relative to `{RD}`. Never chain df calls that one df call does. Run `{DF} step-end`,
+  `check-end` and `land` with the Bash `timeout: 600000` (they run suites and wait for checks).
 
 ## Spawning roles
 
@@ -53,16 +54,14 @@ holds the command for approval, which stalls an unattended run.
 - While a read-only role (checker, reviewer, retro) runs, write no step file, `run.conf`, spec,
   plan or scenario and change nothing in its worktree. After a message with several spawns, run
   the read-only roles' `post` first.
-- **Findings you write** carry an `evidence:` line (the command and its failing output), or
-  the gate counts them low.
+- **Findings you write** carry `evidence:` (the command, its failing output), or count low.
 
 ## Talking to the user
 
-Plain words in everything the user sees (questions, sign-off, progress, final note); the user
-may not be technical. Never say chunk, lens, worktree, e2e or gate to the user: say step,
+Plain words in everything the user sees; the user may not be technical. Never say chunk, lens, worktree, e2e or gate to the user: say step,
 check, working copy, full app tests. Between sign-off and the final note the only text you
 write is milestone lines `[df <id>] <plain event>`: repeat each `milestone:` line df prints,
-word for word, and add one for a pause, a stuck step and the end. No other assistant text,
+word for word, and add one for a pause, a stuck step, a PASS you set yourself, and the end. No other assistant text,
 ever, before, between or after tool calls ("Step 1 is being built now.", "The final check is
 running."): a milestone line or silence, except a stop that needs the user.
 
@@ -81,8 +80,7 @@ and the start of a new run, never on `status`.
 ## Start a run
 
 0. Sweep (prints nothing when there is nothing to clean).
-1. A path: read it. A URL or ticket id: fetch it. If you cannot, ask the user to paste it.
-   Never invent it.
+1. A path: read it. A URL or ticket id: fetch it; if you cannot, ask the user to paste it. Never invent it.
 2. Write the input to a temp file in the system temp directory, run `{DF} scrub` on it. Exit 3:
    tell the user which kinds of secret were redacted and ask them to confirm.
 3. Do not ask about the base: the current branch is used and shown at sign-off. Ask only on a
@@ -219,7 +217,7 @@ lane's first step, when the resume fails, and when `step-end` says it has done 6
    `{PLUGIN}/lenses/security.md`, the step, `<wt>`, `base_sha`, output
    `panel/NN-a<n>-security.md` (`pre` with `--wt <wt>` and that file, then `post`), then
    `{DF} gate` over both files (absolute paths). 9: the builder said `TOO_BIG` or `BLOCKED`
-   (see Also). Not blocking after 6 or 7: `{DF} fm-set <step> status PASS`.
+   (see Also). Not blocking after 6 or 7: `{DF} fm-set <step> status PASS`; milestone.
    Blocking: append one failure note to the step's `## Failure notes` (symptoms only, never
    scenario text), then step-start again (it undoes the failed commit and keeps the files).
 4. BLOCKED: one re-plan per run: spawn `planner` with the failure notes; set the re-planned
@@ -252,7 +250,7 @@ No assistant text accompanies a spawn here either: progress is only the `milesto
    round left (`max_review_rounds`): pause. 4: infra (check-start again, same round; retry the
    checker; check-end). 6: as in step-end. 10: the checker changed something: check-start
    again and spawn a fresh checker. With an `e2e_cmd`: read `{PLUGIN}/skills/dark-factory/e2e.md`
-   and run the full app tests now, then `{DF} gate` its findings with the round's.
+   and run the full app tests now, then `{DF} gate` its findings with the round's; milestone.
 4. A scenario marked `INVALID`: spawn `qa-author` once to rewrite it (else mark it
    `executable: no`), and re-run it next round.
 5. Nothing blocking: read `{PLUGIN}/skills/dark-factory/ship.md` and follow it.
@@ -267,10 +265,10 @@ No assistant text accompanies a spawn here either: progress is only the `milesto
 ## Pausing
 
 The run never finishes while something is open. To pause: write `report.md` (see `ship.md`)
-with `PAUSED: <what is open>` as its first line; run the retro (`ship.md`; it ignores exit 3)
-without changing `stage`; `{DF} pause <id> "<what is open>"`; `{DF} metrics <id>` (its line
-verbatim into the report); `{DF} lock <id> release <session-id>`; print `[df <id>] paused: <what is open>`; and tell the
-user, in plain words, what is open and the one thing to say to go on:
+with `PAUSED: <what is open>` first; run the retro (`ship.md`; it ignores exit 3) without
+changing `stage`; `{DF} pause <id> "<what is open>"`; `{DF} metrics <id>` (its line verbatim
+into the report); `{DF} lock <id> release <session-id>`; print `[df <id>] paused: <what is
+open>`; and tell the user, in plain words, what is open and the one thing to say to go on:
 `/dark-factory:dark-factory resume` (at a cap, resume asks before allowing more; a stuck step:
 they may first say what to change). Never ask them to type a script command or edit state. Do
 not run `{DF} finish` for a paused run.
