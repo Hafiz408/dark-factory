@@ -8,8 +8,9 @@ diff since the step's `base_sha`) and store the new id.
 1. Pick the run: the id given, else the most recent unfinished one (stage is not `done`); ask
    only if there are several. A run with status `unresolved` is finished: report it, do not
    resume it.
-2. Pick a new session id; `{DF} lock <id> acquire <session-id>`. A refusal: the run is live in
-   another session; stop (the user may pass `--force`, which releases the lock first).
+2. Pick a new session id; `{DF} lock <id> acquire <session-id>`. Refused as `run is live`: ask
+   "Is another window still working on this? If not, answer `take over`." On `take over`:
+   `{DF} lock <id> release <session-id>`, then acquire again. Any other answer: stop.
 3. `{DF} validate <id>`. On failure show the message and stop. Never repair state silently.
 4. Confirm the worktree and branch exist and the branch head is `root_base_sha` or a sha on a
    `commit <sha> <message>` line of `log.md` (`{DF} commit` and `{DF} sub-join` write them; an

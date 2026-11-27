@@ -34,8 +34,11 @@ breaks it). No evidence, no blocking finding.
    the valid inputs from the format's own specification (every documented form; for CommonMark
    links: parentheses in targets, single-quoted titles, reference and shortcut links, images
    inside links) and run them; state how many cases were tried.
-8. **Promises in the answers.** Read `questions.md` with `spec.md`: an accepted answer that the
-   spec or the code narrowed (fewer cases, weaker wording) is high.
+8. **Promises in the answers and the input.** Read `input.md` and `questions.md` with `spec.md`:
+   an accepted answer the spec or the code narrowed (fewer cases, weaker wording) is high, and
+   so is anything (spec, a plan "won't do", code) that narrows `input.md`.
+9. **Stored data.** When the change persists data, concurrent writers and partial failure are
+   in scope: a lost update, a double charge or a half-written record is high.
 
 Checks 6 and 7 run in full once, in round 1, within about 5 minutes; later rounds re-test only
 the fix diff and what failed.
@@ -47,7 +50,7 @@ the fix diff and what failed.
 | An acceptance criterion is not met; an existing caller or test now breaks | high |
 | Exploitable injection, auth bypass, secret committed | critical |
 | Wrong behaviour on a reachable input; public interface changed with a consumer not updated | high |
-| A checker flags ordinary valid input or misses a documented form; an accepted answer narrowed | high |
+| A checker flags ordinary valid input or misses a documented form; an accepted answer or the input narrowed | high |
 | The same, only for a contrived combination of rare constructs | low |
 | A real defect with limited reach; reinvented stdlib; fix wider than its cause | medium |
 | A differential mismatch on the fixed code path | medium |

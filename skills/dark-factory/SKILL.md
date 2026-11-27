@@ -49,9 +49,10 @@ holds the command for approval, which stalls an unattended run.
 - **Verdict validity.** A missing or invalid verdict (post exit 1, step-end or check-end exit
   4), a timeout or a context overflow is an infra failure: retry the role up to 2 times, not
   counted as an attempt. Never write or append a verdict line to a role's output: a role that
-  left no valid output file with a verdict is an infra failure. A permission denial shows in
-  the output as `needs approval` or `haven't granted it yet`: set `status=waiting_permission`
-  and `waiting_on=<the command or path>`, stop; `{DF} status` tells the user what to allow.
+  left no valid output file with a verdict is an infra failure. A permission denial
+  (`needs approval`, `haven't granted it yet`, `Permission for this tool use was denied`,
+  `requires approval`, or auto mode blocked it): Never work around a block. Set `status=waiting_permission`
+  and `waiting_on=<the command or path>`, stop, and say in one plain line what to allow.
 - While a read-only role (checker, reviewer, retro) runs, write no step file, `run.conf`, spec,
   plan or scenario and change nothing in its worktree. After a message with several spawns, run
   the read-only roles' `post` first.
@@ -59,14 +60,12 @@ holds the command for approval, which stalls an unattended run.
 
 ## Talking to the user
 
-Plain words in everything the user sees; the user may not be technical. Never say chunk, lens, worktree, e2e or gate to the user: say step,
-check, working copy, full app tests. Between sign-off and the final note the only text you
-write is milestone lines `[df <id>] <plain event>`: repeat each `milestone:` line df prints,
-word for word, and add one for a pause, a stuck step, a PASS you set yourself, and the end. No other assistant text,
-ever, before, between or after tool calls ("Step 1 is being built now.", "The final check is
-running."): a milestone line or silence, except a stop that needs the user. If a spawn returns
-before the agent is done and your turn must say something while waiting, say only the latest
-milestone line.
+Plain words in everything the user sees (they may not be technical): say step, check, working
+copy, full app tests, never chunk, lens, worktree, e2e or gate. Between sign-off and the final
+note write only milestone lines `[df <id>] <plain event>`: repeat each `milestone:` line df prints,
+word for word, plus one for a pause, a stuck step, a PASS you set yourself, and the end. Nothing
+else ("Step 1 is being built now."), before, between or after tool calls, except a stop that
+needs the user; while waiting on a spawn, only the latest milestone line.
 
 ## Subcommands
 
@@ -168,6 +167,8 @@ words. First block, at most 12 lines, no YAML, file names or tool names:
   `<branch>`; nothing is pushed or merged." Quote a repo rule that set it in one line.
   Other answers: `merge`, `no merge` (stop at the PR), `local`, `branch`. Then: "If only minor
   problems are left after the last check, I finish and list them; answer `strict` to stop."
+  Unless `{DF} mode` prints `auto`, `bypassPermissions` or `unknown`: "You will be asked for
+  permission while I work. To walk away, switch to auto mode first (Shift+Tab until it says auto)."
 - The estimate line, "This is a rough range, not a promise.", the `cap:` line: "This is a
   safety limit well above the estimate; I stop and ask only if the run goes past it."
   `Recommend abort: <reason>` if any. Then the question, then `Details`:
@@ -241,19 +242,18 @@ No assistant text accompanies a spawn here either: progress is only the `milesto
    prints the round, output path and, from round 2, the fix diff. Exit 8: a step is BLOCKED or
    SKIPPED: pause without spawning. 3: a cap (re-checking an applied fix ignores the time
    cap). A validate failure (a changed profile) pauses.
-2. Round 1: spawn `checker` with `{PLUGIN}/lenses/check.md`, spec, `questions.md`, plan, step
-   files, `{RD}/scenarios/` (with `checklist.md`), `{WT}`, `root_base_sha`, `env.commands`,
-   `DF_PORT_BASE` = `port_base` unchanged (it runs its app on `DF_PORT_BASE + 50`; yours stays
-   free), the profile's `## How to start` and `## Signing in for tests` in `<data>`, the output
-   path. Later rounds resume it: "Re-check the fix diff `<fix diff>` and scenarios <ids>;
-   write `<output path>`."
+2. Round 1: spawn `checker` with `{PLUGIN}/lenses/check.md`, `{RD}/input.md`, spec,
+   `questions.md`, plan, step files, `{RD}/scenarios/` (with `checklist.md`), `{WT}`,
+   `root_base_sha`, `env.commands`, `DF_PORT_BASE` = `port_base` unchanged (it runs its app on
+   `DF_PORT_BASE + 50`; yours stays free), the profile's `## How to start` and `## Signing in
+   for tests` in `<data>`, the output path. Later rounds resume it: "Re-check the fix diff
+   `<fix diff>` and scenarios <ids>; write `<output path>`."
 3. After the checker returns: `{DF} check-end <id> <agent-id> <tokens> spawn|resume <digest>`
    (the digest check-start printed; hashes, spawn log, `checker_agent`, every `env.commands`
    line, `e2e: not configured` without an `e2e_cmd`, gate) prints the blocking findings and
    failed scenarios. Exit 0: clean, the pass is recorded. 2: blocking. 3: blocking with no fix
-   round left (`max_review_rounds`): pause. 4: infra (check-start again,
-   same round; retry; check-end). 10: the checker changed something: check-start, fresh
-   checker. 6: judge the command as in step-end, then `{DF} check-gate <id>`. 7: read
+   round left (`max_review_rounds`): pause. 4: infra (check-start again, same round; retry;
+   check-end). 10: the checker changed something: check-start, fresh checker. 6: judge the command as in step-end, then `{DF} check-gate <id>`. 7: read
    `{PLUGIN}/skills/dark-factory/e2e.md`, run the full app tests, then `{DF} check-gate <id>`
    (exits as check-end). Only a recorded pass can ship.
 4. A scenario marked `INVALID`: spawn `qa-author` once to rewrite it (else mark it
@@ -265,7 +265,8 @@ No assistant text accompanies a spawn here either: progress is only the `milesto
    the finding names; existing tests or test helpers it names in `touches_tests`; "Done when" =
    the expected behaviour in your words, symptoms only; nothing else, no new docs unless a
    finding is about them; `builder_agent` = the owner's). Run fix steps as steps in `{WT}`,
-   resuming the owning builder. Then the next round.
+   resuming the owning builder. A finding that survived a fix round, or that a fix caused: "Done
+   when" first undoes that fix (`git revert --no-commit <its commit>`), then solves it simply. Then the next round.
 
 ## Pausing
 
@@ -276,5 +277,4 @@ into the report); `{DF} lock <id> release <session-id>`; print `[df <id>] paused
 open>`; and tell the user, in plain words, what is open and the one thing to say to go on:
 `/dark-factory:dark-factory resume` (at a cap, resume asks before allowing more; after the
 last check round it offers to merge with the known problem when only minor ones are open; a
-stuck step: they may first say what to change). Never ask them to type a script command. Do
-not run `{DF} finish` for a paused run.
+stuck step: they may first say what to change). Never ask them to type a script command. Never `{DF} finish` a paused run.

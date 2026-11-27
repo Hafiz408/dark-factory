@@ -58,6 +58,10 @@ reply) becomes its own numbered criterion in `spec.md`, tagged `(from Qn)`, in t
 full wording; never narrow it (fewer cases, a weaker verb). These are not `(derived)` and do
 not count against the derived limit.
 
+Every rule or constraint line of `input.md` (a must, a never, a limit, a "Rules" item) is its
+own acceptance criterion, in its wording. A default never drops or narrows what the input asks
+for: if one would, the question says so and the default keeps the literal text.
+
 Write both files before you reply. The last line of each file itself must be the verdict: `VERDICT: PASS - <n> gaps, <m> questions`.
 
 ## Second pass (resumed only when an answer differs from its default): spec

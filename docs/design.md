@@ -54,7 +54,11 @@ intake -> refine -> plan -> preflight -> signoff -> build -> check -> ship -> me
   ones follow, marked `(derived)`, and user-facing counts use only the user's. Accepted answers
   are a contract: each question's accepted answer (default or the user's) is its own criterion
   tagged `(from Qn)`, in its full wording; the QA author covers each, and the checker reads
-  `questions.md` and treats a narrowed promise as high.
+  `questions.md` and treats a narrowed promise as high. Every rule or constraint line of the
+  input is its own criterion, and a question's default never narrows the input; the checker
+  also reads `input.md` and treats a narrowing of it (spec, plan, code) as high. When data
+  persists, concurrent writers and partial failure are in scope: the QA author writes a
+  concurrent-write scenario and the planner may not leave data integrity out.
 - **plan.** The dependency install starts as a background shell command, then `planner` and
   `qa-author` spawn together from the spec (roles never run in the background). A feature with
   at most 5 user criteria that fits in 8 files is one step. The planner writes
@@ -146,6 +150,8 @@ gate, the failing items):
   whose scope holds the file, run by that step's resumed builder. The checker is resumed to
   re-check only the fix diff and failed scenarios. `max_review_rounds` is 3 (2 fix rounds),
   then pause.
+- A finding that survives a fix round, or that a fix caused: the next fix step first reverts
+  that fix (`git revert --no-commit`), then solves it the simplest way.
 
 ## 6. Ship cycle
 
@@ -238,7 +244,10 @@ unmerged. `df budget` runs before every spawn or resume (the retro ignores it, s
 when a cap is reached; time counts from sign-off (`signoff_at`, as do the metrics seconds); only spawns
 count toward `max_agents` (a resume keeps its agent). The run then pauses; on `resume` the user
 says yes and `df extend` allows half as much again. A new session taking over a dead one credits
-the idle gap since its last lock heartbeat, so downtime never counts. Other limits: 3 attempts per step, 3 interrupts per step,
+the idle gap since its last lock heartbeat, so downtime never counts; so does the same session
+refreshing its lock after 20 min or more without a heartbeat (`DF_IDLE_CREDIT`; an interactive
+session continuing after a usage limit). A paused run is credited only by `df unpause`. `df post`
+and `step-end` beat the heartbeat, so a long role is not mistaken for idle. Other limits: 3 attempts per step, 3 interrupts per step,
 3 review rounds, 6 steps per builder, 3 amends, 3 lanes.
 
 ## 9. State, status, resume, clean
@@ -279,7 +288,13 @@ when safe; `--archive` first copies the audit trail to `reports/<id>/` (no `run.
 - Guard hook (`hooks/guard.sh`), active only while a run lock is fresh: blocks `git push`,
   recursive deletes outside the run's worktrees, pipe-to-shell, and migrations or destructive
   SQL that don't target a per-run `df_*` database. A seat belt, not a sandbox.
-- Runs under the user's permission mode; a denial sets `waiting_permission` and stops.
+- Runs under the user's permission mode. The guard hook also records the session's
+  `permission_mode` beside the run state (fail-open, blocks nothing); `df mode` prints it, and
+  the sign-off adds one line asking to switch to auto mode unless it is auto or bypass. A denial
+  (any of the known wordings, or an auto-mode block) is never worked around: it sets
+  `waiting_permission`, stops and names what to allow.
+- `resume` refused because the run looks live asks whether another window is still working;
+  `take over` releases and re-acquires the lock.
 - Secrets are scrubbed on intake. Roles never copy the user's global CLAUDE.md rules into the
   project.
 - The scenario barrier is soft: the canary scan detects leaks rather than preventing them.

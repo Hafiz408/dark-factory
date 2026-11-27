@@ -301,4 +301,14 @@ grep -q "{DF} accept <id>" "$ROOT/skills/dark-factory/resume.md" && ok "resume: 
 grep -q "Never call an \`advisor\` tool" "$ROOT/skills/dark-factory/rules.md" && ok "rules: no advisor calls" || bad "rules: no advisor calls"
 grep -q "contrived" "$ROOT/lenses/check.md" && ok "check lens: contrived layouts are low" || bad "check lens: contrived layouts are low"
 grep -q "answer \`strict\` to stop" "$ROOT/skills/dark-factory/SKILL.md" && grep -q "WITH KNOWN PROBLEMS" "$ROOT/skills/dark-factory/ship.md" && ok "sign-off offers strict; known problems lead the note" || bad "sign-off offers strict; known problems lead the note"
+# hands-off design (2026-11-27): permission mode, denials, take over, revert a failed fix, PRD gaps
+echo "$SO" | grep -q "{DF} mode" && echo "$SO" | grep -q "Shift+Tab until it says auto" && echo "$SO" | grep -q "bypassPermissions" && ok "sign-off: says to switch to auto mode unless it is on" || bad "sign-off: says to switch to auto mode unless it is on"
+grep -q "Permission for this tool use was denied" "$S" && grep -q "requires approval" "$S" && grep -q "auto mode" "$S" && grep -q "Never work around a block" "$S" && ok "SKILL.md: current denial wording, never works around a block" || bad "SKILL.md: current denial wording, never works around a block"
+grep -q "take over" "$RS" && grep -q "{DF} lock <id> release <session-id>" "$RS" && ! grep -q -- "--force" "$RS" && ok "resume.md: a live refusal asks to take over, no --force" || bad "resume.md: a live refusal asks to take over, no --force"
+sed -n '/^## Check/,/^## Pausing/p' "$S" | grep -q "git revert" && ok "check: a fix that failed is reverted first" || bad "check: a fix that failed is reverted first"
+grep -q "rule or constraint" "$RF" && grep -q "keeps the literal" "$RF" && ok "refiner: every input rule is a criterion; a default never narrows the input" || bad "refiner: every input rule is a criterion; a default never narrows the input"
+grep -q "input.md" "$K" && grep -q "narrows .input.md." "$C" && sed -n '/^## Check/,/^## Pausing/p' "$S" | grep -q "{RD}/input.md" && ok "checker: gets input.md, a narrowing of the input is high" || bad "checker: gets input.md, a narrowing of the input is high"
+grep -q "concurrent" "$ROOT/agents/qa-author.md" && grep -q "partial failure" "$C" && ok "qa-author and check lens: concurrent writers and partial failure" || bad "qa-author and check lens: concurrent writers and partial failure"
+grep -q "data integrity" "$ROOT/agents/planner.md" && ok "planner: data integrity is never left out" || bad "planner: data integrity is never left out"
+grep -q "auto mode" "$ROOT/README.md" && grep -qi "usage limit" "$ROOT/README.md" && ok "README: auto mode and usage limits" || bad "README: auto mode and usage limits"
 finish

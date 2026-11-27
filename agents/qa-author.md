@@ -31,6 +31,8 @@ Rules:
   `(from Qn)` (an answer the user accepted) has its own scenario, testing its full wording.
 - Add scenarios for: the empty or zero case, a boundary, a permission or invalid-input case,
   and (feature and bugfix tracks) one existing behaviour that must not change (`proves: -`).
+- When the spec stores data, add one concurrent-write scenario (two writers at once; no lost
+  update, no double effect) and one partial-failure scenario where the spec implies them.
 - Scenarios describe observable behaviour, never implementation. A "must not change"
   scenario runs the behaviour or the existing test suite; it never inspects diffs, file text
   or which lines were edited (the builder may legitimately edit test imports).

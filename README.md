@@ -32,6 +32,8 @@ Then, inside your project (or an empty folder, to build something new):
 2. Read the sign-off screen and say `approve`. It shows an estimate such as
    `estimate: 7-14 min, ~6-8 agents`: a rough range, not a promise, and a cap the run will not
    exceed. Stay a moment: commands it will run may ask for permission now, so nothing stalls later.
+   To walk away, use auto mode (Shift+Tab until it says auto): in manual mode it stops at the
+   first permission prompt. The sign-off screen says so when you are not in auto mode.
 3. Leave it, usually for minutes, not hours. It prints only milestone lines (when step 1
    starts, each step done, each check round, each fix with its reason), like
    `[df r261127-101500-123] step 2 of 4 done`, and nothing else.
@@ -141,7 +143,11 @@ past runs once there are a few.
 - Work happens in a separate copy beside your repo, `../<repo>-df-<run-id>`. Your own folder
   is not touched, except by a local merge you approved.
 - Run state lives in `../.df-<repo>/<run-id>/`, never committed. One run executes per repo at
-  a time. `resume` works from a new session: everything is on disk.
+  a time. `resume` works from a new session: everything is on disk. If it says the run is live
+  elsewhere, answer `take over` when no other window is working on it.
+- Usage limit in an interactive session: Claude Code continues by itself once the limit resets,
+  and the run carries on; the wait is not counted against the time cap. A `claude -p` or
+  background session stops instead: run `resume` when the limit resets.
 - After a merge that re-tests green, it removes the working copy and local branch by itself
   and archives the run (report, spec, plan, questions, log, checks) in
   `../.df-<repo>/reports/<run-id>/`. `sweep` offers the same cleanup

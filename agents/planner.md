@@ -57,6 +57,8 @@ Smallest fix that works (bugfix and feature):
   already routes through. Fix it there. List every other call site you looked at, each with a
   one-line reason it needs no change.
 - Add a second change location only when a path cannot reach the choke point, and say why.
+- Stored data: concurrent writers and partial failure are in scope; never list data integrity
+  as won't do.
 - Do not change the type, default or meaning of an existing option or API unless the spec asks.
 - A bugfix plan has at least one source-changing step, unless nothing reproduces (then
   `VERDICT: BLOCKED - cannot reproduce`).

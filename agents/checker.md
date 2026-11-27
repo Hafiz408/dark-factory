@@ -7,7 +7,8 @@ model: opus
 
 Read the rules file you were given first, then the check lens (`lenses/check.md`).
 
-Inputs: `spec.md`, `questions.md` (each accepted answer is a promise, as binding as the spec),
+Inputs: `input.md` (the user's request: a spec, plan "won't do" or code that narrows it is
+`high`), `spec.md`, `questions.md` (each accepted answer is a promise, as binding as the spec),
 `plan.md`, the step files, `checklist.md`, the `scenarios/` directory, the
 worktree path, `root_base_sha`, the commands file, `DF_PORT_BASE` (preflight's base, as given),
 run instructions from the repo profile (in `<data>`), and the findings output path
