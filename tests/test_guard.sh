@@ -9,6 +9,18 @@ call() { printf '{"tool_name":"Bash","tool_input":{"command":"%s"}}' "$1" | "$GU
 # no run lock: guard is inert
 assert_ok "inert without a lock: git push allowed" call "git push origin main"
 
+# hands-off #1: the guard records the permission mode (fail-open, blocks nothing new)
+mode() { printf '{"session_id":"x","permission_mode":"%s","tool_name":"Bash","tool_input":{"command":"%s"}}' "$1" "$2" | "$GUARD" 2>/dev/null; }
+assert_eq "unknown" "$("$DF" mode)" "df mode: unknown before any hook call"
+mkdir -p "$(dirname "$R")/.df-$(basename "$R")"
+assert_ok "mode recorded, call allowed" mode acceptEdits "echo hi"
+assert_eq "acceptEdits" "$("$DF" mode)" "df mode prints the recorded mode"
+mode auto 'echo \"permission_mode\":\"plan\"'
+assert_eq "auto" "$("$DF" mode)" "a mode quoted inside the command is ignored"
+mode 'bad mode' "echo"
+assert_eq "unknown" "$("$DF" mode)" "an unrecognised mode reads as unknown"
+assert_ok "no permission_mode in the input: allowed" call "echo hi"
+
 id=$("$DF" start "$R/in.txt")
 "$DF" lock "$id" acquire sessA
 

@@ -6,6 +6,14 @@ g=$(git rev-parse --git-common-dir 2>/dev/null) || exit 0
 m=$(dirname "$(cd "$g" && pwd)")
 sr="$(dirname "$m")/.df-$(basename "$m")"
 ttl=${DF_LOCK_TTL:-3600}; now=$(date +%s)
+input=$(cat)
+
+# Record the session's permission mode for `df mode` (the sign-off screen). Fail-open: never blocks.
+# The unescaped key only occurs at the top level: inside tool_input its quotes are escaped.
+if [ -d "$sr" ]; then
+  pm=$(printf '%s' "$input" | sed -n 's/.*"permission_mode"[ ]*:[ ]*"\([^"]*\)".*/\1/p' | head -1)
+  [ -z "$pm" ] || printf '%s\n' "$pm" > "$sr/permission-mode" 2>/dev/null || true
+fi
 
 # Active when at least one run has a lock whose heartbeat is fresh (a corrupt heartbeat counts as
 # fresh: the conservative choice). A crashed run stops arming the guard once its lock goes stale.
@@ -22,7 +30,6 @@ for lf in "$sr"/*/lock; do
 done
 [ "$active" = 1 ] || exit 0
 
-input=$(cat)
 deny() { echo "Dark Factory guard: blocked ($1). Use a different approach or ask the user." >&2; exit 2; }
 
 # git push, including `git -C <dir> push` and `git --no-pager push`

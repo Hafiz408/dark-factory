@@ -78,6 +78,10 @@ credit_clock() { # credit_clock <run.conf> <seconds>: idle time never counts aga
     case "$s" in ''|*[!0-9]*) ;; *) conf_set "$1" $k $((s + $2));; esac
   done
 }
+cmd_mode() { # df mode: the permission mode the guard hook last saw in this repo, or unknown
+  local m; m=$(cat "$(state_root)/permission-mode" 2>/dev/null || true)
+  case "$m" in default|acceptEdits|plan|auto|dontAsk|bypassPermissions) echo "$m";; *) echo unknown;; esac
+}
 cmd_unpause() { # df unpause <run-id>: resume the clock, crediting the time spent paused
   local c p; c="$(run_dir "$1")/run.conf"; [ -f "$c" ] || die "no such run: $1"
   [ "$(conf_get "$c" status)" = paused ] || die "unpause: run is not paused"
@@ -302,6 +306,13 @@ cmd_lock() { # df lock <run-id> acquire|refresh|release|check [session]
         # a --force release removes the lock, so that path credits nothing.
         if [ "$act" = acquire ] && [ "$cur" != "$sess" ] && [ "$hb" -gt 0 ] && [ -f "$rd/run.conf" ] &&
            [ "$(conf_get "$rd/run.conf" status)" != paused ]; then
+          credit_clock "$rd/run.conf" $((now - hb))
+        fi
+        # The same session back after a long silence (a usage limit, a closed laptop): idle, not work.
+        # Not while paused: unpause credits that. post and step-end beat the heartbeat, so a long role is not idle.
+        # ponytail: a wait inside a role (the limit hit mid-builder) still counts; it ends with that role's post.
+        if [ "$act" = refresh ] && [ "$cur" = "$sess" ] && [ "$hb" -gt 0 ] && [ $((now - hb)) -ge "${DF_IDLE_CREDIT:-1200}" ] &&
+           [ -f "$rd/run.conf" ] && [ "$(conf_get "$rd/run.conf" status)" != paused ]; then
           credit_clock "$rd/run.conf" $((now - hb))
         fi
       fi
@@ -657,10 +668,15 @@ run_wt_ok() { # run_wt_ok <run.conf> <path>: the path is the run worktree or one
   [ "$2" = "$w" ] && return 0
   case $2 in "$w-c"*) printf '%s\n' "${2#"$w-c"}" | grep -Eqx '[0-9]{1,3}|FX-[0-9]+';; *) return 1;; esac
 }
+beat() { # beat <run-dir>: a role just returned, so the session is working: move the heartbeat, keep its session
+  [ -f "$1/lock" ] || return 0
+  printf 'session=%s\nheartbeat=%s\n' "$(sed -n 's/^session=//p' "$1/lock")" "$(date +%s)" | atomic "$1/lock"
+}
 mark_epoch() { date +%s | atomic "$1/spawn-epoch"; } # not hashed for read-only roles; one pre may serve several spawns (a wave)
 elapsed() { local e; e=$(cat "$1/spawn-epoch" 2>/dev/null || true); case $e in ''|*[!0-9]*) echo -;; *) echo $(( $(date +%s) - e ));; esac; }
 spawn_record() { # spawn_record <run-id> <role> <seconds-or-> <tokens> <kind> <output-file>: seconds measured from the last pre when there was one
   local rd s e; rd=$(run_dir "$1"); e=$(cat "$rd/spawn-epoch" 2>/dev/null || true)
+  beat "$rd"
   case $e in ''|*[!0-9]*) cmd_spawn_log "$1" "$2" "$3" "$4" "$5";; *) cmd_spawn_log "$1" "$2" "$(elapsed "$rd")" "$4" "$5" "$e:$(basename "$6")";; esac
 }
 ro_hashes() { # ro_hashes <run-id> <worktree> <allowed-file>...: what a read-only role must leave as it is
@@ -1591,6 +1607,7 @@ case "$cmd" in
   sub-drop) cmd_sub_drop "$@";;
   metrics) cmd_metrics "$@";;
   pause) cmd_pause "$@";;
+  mode) cmd_mode;;
   unpause) cmd_unpause "$@";;
   extend) cmd_extend "$@";;
   state-hash) cmd_state_hash;;
@@ -1616,5 +1633,5 @@ case "$cmd" in
   fm-get) fm_get "$@";;
   fm-set) fm_set "$@";;
   write) atomic "$@";;
-  *) die "usage: df {start|validate|profile-pin|verdict|gate|lock|snapshot|check-diff|canary-scan|srchash|redcheck|commit|scrub|status|list|clean|fixed|finish|ship|merge|local-merge|postmerge|revert-pr|sweep|lessons-set|metrics|state-hash|rundir-hash|spawn-log|pre|post|signoff|steps|step-start|step-end|check-start|check-end|check-gate|land|bump|estimate|budget|pause|unpause|wave|sub-add|sub-join|sub-drop|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
+  *) die "usage: df {start|validate|profile-pin|verdict|gate|lock|snapshot|check-diff|canary-scan|srchash|redcheck|commit|scrub|status|list|clean|fixed|finish|ship|merge|local-merge|postmerge|revert-pr|sweep|lessons-set|metrics|state-hash|rundir-hash|spawn-log|pre|post|signoff|steps|step-start|step-end|check-start|check-end|check-gate|land|bump|estimate|budget|pause|unpause|mode|wave|sub-add|sub-join|sub-drop|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
 esac
