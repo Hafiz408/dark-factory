@@ -1026,7 +1026,10 @@ EOF
   { printf 'run\ttrack\tchunks\tattempts\treview_rounds\tqa_rounds\tseconds\toutcome\tspawns\ttokens\tresumes\n'
     [ -f "$m" ] && tail -n +2 "$m" | grep -v "^$1	" || true
     printf '%s\n' "$row"; } | atomic "$m"
-  [ "$tok" = - ] && tok="unknown" # the orchestrator's own tokens are not in spawns.tsv
+  # Resumed and background agents often report no usage: a partial sum is a floor, never stated as the total.
+  local miss=0
+  [ ! -f "$rd/spawns.tsv" ] || miss=$(awk -F'\t' '$3 !~ /^[0-9]+$/ { m++ } END { print m+0 }' "$rd/spawns.tsv")
+  if [ "$tok" = - ]; then tok="unknown"; elif [ "$miss" -gt 0 ]; then tok="at least $tok (not reported for $miss of $((sp + rs)) agent runs)"; fi # the orchestrator's own tokens are not in spawns.tsv
   echo "time: $(( ($(date +%s) - $(clock_start "$c") + 30) / 60 )) min from sign-off; agents: $sp started, $rs resumed; agent tokens, excluding this conversation: $tok"
 }
 

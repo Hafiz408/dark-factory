@@ -90,6 +90,7 @@ In order:
 - How it was checked, one line: "<n> checks passed, tests <before>→<after>, re-tested after
   merge" (drop the last part when not merged). Any "all" or "every" claim states its scope
   ("of 500 generated cases"), and problems found that were already there are named.
+- Copy "at least ..." or "unknown" for tokens exactly as the metrics line says it.
 - Time, agents and "agent tokens, excluding this conversation" from the metrics line, against
   the estimate.
 - A leftover only when the user must act on it.

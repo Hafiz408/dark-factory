@@ -57,7 +57,7 @@ printf 'builder\t1\t1\n' >> "$rd/spawns.tsv"
 printf 'run\ttrack\tchunks\tattempts\treview_rounds\tqa_rounds\tseconds\toutcome\nr0\tbugfix\t1\t1\t1\t1\t600\tdone\n' > "$SR/metrics.tsv"
 "$DF" conf-set "$rd/run.conf" status active
 mo=$(df_ metrics "$id")
-assert_contains "; agents: 5 started, 1 resumed; agent tokens, excluding this conversation: 43008" "$mo" "metrics prints agents and agent tokens for the final note"
+assert_contains "; agents: 5 started, 1 resumed; agent tokens, excluding this conversation: at least 43008 (not reported for" "$mo" "metrics_partial_tokens_are_a_floor"
 case $mo in "time: "[0-9]*" min from sign-off; "*) ok "metrics prints minutes from sign-off, the one source for the note";; *) bad "metrics prints minutes from sign-off ($mo)";; esac
 assert_eq "run	track	chunks	attempts	review_rounds	qa_rounds	seconds	outcome	spawns	tokens	resumes" "$(head -1 "$SR/metrics.tsv")" "metrics header has spawns, tokens and resumes"
 assert_eq "r0	bugfix	1	1	1	1	600	done" "$(grep '^r0	' "$SR/metrics.tsv")" "an old row is kept as it was"
