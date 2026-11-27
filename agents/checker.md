@@ -44,9 +44,11 @@ you run.
 
 Output file sections, in order:
 - `## findings`: the findings.
-- `## scenarios`: one line each: `S1 PASS`, `S2 FAIL - <symptom>`, `S3 SKIP - not executable`,
+- `## scenarios`: one line each, exactly in this form, starting the line, with no bullet, bold,
+  table or colon: `S1 PASS`, `S2 FAIL - <symptom>`, `S3 SKIP - not executable`,
   or `S4 INVALID - <why it cannot run as written or contradicts the spec>`. An invalid
-  scenario is not a code failure.
+  scenario is not a code failure. Anywhere in the file, a line naming a scenario id together
+  with FAIL or INVALID counts as a failed scenario, so name scenario ids only here.
 - `## criteria`: one line per acceptance criterion: `AC1 met - <evidence>` or
   `AC1 not met - <why>`. Check each `(from Qn)` criterion against the answer in
   `questions.md` itself: a narrowed promise is a `high` finding. A criterion only a manual check can confirm is `met (by reading)`.

@@ -56,6 +56,8 @@ grep -q "outside the step's" "$ROOT/agents/builder.md" && ok "builder: no new te
 grep -q ".gitignore" "$ROOT/agents/builder.md" && ok "builder: never adds personal tooling rules to project files" || bad "builder: never adds personal tooling rules to project files"
 grep -q "evidence:" "$ROOT/agents/checker.md" && ok "checker: medium+ findings carry evidence" || bad "checker: medium+ findings carry evidence"
 grep -q "## findings" "$ROOT/agents/checker.md" && grep -q "## scenarios" "$ROOT/agents/checker.md" && grep -q "## criteria" "$ROOT/agents/checker.md" && ok "checker: output sections" || bad "checker: output sections"
+grep -q "exactly in this form" "$ROOT/agents/checker.md" && grep -q "name scenario ids only here" "$ROOT/agents/checker.md" && ok "checker: one canonical scenario line format" || bad "checker: one canonical scenario line format"
+grep -q '`what:` the' "$ROOT/skills/dark-factory/e2e.md" && ok "e2e: findings carry what:" || bad "e2e: findings carry what:"
 grep -q "resumed" "$ROOT/agents/checker.md" && ok "checker: may be resumed to re-check fixes" || bad "checker: may be resumed to re-check fixes"
 grep -q "lenses/check.md\|check lens" "$ROOT/agents/checker.md" && ok "checker: uses the check lens" || bad "checker: uses the check lens"
 grep -q "security" "$ROOT/agents/reviewer.md" && grep -q "risk: high" "$ROOT/agents/reviewer.md" && ok "reviewer: security lens on high-risk steps" || bad "reviewer: security lens on high-risk steps"

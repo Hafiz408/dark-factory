@@ -14,7 +14,8 @@ the merge.
    pause.
 2. Run `e2e_cmd`, then always `stop_cmd`.
 3. A check round: a test failing now that passed at baseline is a `high` finding
-   (`source: e2e`, `evidence:` the test and its output) in `{RD}/panel/e2e-r<n>-findings.md`;
+   (`- severity: high`, then indented `source: e2e`, `where:` the test file, `what:` the
+   failure in plain words, `evidence:` the test and its output) in `{RD}/panel/e2e-r<n>-findings.md`;
    one that failed at baseline is pre-existing. Then `{DF} check-gate <id>`: it gates the
    round's checker, suite and e2e findings and records the pass.
 4. After the merge: `{DF} conf-set {RD}/run.conf postmerge_e2e green` (or `red`), then run

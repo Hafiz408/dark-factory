@@ -263,24 +263,34 @@ cmd_verdict() { # df verdict <role-output-file>: prints the verdict word, exit 1
   echo "$last" | sed -E 's/^VERDICT: ([A-Z_]+).*/\1/'
 }
 
+# One reading of findings files for the gate and for acceptance, so they never disagree.
+# A medium+ finding without an evidence: line (a failing command, scenario id, or file:line + input) counts as low.
+# mode=count prints "<blocking> <total> <bad severity words>"; mode=list prints each blocking finding (with or without
+# a what: line) and every line pairing a scenario id with FAIL or INVALID, in any format (fail closed).
+FINDINGS_AWK='
+  function flush() {
+    if (sev != "") {
+      if (sev!="critical" && sev!="high" && sev!="medium" && sev!="low") bad++
+      t++
+      if ((sev=="medium"||sev=="high"||sev=="critical") && ev && tags !~ /pre-existing/ && !(sev=="medium" && tags ~ /late-find/)) {
+        b++; if (mode == "list") print "  " sev " " (w == "" ? "?" : w) ": " (x == "" ? "(no what: line)" : x)
+      }
+    }
+    sev=""; tags=""; ev=0; w=""; x=""
+  }
+  FNR == 1 { flush() }
+  /^- severity:/ { flush(); sev=$3 }
+  /^[ \t]+tags:/ { tags=$0 }
+  /^[ \t]+evidence:[ \t]*[^ \t]/ { ev=1 }
+  /^[ \t]+where:/ { w=$0; sub(/^[ \t]+where:[ \t]*/, "", w) }
+  /^[ \t]+what:/ { x=$0; sub(/^[ \t]+what:[ \t]*/, "", x) }
+  mode == "list" { u=toupper($0)
+    if (u ~ /(^|[^A-Z0-9])S[0-9]+([^0-9]|$)/ && u ~ /(^|[^A-Z])(FAIL|FAILS|FAILED|FAILING|INVALID)([^A-Z]|$)/) { l=$0; sub(/^[ \t]+/, "", l); print "  scenario " l } }
+  END { flush(); if (mode == "count") printf "%d %d %d\n", b+0, t+0, bad+0 }'
 cmd_gate() { # df gate <findings-file>...: prints "<blocking> <total>", exit 1 if blocking > 0
   local out
   [ $# -ge 1 ] || die "usage: df gate <findings-file>..."
-  # A medium+ finding without an evidence: line (a failing command, scenario id, or file:line + input) counts as low.
-  out=$(awk '
-    function flush() {
-      if (sev != "") {
-        if (sev!="critical" && sev!="high" && sev!="medium" && sev!="low") bad++
-        t++
-        if ((sev=="medium"||sev=="high"||sev=="critical") && ev && tags !~ /pre-existing/ && !(sev=="medium" && tags ~ /late-find/)) b++
-      }
-      sev=""; tags=""; ev=0
-    }
-    FNR == 1 { flush() }
-    /^- severity:/ { flush(); sev=$3 }
-    /^[ \t]+tags:/ { tags=$0 }
-    /^[ \t]+evidence:[ \t]*[^ \t]/ { ev=1 }
-    END { flush(); printf "%d %d %d\n", b+0, t+0, bad+0 }' "$@")
+  out=$(awk -v mode=count "$FINDINGS_AWK" "$@")
   if [ "${out##* }" -ne 0 ]; then die "gate: unknown severity word in $* (use critical|high|medium|low, lowercase)"; fi
   out="${out% *}"
   echo "$out"
@@ -998,12 +1008,7 @@ cmd_accept() { # df accept <run-id>: the user said yes to merging with the open 
   accept_record "$(basename "$rd")" "$n" "$@" || return $?
   echo "accept: recorded. Known problems merged as they are:"; check_items "$@"
 }
-check_items() { # the blocking findings and the failed or invalid scenarios, one line each
-  awk '/^- severity:/ { s = $3 } /^[ \t]+where:/ { w = $0; sub(/^[ \t]+where:[ \t]*/, "", w) }
-    /^[ \t]+what:/ { x = $0; sub(/^[ \t]+what:[ \t]*/, "", x); if (s ~ /^(critical|high|medium)$/) print "  " s " " w ": " x }
-    /^(- )?S[0-9]+ (FAIL|INVALID)/ { print "  " $0 }' "$@"
-}
-
+check_items() { awk -v mode=list "$FINDINGS_AWK" "$@"; } # the blocking findings and the failed or invalid scenarios, one line each
 cmd_metrics() { # df metrics <run-id>: one row per run in <state-root>/metrics.tsv, replaced on re-run
   local rd c m f chunks=0 att=0 a row sp=0 rs=0 tok=- rr qr
   rd=$(run_dir "$1"); c="$rd/run.conf"; m="$(state_root)/metrics.tsv"
