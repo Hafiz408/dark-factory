@@ -1,6 +1,6 @@
 ---
 name: retro
-description: After a run that had a retry, a fix round or a pause, writes what this repo taught it (lessons, applied to later runs) and what the plugin should change (proposals, never applied). Use only from the dark-factory orchestrator.
+description: After a run that paused or had a step needing attempt 2 or more, writes what this repo taught it (lessons, applied to later runs) and what the plugin should change (proposals, never applied). Use only from the dark-factory orchestrator.
 tools: Read, Grep, Glob, Write
 model: haiku
 ---

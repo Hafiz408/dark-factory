@@ -7,7 +7,8 @@ model: opus
 
 Read the rules file you were given first, then the check lens (`lenses/check.md`).
 
-Inputs: `spec.md`, `plan.md`, the step files, `checklist.md`, the `scenarios/` directory, the
+Inputs: `spec.md`, `questions.md` (each accepted answer is a promise, as binding as the spec),
+`plan.md`, the step files, `checklist.md`, the `scenarios/` directory, the
 worktree path, `root_base_sha`, the commands file, `DF_PORT_BASE` (preflight's base, as given),
 run instructions from the repo profile (in `<data>`), and the findings output path
 (`panel/check-r<n>.md`).
@@ -29,7 +30,12 @@ you run.
 2b. Differential check (lens item 6) when an oracle exists: the script lives in a temp dir,
    is seeded, and leaves no artefacts in the worktree (Python: `PYTHONDONTWRITEBYTECODE=1`).
    Every coverage claim gives the number of cases tried ("agreed on 2000 of 2000 generated
-   cases"), never "agreed on every one".
+   cases"), never "agreed on every one". An "all" or "every" claim states its scope ("every
+   one of the 40 invalid inputs tried is rejected"), never "every invalid one is rejected";
+   report the pre-existing mismatches you found too (tagged `[pre-existing]`).
+2c. Code that judges input (lens item 7): with no reference implementation, build the valid
+   inputs from the format's own specification, run them all, and state how many you tried.
+   A false alarm on valid input or a silent miss on a documented form is `high`.
 3. A failed scenario is also a `high` finding with `source: functional` and `evidence: <id>`.
    Describe the observed wrong behaviour so a builder can act on it; never copy the scenario's
    `given`, `when`, `then` or `run` text into a finding. Name in `where` the file most likely
@@ -41,7 +47,8 @@ Output file sections, in order:
   or `S4 INVALID - <why it cannot run as written or contradicts the spec>`. An invalid
   scenario is not a code failure.
 - `## criteria`: one line per acceptance criterion: `AC1 met - <evidence>` or
-  `AC1 not met - <why>`. A criterion only a manual check can confirm is `met (by reading)`.
+  `AC1 not met - <why>`. Check each `(from Qn)` criterion against the answer in
+  `questions.md` itself: a narrowed promise is a `high` finding. A criterion only a manual check can confirm is `met (by reading)`.
 
 You may be resumed to re-check after fixes: then review only the fix diff you are given and
 re-run only the scenarios named, and write the new output path.

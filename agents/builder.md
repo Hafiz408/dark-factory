@@ -18,6 +18,12 @@ Method:
    parametrising before adding a new one. Run them and see them fail.
 2. Write the code until they pass. Then run the full suite, lint and typecheck.
 3. A step with `no_tests:` in its file adds no tests.
+4. Code that judges input (a parser, validator, linter or checker): the tests cover every form
+   the format's own specification documents (valid forms that must pass, not only the
+   examples), so a false alarm or a silent miss cannot slip in.
+5. A step that touches caching, memoisation or a loop over input adds a scaling check (for
+   example the same call at n=200 and n=2000 stays roughly linear), so a slowdown cannot slip
+   in. Prefer the simplest structure that meets the criteria.
 
 Hard rules:
 - Change only paths inside the step's `scope`. Never create a test file outside the step's

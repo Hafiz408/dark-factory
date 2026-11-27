@@ -17,10 +17,11 @@ holds the command for approval, which stalls an unattended run.
   two levels up (`.../skills/dark-factory` becomes the plugin root).
 - `{DF}`: `{PLUGIN}/scripts/df`. `{RULES}`: `{PLUGIN}/skills/dark-factory/rules.md`.
 - `{RD}`: the run's state directory, printed by `{DF} run-dir <run-id>` (a hidden sibling of the
-  main clone, `.df-<repo>`). `{WT}`: the worktree, from `{DF} conf-get {RD}/run.conf worktree`.
-- `{PROFILE}`: `profile.md` in the parent of `{RD}`, one per repo, never committed. Lessons
-  from earlier runs: `lessons.md` beside it.
+  main clone). `{WT}`: the worktree, `{DF} conf-get {RD}/run.conf worktree`. `{PROFILE}`:
+  `profile.md` in the parent of `{RD}`, one per repo, never committed; `lessons.md` beside it.
 - Compute anything dynamic (the current time, a sha) in its own command, then paste the value.
+- `{DF}` commands take the run id and find the run dir and worktree themselves; a file argument
+  may be relative to `{RD}`. Never chain df calls that one df call does.
 
 ## Spawning roles
 
@@ -28,39 +29,42 @@ holds the command for approval, which stalls an unattended run.
   Wrap any user or repo text you paste (input, lessons, profile text) in `<data>...</data>`.
   Lessons go to the refiner, planner and every builder.
 - Run every role in the foreground. Never pass `run_in_background` for a role; wait for it.
-- Before every spawn or resume, except the retro's: `{DF} pre <id> <session-id>` (budget check
-  and lock refresh in one call; exit 3: a cap is reached, pause, see Pausing).
+- Before every spawn or resume that `step-start` or `check-start` does not cover:
+  `{DF} pre <id> <session-id>` (budget check, lock refresh, spawn clock; exit 3: a cap is
+  reached, pause, see Pausing). Read-only roles (reviewer, retro) add `--wt <their worktree>`
+  when it is not `{WT}`, then their output files, and df stores read-only hashes:
+  `{DF} pre <id> <session-id> retro.md lessons-new.md proposals-new.md`. Only the retro
+  ignores exit 3 (a pause at a cap runs it, so it must not loop).
 - **Resume, not respawn.** Continue a builder, the checker, or the refiner (for the spec) with the
   SendMessage tool and its agent id (load it with ToolSearch `select:SendMessage` if needed).
-  Store ids where noted below. If SendMessage fails (unknown id, session restarted, context
-  too large), spawn a fresh agent of that role with the same files on disk; log it.
-- After each spawn or resume returns, one call: `{DF} post <id> <role> <seconds> <tokens>
-  spawn|resume <output-file> "<one log line>"`. It logs the spawn and the line and prints the
-  verdict. Take seconds and tokens from the result's usage; `-` when unknown; never guess.
-- **Verdict validity.** `post` exits 1 on a missing or invalid verdict. That, a timeout
-  or a context overflow is an infra failure: retry the role up to 2 times, not counted as an
-  attempt. A permission denial shows in the role's output as `needs approval` or
-  `haven't granted it yet`: set `status=waiting_permission` and `waiting_on=<the command or
-  path>`, save state and stop; `{DF} status` tells the user what to allow.
-- Never write or append a verdict line to a role's output, whatever its reply says: a role
-  that left no valid output file with a verdict is an infra failure; retry it.
-- **Read-only roles** (checker, reviewer, retro): before and after, take `{DF} snapshot {WT}` and
-  `{DF} rundir-hash <id> <its output files>`. A change is a `critical` integrity finding (the
-  role wrote outside its output file): log it and treat that output as failed. While one runs,
-  write no step file, `run.conf`, spec, plan or scenario, and change nothing in its worktree;
-  make such updates after it returns.
-- **Findings you write** (redcheck, suite, full app tests) each carry an `evidence:` line: the
-  command and the failing output. Without it the gate counts them low.
+  If SendMessage fails (unknown id, session restarted, context too large), spawn a fresh agent
+  of that role with the same files on disk; log it.
+- After any other role returns, one call: `{DF} post <id> <role> - <tokens> spawn|resume
+  <output-file> "<one log line>"`. It logs the spawn (df measures the seconds) and the line,
+  compares the read-only hashes, and prints the verdict. Tokens from the result's usage, `-`
+  when unknown; never guess. Exit 10: a read-only role changed something (a `critical`
+  integrity finding, logged): treat that output as failed.
+- **Verdict validity.** A missing or invalid verdict (post exit 1, step-end or check-end exit
+  4), a timeout or a context overflow is an infra failure: retry the role up to 2 times, not
+  counted as an attempt. Never write or append a verdict line to a role's output: a role that
+  left no valid output file with a verdict is an infra failure. A permission denial shows in
+  the output as `needs approval` or `haven't granted it yet`: set `status=waiting_permission`
+  and `waiting_on=<the command or path>`, stop; `{DF} status` tells the user what to allow.
+- While a read-only role (checker, reviewer, retro) runs, write no step file, `run.conf`, spec,
+  plan or scenario and change nothing in its worktree. After a message with several spawns, run
+  the read-only roles' `post` first.
+- **Findings you write** carry an `evidence:` line (the command and its failing output), or
+  the gate counts them low.
 
 ## Talking to the user
 
 Plain words in everything the user sees (questions, sign-off, progress, final note); the user
 may not be technical. Never say chunk, lens, worktree, e2e or gate to the user: say step,
-check, working copy, full app tests. Between sign-off and the final note print only milestone
-lines `[df <id>] <plain event>` (for example `[df r261127-101500-123] step 2 of 4 done`), one per
-milestone: a stage starts, a step passes or is stuck, a check round's result, a pause, each
-ship step, the end. No text before or between tool calls ("I'll now...", "The builder is
-working..."): either a milestone line or silence, except a stop that needs the user.
+check, working copy, full app tests. Between sign-off and the final note the only text you
+write is milestone lines `[df <id>] <plain event>`: repeat each `milestone:` line df prints,
+word for word, and add one for a pause, a stuck step and the end. No other assistant text,
+ever, before, between or after tool calls ("Step 1 is being built now.", "The final check is
+running."): a milestone line or silence, except a stop that needs the user.
 
 ## Subcommands
 
@@ -87,7 +91,8 @@ and the start of a new run, never on `status`.
 4. `{DF} start <scrubbed-file>` (prefix `DF_ALLOW_INIT=1` only for an empty directory and a new
    application), adding `--base <ref>` and `--branch <name>` only when given. A refusal
    (one run executes per repo at a time) is relayed in one line, then stop. `could not fetch`: say
-   the base may be out of date, and again at sign-off.
+   the base may be out of date, and again at sign-off. `started a new git repository`: tell the
+   user in one plain line, before any question, that the folder is now a git repository.
 5. Pick a session id once (`s` plus the epoch time) and pass it to every lock command:
    `{DF} lock <id> acquire <session-id>`.
 6. One line to the user: the run id, and that uncommitted files are not included when
@@ -110,18 +115,20 @@ Set the cursor with `{DF} conf-set {RD}/run.conf stage <name>` on entering each 
    `mixed: yes`: ask whether to do the parts as separate runs (queue the rest).
 4. Show the questions (at most 8, each with its default). Wait. Append the answers to
    `questions.md`. All defaults (`ok`): the draft is the spec, no resume. Else resume the
-   refiner (SendMessage): "The answers are in questions.md. Write `{RD}/spec.md`." `NEEDS_DECISION`: ask its follow-up or contradiction once, resume it again.
-   `BLOCKED`: `Recommend abort: <reason>` at sign-off.
-   A gap marked infeasible becomes `Recommend abort: <reason>` at sign-off.
+   refiner (SendMessage): "The answers are in questions.md. Write `{RD}/spec.md`." Every
+   accepted answer is a `(from Qn)` criterion in the spec, unnarrowed (`agents/refiner.md`).
+   `NEEDS_DECISION`: ask its follow-up or contradiction once, resume it again. `BLOCKED`, or
+   a gap marked infeasible: `Recommend abort: <reason>` at sign-off.
 
 ### plan
 1. Start preflight step 1's install in `{WT}` as one background shell command (Bash
    `run_in_background`; roles are never backgrounded). Then in ONE message spawn `planner`
-   (spec, track file, repo, detected env, lessons, run dir;
-   on the bugfix track pass `model: sonnet` in the spawn) and `qa-author` (spec, track file,
-   profile run text, output `{RD}/scenarios/`).
-2. `VERDICT: BLOCKED` from the planner: carry it to sign-off as `Recommend abort: <reason>`.
-3. Scenarios with `executable: no` are listed at sign-off as manual checks.
+   (spec, track file, repo, detected env, lessons, run dir; pass `model: sonnet` on every track,
+   `model: opus` only when the spec touches auth, payments, secrets, data deletion or
+   migrations, or the repo has more than about 200 source files) and `qa-author` (spec, track
+   file, profile run text, output `{RD}/scenarios/`).
+2. Planner `BLOCKED`: `Recommend abort: <reason>` at sign-off. Scenarios with `executable: no`
+   are listed at sign-off as manual checks.
 
 ### preflight
 1. Detect the stack (per package in a monorepo); install dependencies in `{WT}` (started
@@ -130,7 +137,9 @@ Set the cursor with `{DF} conf-set {RD}/run.conf stage <name>` on entering each 
    `{RD}/env.commands`, each with settings that leave no artefacts (for example
    `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v`). The one that runs the tests also goes
    in `{DF} conf-set {RD}/run.conf test_cmd "<command>"`. Run each once, in one Bash call per
-   command: approvals happen now, while the user is here. Record a denial or env failure.
+   command: approvals happen now, while the user is here. Install the lint and type tools the
+   project config declares (pre-commit, ruff, mypy, eslint); one that cannot run is said at
+   sign-off as "this check cannot run here". Record a denial or env failure.
 3. Run the suite at `root_base_sha`; save to `{RD}/baseline.md`. Failures there are
    pre-existing; each command that fails here goes verbatim on a line of `{RD}/baseline.failing`.
 4. List unmet needs (services, credentials, network). Allocate `DF_PORT_BASE` (a random free
@@ -145,8 +154,9 @@ Set the cursor with `{DF} conf-set {RD}/run.conf stage <name>` on entering each 
    `branch` (repo rules beat the default; merging then needs the answer `merge`).
 
 ### signoff (the only gate)
-Run `{DF} estimate <id> <steps> <lanes>` (lanes from `plan.md`'s `lanes:`); log both lines.
-Show one screen in plain words. First block, at most 12 lines, no YAML, file names or tool names:
+`{DF} steps <id>` prints the steps in the order they will run (from the step files, which
+run side by side), the estimate and the `cap:` line, and logs both. Show one screen in plain
+words. First block, at most 12 lines, no YAML, file names or tool names:
 - What I understood (the goal; a bug fix, a new feature or a new app: answer `bugfix`,
   `feature` or `build` to change it), what I will do, what I will not do.
 - The ending and why (by whether `git remote get-url origin` and `gh auth status` exit 0,
@@ -157,118 +167,107 @@ Show one screen in plain words. First block, at most 12 lines, no YAML, file nam
   leave the merge to you" (without both: as `branch`). `branch`: "I will leave it on
   `<branch>`; nothing is pushed or merged." Quote a repo rule that set it in one line.
   Other answers: `merge`, `no merge` (stop at the PR), `local`, `branch`.
-- The estimate line, "This is a rough range, not a promise.", the `cap:` line: "I stop and ask
-  if it goes past this." `Recommend abort: <reason>` if any. Then the question, then `Details`:
-- Steps with sizes, which run side by side; hidden checks: number and titles only (never
-  steps); manual checks. Assumptions with sources. How: `plan.md`'s Approach, Alternatives
-  considered and Trade-offs, at most ten lines.
+- The estimate line, "This is a rough range, not a promise.", the `cap:` line: "This is a
+  safety limit well above the estimate; I stop and ask only if the run goes past it."
+  `Recommend abort: <reason>` if any. Then the question, then `Details`:
+- The step list exactly as `{DF} steps` printed it; hidden checks: number and titles only
+  (never steps); manual checks. Assumptions with sources. How: `plan.md`'s Approach,
+  Alternatives considered and Trade-offs, at most ten lines.
 - Commands I will run (`env.commands`), new dependencies, and `{PROFILE}` verbatim on every run
-  ("drafted, please confirm" when written this run). Nothing in it has run yet.
+  ("drafted, please confirm" when written this run). Nothing in it has run yet. A profile with
+  no commands (a new or empty project): one plain line instead, "There is no app to start yet,
+  so no full app tests will run."
 - Starting point: `base_ref` at the short `root_base_sha`, on branch `<branch>`; to change it,
   abort and start again. Uncommitted files left out. Unmet needs. Estimate caveats: retries
   are unknown in advance, your plan usage is unseen, it improves after a few runs here.
 Ask: approve, amend `<what>` (re-run only the affected stages; at most 3 amends), or abort; the
-ship words may come with approve. Record `{DF} conf-set {RD}/run.conf ship_mode` with the word
-given (`no merge` is `pr`) or the default, `ship_base` if asked, the approval in `log.md`, and
-run `{DF} profile-pin <id>`. This is the last question before the report: nothing is asked
-after it except a permission stop, and the screen says so.
-
-### slice
-`mv` each file from `chunks-draft/` to `chunks/`; `{DF} validate <id>`. If the profile has an
-`e2e_cmd`, run it once now at `root_base_sha` (starting the app as in Check) and save it to
-`{RD}/e2e-baseline.md`.
+ship words may come with approve. On approve: `{DF} signoff <id> <word> [<target>]` with the
+word given or the default (it records `ship_mode`, `no merge` as `pr`, the target if asked,
+the approval, pins the profile, moves the steps in, validates and sets stage `build`). This is
+the last question before the report: nothing is asked after it except a permission stop, and
+the screen says so. If the profile has an `e2e_cmd`, run it once now at `root_base_sha`
+(`e2e.md`) into `{RD}/e2e-baseline.md`.
 
 ## Build (stage `build`): no questions from here on
 
-**Lanes.** Loop until no step is `pending`: run `{DF} wave <id>`. It prints up to 3 ready steps
-with disjoint scopes. One id, or a plan of at most 3 steps: run it in `{WT}` as lane 1. Two or
-more: a parallel wave, one lane per step in wave order. Nothing printed while steps are
-pending: run the lowest-id pending step whose dependencies passed, in `{WT}`, as lane 1.
+No assistant text accompanies a spawn here: progress is only the `milestone:` lines.
 
-**Builders.** One builder per lane, kept across steps: lane k's id and step count live in
-`run.conf` as `lane<k>_agent` and `lane<k>_steps`. A lane's next step, retries and fixes
-resume that builder (SendMessage: the step file path, the worktree path, the output path, the
-failure note). Spawn a fresh builder for the lane's first step, when the resume fails, and
-when `lane<k>_steps` reaches 6 steps (reset the count). After each step
-`{DF} fm-set <step> builder_agent <agent id>`.
+**Lanes.** Loop until no step is `pending`: `{DF} wave <id>` prints the steps to run next. One
+id: run it in `{WT}` as lane 1. Several: a parallel wave, one lane per step in wave order.
+Nothing printed while steps are pending: they all wait on a BLOCKED step (see 4).
 
-**Parallel wave.** For each step: `{DF} sub-add <id> NN` prints its sub-worktree; run every line
-of `{RD}/install.commands` there; it uses port base `DF_PORT_BASE + 10 x <position>` and database
-suffix `df_<run-id>_c<NN>`. Spawn or resume the wave's builders in ONE message; steps advance
-independently. When all finish, record the run branch head in `log.md` as the wave base; join
-the PASS steps in id order with `{DF} sub-join <id> NN` (it logs the joined commit in
-`log.md`, as `{DF} commit` does), then print that step's milestone. A join that refuses:
-`{DF} sub-drop <id> NN`, set it `pending` with `{DF} fm-set <step> serial yes`, `interrupts`
-+1 (3 interrupts: BLOCKED). Drop BLOCKED steps' sub-worktrees too. Then run the full suite in `{WT}`; red: reset `{WT}` to the
-wave base, set the joined steps `pending`, `serial yes`, interrupts +1, and rerun them serially.
+**Builders.** One builder per lane, kept across steps: its next step, retries and fixes resume
+it (SendMessage: step file, worktree, output path, failure note). Spawn a fresh one for the
+lane's first step, when the resume fails, and when `step-end` says it has done 6 steps.
 
-**One step** in worktree `<wt>` (`{WT}` or its sub-worktree). Keep values in the step file or
-`log.md`, never in shell variables.
-1. `git -C <wt> rev-parse HEAD`; `{DF} fm-set <step> base_sha <sha>`, `status running`.
-2. For attempt 1..3 (`{DF} fm-set <step> attempts <n>`):
-   a. Builder (spawn or resume) writes `{RD}/panel/NN-a<n>-builder.md`.
-   b. One call does every mechanical check (scope and test integrity, canary, commit, redcheck,
-      each `env.commands` line, gate): `{DF} step-check <wt> <step> {RD}/panel/NN-a<n>-builder.md
-      {RD}/panel/NN-a<n>-checks.md "df(step NN): <title>"`. Exit 0: pass. 1: blocking. 4: infra
-      (retry once, not an attempt; again: pause). 5: a canary leaked: hard reset, regenerate the
-      scenarios with `qa-author`, use a fresh builder. 6: a command that already failed before
-      the run failed again: read its log; only a new failure is a `high` finding added to the
-      checks file; `{DF} gate` it.
-   c. `risk: high` and b passed: spawn `reviewer` with `{PLUGIN}/lenses/security.md`, the step,
-      `<wt>`, `base_sha`, output `{RD}/panel/NN-a<n>-security.md` (read-only hashes around it),
-      then `{DF} gate` over both findings files.
-   d. Not blocking: `status PASS`, milestone line, next step. Blocking: append one failure note
-      to the step's `## Failure notes` (scenario symptoms only, never scenario text), undo the
-      commit with `git -C <wt> reset -q <base_sha>` (keeps the files), next attempt.
-3. After attempt 3: reset is `git -C <wt> reset --hard <base_sha>` and `git -C <wt> clean -fd`
-   (never `-x`); `status BLOCKED`. One re-plan per run: spawn `planner` with the failure
-   notes. Still BLOCKED: mark SKIPPED every step that depends on it, directly or through other
-   steps (repeat until no pending step depends on a BLOCKED or SKIPPED one), and continue.
+**Parallel wave** (several ids): read `{PLUGIN}/skills/dark-factory/wave.md` and follow it.
+
+**One step** `NN` (df uses the step's sub-worktree when it has one, else `{WT}`):
+1. `{DF} step-start <id> NN <session-id>` (budget, lock, `base_sha`, `status running`, attempt
+   +1) prints the base, attempt, worktree and builder output path. Exit 3: pause at a
+   cap. Exit 8: its attempts are used up; df reset it and marked it BLOCKED (go to 4).
+2. The builder (spawn or resume) writes that builder output.
+3. `{DF} step-end <id> NN <lane> <agent-id> <tokens> spawn|resume "<title>"` logs the spawn,
+   stores the agent ids, runs every mechanical check (scope and test integrity, canary,
+   commit, redcheck, each `env.commands` line with `test_cmd` and `baseline.failing`, gate;
+   `df step-check` alone does the same) and marks the step PASS. Exit 0: next step.
+   2: blocking. 4: infra (`{DF} pre`, retry the builder, `step-end` again; not an attempt;
+   twice: pause). 5: a canary leaked: `git -C <wt> reset --hard <base_sha>`, regenerate the
+   scenarios with `qa-author`, use a fresh builder. 6: a command that already failed before
+   the run failed again: read its log; only a new failure is a `high` finding added to the
+   checks file; `{DF} gate` it. 7: `risk: high`: spawn `reviewer` with
+   `{PLUGIN}/lenses/security.md`, the step, `<wt>`, `base_sha`, output
+   `panel/NN-a<n>-security.md` (`pre` with `--wt <wt>` and that file, then `post`), then
+   `{DF} gate` over both files (absolute paths). 9: the builder said `TOO_BIG` or `BLOCKED`
+   (see Also). Not blocking after 6 or 7: `{DF} fm-set <step> status PASS`.
+   Blocking: append one failure note to the step's `## Failure notes` (symptoms only, never
+   scenario text), then step-start again (it undoes the failed commit and keeps the files).
+4. BLOCKED: one re-plan per run: spawn `planner` with the failure notes; set the re-planned
+   step `status pending`, `attempts 0` with `{DF} fm-set`. Still BLOCKED: mark
+   SKIPPED every step that depends on it, directly or through other steps (repeat until no
+   pending step depends on a BLOCKED or SKIPPED one), and continue.
 
 Also: `TOO_BIG`: ask `planner` to split that step once. `NEEDS_DECISION`: take the stated
 conservative default, log it as an assumption; no safe default: BLOCKED. On the bugfix track
 the default is the one that makes the reported input behave correctly: a cause in a source file
 outside `scope` is added to `scope` (logged). Two attempts failing on the same top finding:
-tell the builder to take a different approach. Time: `{DF} budget` counts `budget_seconds`
-from sign-off (`signoff_at`); the questions before it are not counted.
+tell the builder to take a different approach. Time counts from sign-off (`signoff_at`).
 
 ## Check (stage `check`)
 
-On entry: any step BLOCKED or SKIPPED: pause without spawning. Otherwise, per round:
-1. `{DF} bump <id> review` prints round `<n>`. `{DF} validate <id>`; a changed profile pauses.
-2. Round 1: spawn `checker` with `{PLUGIN}/lenses/check.md`, spec, plan, step files,
-   `{RD}/scenarios/` (with `checklist.md`), `{WT}`, `root_base_sha`, `env.commands`,
+No assistant text accompanies a spawn here either: progress is only the `milestone:` lines. Per round:
+1. `{DF} check-start <id> <session-id>` (stage, round count, validate, lock, read-only hashes)
+   prints the round, output path and, from round 2, the fix diff. Exit 8: a step is BLOCKED or
+   SKIPPED: pause without spawning. 3: a cap (re-checking an applied fix ignores the time
+   cap). A validate failure (a changed profile) pauses.
+2. Round 1: spawn `checker` with `{PLUGIN}/lenses/check.md`, spec, `questions.md`, plan, step
+   files, `{RD}/scenarios/` (with `checklist.md`), `{WT}`, `root_base_sha`, `env.commands`,
    `DF_PORT_BASE` = `port_base` unchanged (it runs its app on `DF_PORT_BASE + 50`; yours stays
-   free), the profile's `## How to start` and `## Signing in for tests` in `<data>`, output
-   `{RD}/panel/check-r<n>.md`; store `{DF} conf-set {RD}/run.conf checker_agent <id>`.
-   Later rounds resume it: "Re-check the fix diff `git diff <sha>..HEAD` and scenarios
-   <ids>; write `{RD}/panel/check-r<n>.md`." Read-only hashes around it.
-3. After the checker returns (never while it runs: its hashes would see the app's files and
-   your outputs), run the full suite in `{WT}`, and the profile's `e2e_cmd`: with
-   `e2e_needs_app` yes, start `start_cmd` in the background (`<WORKTREE>` = `{WT}`, `<PORT>` =
-   `DF_PORT_BASE`), poll `ready_url` up to 120 s, run `e2e_cmd`, then always `stop_cmd`. Save to
-   `{RD}/panel/e2e-r<n>.md`. A test failing now that passed at baseline is a `high` finding
-   (`source: e2e`, `evidence:` the test and its output) in `{RD}/panel/e2e-r<n>-findings.md`;
-   one that failed at baseline is
-   pre-existing. App never ready: retry once, then pause. No `e2e_cmd`: the report says
-   `e2e: not configured`, never a pass.
+   free), the profile's `## How to start` and `## Signing in for tests` in `<data>`, the output
+   path. Later rounds resume it: "Re-check the fix diff `<fix diff>` and scenarios <ids>;
+   write `<output path>`."
+3. After the checker returns: `{DF} check-end <id> <agent-id> <tokens> spawn|resume` (hashes,
+   spawn log, `checker_agent`, every `env.commands` line, `e2e: not configured` when the profile
+   has no `e2e_cmd`, gate) prints the blocking findings and failed scenarios. Exit 0: clean. 2: blocking. 3: blocking with no fix
+   round left (`max_review_rounds`): pause. 4: infra (check-start again, same round; retry the
+   checker; check-end). 6: as in step-end. 10: the checker changed something: check-start
+   again and spawn a fresh checker. With an `e2e_cmd`: read `{PLUGIN}/skills/dark-factory/e2e.md`
+   and run the full app tests now, then `{DF} gate` its findings with the round's.
 4. A scenario marked `INVALID`: spawn `qa-author` once to rewrite it (else mark it
    `executable: no`), and re-run it next round.
-5. `{DF} gate` over the round's findings. Nothing blocking and a green suite: read
-   `{PLUGIN}/skills/dark-factory/ship.md` and follow it.
-6. Blocking and `<n>` has reached `max_review_rounds` (default 3, so at most 2 fix rounds):
-   pause. Otherwise each finding goes to the step whose `scope` holds its `where` file (no
-   file, as for a full app test: the last step, with every step's scope): write a
-   fix step `chunks/FX-<k>.md` (scope = that step's scope plus files the finding names;
-   existing tests or test helpers it names in `touches_tests`; "Done when" = the expected
-   behaviour in your words, symptoms only; nothing else, no new docs unless a finding is about
-   them; `builder_agent` = the owner's). Run fix steps as steps in `{WT}`, resuming the owning
-   builder. Then the next round.
+5. Nothing blocking: read `{PLUGIN}/skills/dark-factory/ship.md` and follow it.
+6. Blocking: each finding goes to the step whose `scope` holds its `where` file (no file, as
+   for a full app test: the last step, with every step's scope): write a fix step
+   `chunks/FX-<k>.md` whose `title` is the plain reason (scope = that step's scope plus files
+   the finding names; existing tests or test helpers it names in `touches_tests`; "Done when" =
+   the expected behaviour in your words, symptoms only; nothing else, no new docs unless a
+   finding is about them; `builder_agent` = the owner's). Run fix steps as steps in `{WT}`,
+   resuming the owning builder. Then the next round.
 
 ## Pausing
 
 The run never finishes while something is open. To pause: write `report.md` (see `ship.md`)
-with `PAUSED: <what is open>` as its first line; run the retro (`ship.md`, no budget check)
+with `PAUSED: <what is open>` as its first line; run the retro (`ship.md`; it ignores exit 3)
 without changing `stage`; `{DF} pause <id> "<what is open>"`; `{DF} metrics <id>` (its line
 verbatim into the report); `{DF} lock <id> release <session-id>`; print `[df <id>] paused: <what is open>`; and tell the
 user, in plain words, what is open and the one thing to say to go on:

@@ -53,6 +53,11 @@ faulty code path, never only the reported pattern.
 Then write `spec.md` as in the second pass, assuming every default answer (each marked
 `user (default)`), so that an `ok` needs no second pass.
 
+Accepted answers are a contract: every question's accepted answer (its default, or the user's
+reply) becomes its own numbered criterion in `spec.md`, tagged `(from Qn)`, in the answer's
+full wording; never narrow it (fewer cases, a weaker verb). These are not `(derived)` and do
+not count against the derived limit.
+
 Write both files before you reply. The last line of each file itself must be the verdict: `VERDICT: PASS - <n> gaps, <m> questions`.
 
 ## Second pass (resumed only when an answer differs from its default): spec
@@ -60,7 +65,8 @@ Write both files before you reply. The last line of each file itself must be the
 You get the user's answers (appended to `questions.md`) and the output path `spec.md`. Write:
 goal, in scope, out of scope, acceptance criteria numbered `AC1:`, `AC2:`, ... (each a
 testable statement; when the user listed criteria, AC1..ACn are theirs in their order and
-wording; add at most 5 derived ones after them, each marked `(derived)`), assumptions (each marked user or repo), constraints, open risks. Nothing
+wording; then one `(from Qn)` criterion per accepted answer; add at most 5 derived ones
+after them, each marked `(derived)`), assumptions (each marked user or repo), constraints, open risks. Nothing
 in `spec.md` may be a guess presented as fact. Update the track in `questions.md` if the
 answers changed it.
 

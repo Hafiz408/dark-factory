@@ -32,16 +32,13 @@ diff since the step's `base_sha`) and store the new id.
    `e2e` are `check`):
    - before `signoff`: re-ask only unanswered questions, then continue the stages.
    - `build`: a step `running` is reset to its `base_sha` (`git -C {WT} reset --hard <sha>`,
-     `git -C {WT} clean -fd`), `interrupts` +1 (3: BLOCKED), and rerun from attempt 1 of the
-     remaining attempts. Then carry on with the lanes.
+     `git -C {WT} clean -fd`), `interrupts` +1 (3: BLOCKED); `{DF} step-start` then continues
+     with its remaining attempts. Then carry on with the lanes.
    - `check`: if the profile has `e2e_needs_app: yes`, run `stop_cmd` first (an app may still
-     run). Finish any fix step that is `running` or `pending`, then redo the current round
-     `review_round` from its step 1, skipping `{DF} bump` (bump only starts a new round, so the
-     total is not counted twice; 0 means no round started: begin round 1 as usual). Ignore that round's partial outputs.
-     A v0.2 run has no checker yet: round 1 spawns it.
+     run). Finish any fix step that is `running` or `pending`, then `{DF} check-start`: a
+     round that started and never ended is redone, not counted twice. Ignore that round's
+     partial outputs. A v0.2 run has no checker yet: round 1 spawns it.
    - `retro`: run the retro again from its start (`ship.md` section 2).
-   - `ship`: never ask again. `pr_url` recorded or `ship_confirmed yes`: run `{DF} ship` again
-     (safe to repeat: it prints a recorded `pr_url`), then continue `ship.md` from the merge.
-   - `merge`: `merged` recorded in `run.conf`: go to the post-merge test; else run the merge
-     command for the mode again.
-   - `postmerge`: run the post-merge test again (`ship.md` section 4).
+   - `ship`, `merge`, `postmerge`: never ask again. `report.md` written: run `{DF} land` again
+     (`ship.md` section 3; it continues from its stage and never opens a second PR). Else
+     write the report first.

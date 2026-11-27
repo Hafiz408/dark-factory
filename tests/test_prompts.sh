@@ -136,10 +136,12 @@ sed -n '/^## Quickstart/,/^## How it works/p' "$ROOT/README.md" | grep -qi "esti
 
 # v0.3 orchestrator: SKILL.md (loaded every run) plus side files read only when needed
 D="$ROOT/skills/dark-factory"
-S="$D/SKILL.md"; RS="$D/resume.md"; SH="$D/ship.md"; ALL="$S $RS $SH"
+S="$D/SKILL.md"; RS="$D/resume.md"; SH="$D/ship.md"; WV="$D/wave.md"; E2="$D/e2e.md"; ALL="$S $RS $SH $WV $E2"
 assert_ok "SKILL.md exists" test -f "$S"
 assert_ok "resume.md exists" test -f "$RS"
 assert_ok "ship.md exists" test -f "$SH"
+assert_ok "wave.md and e2e.md exist" test -f "$WV" -a -f "$E2"
+grep -q "wave.md" "$S" && grep -q "e2e.md" "$S" && ok "SKILL.md points at wave.md and e2e.md" || bad "SKILL.md points at wave.md and e2e.md"
 n=$(grep -c '' "$S"); [ "$n" -le 280 ] && ok "SKILL.md is at most 280 lines ($n)" || bad "SKILL.md is at most 280 lines ($n)"
 grep -q "resume.md" "$S" && grep -q "ship.md" "$S" && ok "SKILL.md points at its side files" || bad "SKILL.md points at its side files"
 for a in $AGENTS; do grep -q "$a" "$S" && ok "SKILL.md uses $a" || bad "SKILL.md uses $a"; done
@@ -159,11 +161,12 @@ grep -q "last question before the report" "$S" && ok "SKILL.md: sign-off is the 
 grep -q "run.conf" "$S" && ok "SKILL.md: uses run.conf" || bad "SKILL.md: uses run.conf"
 grep -q "one run executes per repo" "$S" && ok "SKILL.md: one run per repo" || bad "SKILL.md: one run per repo"
 grep -qi "never force" $ALL && grep -q -- "--admin" "$SH" && ok "never force-push, never --admin" || bad "never force-push, never --admin"
-grep -q "{DF} finish <id> <session-id>" "$SH" && ok "ship.md ends a run with df finish" || bad "ship.md ends a run with df finish"
-grep -q "{DF} commit" "$S" && ok "SKILL.md commits through df commit" || bad "SKILL.md commits through df commit"
-grep -q "{DF} post <id> <role> <seconds> <tokens>" "$S" && grep -q "spawn|resume" "$S" && ok "SKILL.md: every spawn and resume is logged" || bad "SKILL.md: every spawn and resume is logged"
+grep -q "{DF} land <id> <session-id>" "$SH" && grep -q "{DF} finish" "$SH" && ok "ship.md ends a run with df land (which runs df finish)" || bad "ship.md ends a run with df land (which runs df finish)"
+grep -q "{DF} commit" $ALL && ok "SKILL.md commits through df commit" || bad "SKILL.md commits through df commit"
+grep -q "{DF} post <id> <role> -" "$S" && grep -q "df measures the" "$S" && grep -q "spawn|resume" "$S" && ok "SKILL.md: every spawn and resume is logged" || bad "SKILL.md: every spawn and resume is logged"
 grep -q "never guess" "$S" && ok "SKILL.md: spawn log never guesses" || bad "SKILL.md: spawn log never guesses"
-grep -q "{DF} rundir-hash" "$S" && grep -q "{DF} snapshot" "$S" && ok "SKILL.md: read-only roles are hashed" || bad "SKILL.md: read-only roles are hashed"
+grep -q "{DF} pre <id> <session-id> retro.md lessons-new.md proposals-new.md" "$S" && grep -q -- "--wt <their worktree>" "$S" && grep -q "Exit 10" "$S" && ok "SKILL.md: read-only roles are hashed by pre and compared by post" || bad "SKILL.md: read-only roles are hashed by pre and compared by post"
+grep -q "read-only roles' .post. first" "$S" && ok "SKILL.md: read-only posts first after a multi-spawn message" || bad "SKILL.md: read-only posts first after a multi-spawn message"
 # every df subcommand the skill calls must exist in scripts/df
 for sub in $(cat $ALL | grep -o '{DF} [a-z-]*' | awk '{print $2}' | sort -u); do
   grep -q "^  $sub)" "$ROOT/scripts/df" && ok "df subcommand '$sub' exists" || bad "df subcommand '$sub' exists"
@@ -172,28 +175,28 @@ done
 grep -qi "intent, not wording" "$S" && ok "SKILL.md: routes inline by intent" || bad "SKILL.md: routes inline by intent"
 grep -q "SendMessage" "$S" && ok "SKILL.md: resumes agents with SendMessage" || bad "SKILL.md: resumes agents with SendMessage"
 grep -q "fresh" "$S" && grep -q "6 steps" "$S" && ok "SKILL.md: fresh builder when a resume fails or after 6 steps" || bad "SKILL.md: fresh builder when a resume fails or after 6 steps"
-grep -q "{DF} fm-set <step> builder_agent" "$S" && ok "SKILL.md: builder id stored in the step file" || bad "SKILL.md: builder id stored in the step file"
+grep -q "{DF} step-end <id> NN <lane> <agent-id> <tokens> spawn|resume" "$S" && grep -q "stores the agent ids" "$S" && ok "SKILL.md: step-end stores the builder ids" || bad "SKILL.md: step-end stores the builder ids"
 grep -q "checker_agent" "$S" && grep -q "refiner_agent" "$S" && ok "SKILL.md: checker and refiner ids stored in run.conf" || bad "SKILL.md: checker and refiner ids stored in run.conf"
-grep -q "{DF} step-check" "$S" && grep -q "redcheck, each \`env.commands\` line, gate\|redcheck," "$S" && grep -q "canary leaked" "$S" && ok "SKILL.md: deterministic per-step checks" || bad "SKILL.md: deterministic per-step checks"
+grep -q "{DF} step-start <id> NN <session-id>" "$S" && grep -q "redcheck," "$S" && grep -q "canary leaked" "$S" && grep -q "Exit 8" "$S" && ok "SKILL.md: deterministic per-step checks" || bad "SKILL.md: deterministic per-step checks"
 grep -q "risk: high" "$S" && grep -q "lenses/security.md" "$S" && ok "SKILL.md: security reviewer only on high-risk steps" || bad "SKILL.md: security reviewer only on high-risk steps"
 grep -q "{DF} pre <id> <session-id>" "$S" && grep -q "exit 3" "$S" && ok "SKILL.md: budget before every spawn, exit 3 pauses" || bad "SKILL.md: budget before every spawn, exit 3 pauses"
-grep -q "{DF} bump <id> review" "$S" && ok "SKILL.md: check rounds counted by df bump" || bad "SKILL.md: check rounds counted by df bump"
-grep -q "{DF} wave <id>" "$S" && grep -q "{DF} sub-add" "$S" && grep -q "{DF} sub-join" "$S" && grep -q "{DF} sub-drop" "$S" && ok "SKILL.md: automatic waves through df helpers" || bad "SKILL.md: automatic waves through df helpers"
+grep -q "{DF} check-start <id> <session-id>" "$S" && grep -q "{DF} check-end <id> <agent-id> <tokens> spawn|resume" "$S" && ok "SKILL.md: check rounds through check-start and check-end" || bad "SKILL.md: check rounds through check-start and check-end"
+grep -q "{DF} wave <id>" "$S" && grep -q "{DF} sub-add" "$WV" && grep -q "{DF} sub-join" "$WV" && grep -q "{DF} sub-drop" "$WV" && ok "SKILL.md: automatic waves through df helpers" || bad "SKILL.md: automatic waves through df helpers"
 grep -q "parallel=on" "$S" && bad "SKILL.md: parallel is automatic, no parallel=on" || ok "SKILL.md: parallel is automatic, no parallel=on"
-grep -q "in id order" "$S" && grep -q "serial yes" "$S" && ok "SKILL.md: join in id order; a conflict reruns serially" || bad "SKILL.md: join in id order; a conflict reruns serially"
+grep -q "in id order" "$WV" && grep -q "serial yes" "$WV" && ok "SKILL.md: join in id order; a conflict reruns serially" || bad "SKILL.md: join in id order; a conflict reruns serially"
 grep -q "in ONE message" "$S" && grep -q "qa-author" "$S" && ok "SKILL.md: planner and qa-author in one message" || bad "SKILL.md: planner and qa-author in one message"
 grep -q "symptoms only" "$S" && ok "SKILL.md: scenario failures reach the builder as symptoms only" || bad "SKILL.md: scenario failures reach the builder as symptoms only"
-grep -q "e2e-baseline.md" "$S" && grep -q "passed at baseline" "$S" && grep -q "e2e: not configured" "$S" && grep -q "never a pass" "$S" && ok "SKILL.md: e2e against baseline, unconfigured is never a pass" || bad "SKILL.md: e2e against baseline, unconfigured is never a pass"
+grep -q "e2e-baseline.md" "$S" && grep -q "passed at baseline" "$E2" && grep -q "e2e: not configured" "$S" && grep -q "never a pass" "$E2" && ok "SKILL.md: e2e against baseline, unconfigured is never a pass" || bad "SKILL.md: e2e against baseline, unconfigured is never a pass"
 grep -q "max_review_rounds" "$S" && ok "SKILL.md: fix rounds capped" || bad "SKILL.md: fix rounds capped"
 grep -q "{DF} pause <id>" "$S" && grep -q "PAUSED: <what is open>" "$S" && ok "SKILL.md: pausing goes through df pause" || bad "SKILL.md: pausing goes through df pause"
 grep -q "lessons" "$S" && ok "SKILL.md: lessons reach the roles" || bad "SKILL.md: lessons reach the roles"
 # sign-off
 SO=$(sed -n '/^### signoff/,/^## Build/p' "$S")
-echo "$SO" | grep -q "{DF} estimate <id> <steps> <lanes>" && echo "$SO" | grep -q "cap:" && ok "sign-off: estimate and cap" || bad "sign-off: estimate and cap"
+echo "$SO" | grep -q "{DF} steps <id>" && echo "$SO" | grep -q "exactly as .{DF} steps. printed" && echo "$SO" | grep -q "cap:" && ok "sign-off: estimate and cap" || bad "sign-off: estimate and cap"
 echo "$SO" | grep -q "not a promise" && ok "sign-off: estimate carries its disclaimer" || bad "sign-off: estimate carries its disclaimer"
 echo "$SO" | grep -q "ship_mode" && echo "$SO" | grep -q "no merge" && echo "$SO" | grep -q '`local`' && ok "sign-off: ship mode chosen here (default merge)" || bad "sign-off: ship mode chosen here (default merge)"
 echo "$SO" | grep -q "side by side" && ok "sign-off: shows which steps run side by side" || bad "sign-off: shows which steps run side by side"
-echo "$SO" | grep -q "{DF} profile-pin <id>" && echo "$SO" | grep -q "verbatim" && ok "sign-off: profile shown verbatim and pinned" || bad "sign-off: profile shown verbatim and pinned"
+echo "$SO" | grep -q "{DF} signoff <id> <word>" && echo "$SO" | grep -q "pins the profile" && echo "$SO" | grep -q "verbatim" && ok "sign-off: profile shown verbatim and pinned" || bad "sign-off: profile shown verbatim and pinned"
 echo "$SO" | grep -q "at most ten lines" && echo "$SO" | grep -q "Recommend abort" && ok "sign-off: approach and recommend abort" || bad "sign-off: approach and recommend abort"
 grep -q -- "--base <ref>" "$S" && grep -q -- "--branch <name>" "$S" && ok "start: base and branch flags" || bad "start: base and branch flags"
 for w in chunk lens worktree e2e gate; do
@@ -209,7 +212,7 @@ grep -q "base_ref. is absent or .detached." "$RS" && ok "resume.md: drift agains
 for st in loop review qa e2e; do grep -q "$st" "$RS" && ok "resume.md: maps old stage $st" || bad "resume.md: maps old stage $st"; done
 grep -q "unresolved" "$RS" && ok "resume.md: an unresolved run is finished" || bad "resume.md: an unresolved run is finished"
 # ship side file
-for c in "{DF} ship <id>" "{DF} merge <id>" "{DF} local-merge <id>" "{DF} postmerge <id>" "{DF} revert-pr <id>" "{DF} fixed <id>" "{DF} metrics <id>" "{DF} lessons-set <id>" "{DF} clean <id> --branch" "{DF} state-hash"; do
+for c in "{DF} land <id>" "{DF} revert-pr <id>" "{DF} fixed <id>" "{DF} lessons-set <id>" "{DF} post <id> retro"; do
   grep -qF "$c" "$SH" && ok "ship.md uses '$c'" || bad "ship.md uses '$c'"
 done
 a=$(grep -n "## What changed" "$SH" | head -1 | cut -d: -f1); b=$(grep -n "## How it was checked" "$SH" | head -1 | cut -d: -f1); c=$(grep -n "## Anything left" "$SH" | head -1 | cut -d: -f1); t=$(grep -n "## Technical changes" "$SH" | head -1 | cut -d: -f1)
@@ -217,17 +220,17 @@ a=$(grep -n "## What changed" "$SH" | head -1 | cut -d: -f1); b=$(grep -n "## Ho
 grep -q "NOT FIXED" "$SH" && grep -q "not confirmed" "$SH" && ok "ship.md: NOT FIXED and unconfirmed criteria reported" || bad "ship.md: NOT FIXED and unconfirmed criteria reported"
 grep -q "never applied" "$SH" && ok "ship.md: plugin proposals are never applied" || bad "ship.md: plugin proposals are never applied"
 grep -qi "only when" "$SH" && grep -q "retry" "$SH" && ok "ship.md: retro only when something went wrong" || bad "ship.md: retro only when something went wrong"
-grep -q "ship_mode" "$SH" && grep -q "ship_confirmed yes" "$SH" && ok "ship.md: follows the ship mode from sign-off" || bad "ship.md: follows the ship mode from sign-off"
+grep -q "ship_mode" "$SH" && ok "ship.md: follows the ship mode from sign-off" || bad "ship.md: follows the ship mode from sign-off"
 grep -qi "no question" "$SH" && ok "ship.md: asks nothing after sign-off" || bad "ship.md: asks nothing after sign-off"
 grep -qi "post-merge" "$SH" && grep -q "Time, agents" "$SH" && grep -q "estimate" "$SH" && ok "ship.md: final note has post-merge result and usage vs estimate" || bad "ship.md: final note has post-merge result and usage vs estimate"
-grep -q "{DF} finish" "$SH" && f=$(grep -n "{DF} finish <id>" "$SH" | head -1 | cut -d: -f1) && s=$(grep -n "{DF} ship <id>" "$SH" | head -1 | cut -d: -f1) && [ "$s" -lt "$f" ] && ok "ship.md: ship before finish, so the lock is held" || bad "ship.md: ship before finish, so the lock is held"
+grep -q "runs \`{DF} finish\`" "$SH" && grep -q "pushes and opens the PR" "$SH" && ok "ship.md: land ships before it finishes, so the lock is held" || bad "ship.md: land ships before it finishes, so the lock is held"
 grep -q "never offered" "$SH" && ok "ship.md: a paused or not-fixed run is never shipped" || bad "ship.md: a paused or not-fixed run is never shipped"
 grep -q "{DF} sweep" "$S" && ok "SKILL.md: merged-PR sweep kept" || bad "SKILL.md: merged-PR sweep kept"
 
-grep -q "Exit 4 (checks still running): run it again, up to 13 calls" "$SH" && ok "ship.md: merge is called again while checks run" || bad "ship.md: merge is called again while checks run"
-grep -q "The retro skips \`{DF} budget\`" "$SH" && grep -q "except the retro's" "$S" && ok "the retro is exempt from the budget, so a cap pause cannot loop" || bad "the retro is exempt from the budget, so a cap pause cannot loop"
+grep -q "4: the checks are still running: run the same \`{DF} land\` again" "$SH" && ok "ship.md: land is called again while checks run" || bad "ship.md: land is called again while checks run"
+grep -q "the retro ignores exit 3" "$SH" && grep -q "Only the retro" "$S" && grep -q "ignores exit 3" "$S" && ok "the retro is exempt from the budget, so a cap pause cannot loop" || bad "the retro is exempt from the budget, so a cap pause cannot loop"
 grep -q "After the checker returns" "$S" && grep -q "DF_PORT_BASE + 50" "$S" && ok "SKILL.md: suite and e2e run after the checker, on another port" || bad "SKILL.md: suite and e2e run after the checker, on another port"
-grep -q "skipping \`{DF} bump\`" "$RS" && grep -q "commit <sha> <message>" "$RS" && ok "resume.md: no second bump; head checked against logged commits" || bad "resume.md: no second bump; head checked against logged commits"
+grep -q "redone, not counted twice" "$RS" && grep -q "commit <sha> <message>" "$RS" && grep -q "{DF} land" "$RS" && ok "resume.md: no second bump; head checked against logged commits" || bad "resume.md: no second bump; head checked against logged commits"
 
 # Eval (tomlkit #632): repo policy, bugfix scope, differential checks, version-safe tests, fast sign-off
 F="$ROOT/lenses/codebase-fit.md"; RF="$ROOT/agents/refiner.md"; B="$ROOT/agents/builder.md"; K="$ROOT/agents/checker.md"
@@ -245,7 +248,7 @@ grep -q "number of cases tried" "$SH" && ok "ship.md: report gives the different
 grep -q "requires-python" "$B" && grep -q "importorskip" "$B" && grep -q "literal expected values" "$B" && ok "builder: tests run on every supported version" || bad "builder: tests run on every supported version"
 grep -q "changelog" "$B" && grep -q "issue" "$B" && grep -q "neighbouring entries" "$B" && ok "builder: changelog names the real symbol and the issue" || bad "builder: changelog names the real symbol and the issue"
 grep -q "draft \`{RD}/spec.md\`" "$S" && grep -q "the draft is the spec, no resume" "$S" && grep -q "an \`ok\` needs no second pass" "$RF" && ok "refine: all defaults accepted skips the refiner resume" || bad "refine: all defaults accepted skips the refiner resume"
-grep -q "on the bugfix track pass \`model: sonnet\`" "$S" && ok "plan: bugfix planner runs on sonnet" || bad "plan: bugfix planner runs on sonnet"
+grep -q "pass \`model: sonnet\` on every track" "$S" && grep -q "payments, secrets, data deletion" "$S" && grep -q "200 source files" "$S" && ok "plan: planner on sonnet unless risky or large" || bad "plan: planner on sonnet unless risky or large"
 echo "$SO" | grep -q "at most 12 lines, no YAML" && echo "$SO" | grep -q "Details" && ok "sign-off: short plain first block, then Details" || bad "sign-off: short plain first block, then Details"
 a=$(echo "$SO" | grep -n "The ending" | head -1 | cut -d: -f1); d=$(echo "$SO" | grep -n "Details" | head -1 | cut -d: -f1); p=$(echo "$SO" | grep -n "verbatim" | head -1 | cut -d: -f1)
 [ -n "$a" ] && [ -n "$d" ] && [ -n "$p" ] && [ "$a" -lt "$d" ] && [ "$d" -lt "$p" ] && ok "sign-off: ending before Details, profile inside Details" || bad "sign-off: ending before Details, profile inside Details"
@@ -253,9 +256,9 @@ grep -q "agent tokens, excluding this conversation" "$SH" && grep -q "agent toke
 
 grep -q "never in a later" "$ROOT/agents/planner.md" && grep -q "README documents" "$ROOT/agents/planner.md" && ok "planner: no tests-only step, README in scope" || bad "planner: no tests-only step, README in scope"
 # Eval (taskplanner feature): audit trail, one source for numbers, short note, user's criteria, speed
-grep -qF "{DF} clean <id> --branch --archive" "$SH" && grep -qF "{DF} clean <id> --archive" "$SH" && grep -q "reports/<id>/report.md" "$SH" && ok "ship.md: cleanup archives the run to reports/<id>/" || bad "ship.md: cleanup archives the run to reports/<id>/"
+grep -q "archives the run to .reports/<id>/." "$SH" && grep -q "the report path land printed" "$SH" && ok "ship.md: cleanup archives the run to reports/<id>/" || bad "ship.md: cleanup archives the run to reports/<id>/"
 grep -qF "{DF} clean <run-id> --branch --archive" "$S" && ok "SKILL.md: sweep archives too" || bad "SKILL.md: sweep archives too"
-grep -q "only source of time, agents" "$SH" && grep -q "Never compute, round or estimate" "$SH" && m=$(grep -n "{DF} metrics <id>\`, after the post-merge" "$SH" | cut -d: -f1) && p=$(grep -n "^## 4. Post-merge" "$SH" | cut -d: -f1) && [ "$p" -lt "$m" ] && ok "ship.md: numbers come from df metrics after post-merge" || bad "ship.md: numbers come from df metrics after post-merge"
+grep -q "only source of time, agents" "$SH" && grep -q "Never compute, round or" "$SH" && grep -q "re-runs .env.commands. in the" "$SH" && ok "ship.md: numbers come from df metrics after post-merge" || bad "ship.md: numbers come from df metrics after post-merge"
 grep -q "at most 10 lines" "$SH" && grep -q "Plugin proposals and technical leftovers go only in the report" "$SH" && grep -q "tests <before>→<after>, re-tested after" "$SH" && ok "ship.md: short final note, proposals only in the report" || bad "ship.md: short final note, proposals only in the report"
 grep -q "(derived)" "$SH" && ok "ship.md: user-facing counts skip derived criteria" || bad "ship.md: user-facing counts skip derived criteria"
 grep -q "their order and" "$RF" && grep -q "at most 5 derived" "$RF" && grep -q "(derived)" "$RF" && ok "refiner: keeps the user's criteria, derived ones marked" || bad "refiner: keeps the user's criteria, derived ones marked"
@@ -267,7 +270,27 @@ grep -q "port_base <n>" "$S" && grep -q "\`port_base\` unchanged" "$S" && grep -
 grep -q "{DF} extend <id>" "$ROOT/skills/dark-factory/resume.md" && grep -q "Never ask them to type a script command" "$ROOT/skills/dark-factory/SKILL.md" && ok "cap pause: plain resume, df extend on yes" || bad "cap pause: plain resume, df extend on yes"
 grep -q "last line of \`retro.md\` itself" "$ROOT/agents/retro.md" && ok "retro: verdict inside retro.md" || bad "retro: verdict inside retro.md"
 for a in $AGENTS; do grep -q "last line of .*itself" "$ROOT/agents/$a.md" && ok "agent $a: verdict is the last line of its own file" || bad "agent $a: verdict is the last line of its own file"; done
-grep -q "{DF} step-check <wt> <step>" "$ROOT/skills/dark-factory/SKILL.md" && grep -q "baseline.failing" "$ROOT/skills/dark-factory/SKILL.md" && grep -q "test_cmd" "$ROOT/skills/dark-factory/SKILL.md" && ok "SKILL.md: one step-check call, test_cmd and baseline.failing set in preflight" || bad "SKILL.md: step-check wiring"
+grep -q "step-check. alone does the same" "$ROOT/skills/dark-factory/SKILL.md" && grep -q "baseline.failing" "$ROOT/skills/dark-factory/SKILL.md" && grep -q "test_cmd" "$ROOT/skills/dark-factory/SKILL.md" && ok "SKILL.md: one step-check call, test_cmd and baseline.failing set in preflight" || bad "SKILL.md: step-check wiring"
 grep -q "Do not ask about the base" "$ROOT/skills/dark-factory/SKILL.md" && ok "SKILL.md: no separate base question" || bad "SKILL.md: no separate base question"
 grep -q "infra retry alone is a tool fault" "$ROOT/skills/dark-factory/ship.md" && ok "ship.md: infra retries do not trigger the retro" || bad "ship.md: infra retries do not trigger the retro"
+# v0.3 lean core: one df call per event, accepted answers as a contract, input-judging code, no commentary
+grep -q "(from Qn)" "$RF" && grep -q "never narrow it" "$RF" && grep -q "not .(derived)." "$RF" && ok "refiner: every accepted answer is a (from Qn) criterion, never narrowed" || bad "refiner: every accepted answer is a (from Qn) criterion, never narrowed"
+grep -q "(from Qn)" "$ROOT/agents/qa-author.md" && ok "qa-author: covers each (from Qn) criterion" || bad "qa-author: covers each (from Qn) criterion"
+grep -q "questions.md" "$K" && grep -q "narrowed promise is a .high." "$K" && echo "$(sed -n '/^## Check/,/^## Pausing/p' "$S")" | grep -q "questions.md" && ok "checker: verifies against questions.md, a narrowed promise is high" || bad "checker: verifies against questions.md, a narrowed promise is high"
+grep -q "format's own specification" "$K" && grep -q "false alarm on valid" "$K" && grep -q "how many you tried" "$K" && grep -q "single-quoted titles" "$C" && ok "checker: input-judging code checked against the format's own forms" || bad "checker: input-judging code checked against the format's own forms"
+grep -q "format's own specification" "$B" && grep -q "n=200 and n=2000" "$B" && grep -q "simplest structure" "$B" && ok "builder: every documented input form, a scaling check, simplest structure" || bad "builder: every documented input form, a scaling check, simplest structure"
+grep -q "never \"every invalid one is rejected\"" "$K" && grep -q "pre-existing" "$K" && grep -q "states its scope" "$SH" && ok "no overclaiming: all/every claims carry their scope" || bad "no overclaiming: all/every claims carry their scope"
+grep -q "pre-commit, ruff" "$S" && grep -q "cannot run here" "$S" && ok "preflight: installs declared lint and type tools or says one cannot run" || bad "preflight: installs declared lint and type tools or says one cannot run"
+grep -q "started a new git repository" "$S" && grep -q "before any question" "$S" && ok "start: a git init is told to the user before the questions" || bad "start: a git init is told to the user before the questions"
+echo "$SO" | grep -q "no commands (a new or empty project): one plain line" && ok "sign-off: one plain line when the profile has no commands" || bad "sign-off: one plain line when the profile has no commands"
+echo "$SO" | grep -q "safety limit well above the estimate" && ok "sign-off: the cap is a safety limit, not the estimate" || bad "sign-off: the cap is a safety limit, not the estimate"
+for sec in "^## Build" "^## Check"; do
+  sed -n "/$sec/,/^## /p" "$S" | grep -q "No assistant text accompanies a spawn" && ok "SKILL.md: no commentary beside a spawn in ${sec#^## }" || bad "SKILL.md: no commentary beside a spawn in ${sec#^## }"
+done
+grep -q "repeat each .milestone:. line df prints" "$S" && grep -q 'milestone: \[df' "$ROOT/scripts/df" && ok "milestone lines come from df, repeated word for word" || bad "milestone lines come from df, repeated word for word"
+grep -q "whose .title. is the plain reason" "$S" && grep -q "fixing: " "$ROOT/scripts/df" && grep -q "building step 1 of" "$ROOT/scripts/df" && grep -q "final check, round" "$ROOT/scripts/df" && ok "progress lines: step 1, each check round, each fix step with its reason" || bad "progress lines: step 1, each check round, each fix step with its reason"
+grep -q "attempt 2 or more" "$SH" && grep -q "check fix round alone does not run it" "$SH" && grep -q "attempt 2 or more" "$ROOT/agents/retro.md" && ok "retro: only after a pause or a retried step" || bad "retro: only after a pause or a retried step"
+for gone in "{DF} snapshot" "{DF} rundir-hash" "{DF} estimate" "{DF} profile-pin" "{DF} bump" "{DF} ship <id>" "{DF} merge <id>" "{DF} local-merge" "{DF} postmerge" "ship_confirmed"; do
+  grep -qF "$gone" $ALL && bad "old chain gone from the prompts: $gone" || ok "old chain gone from the prompts: $gone"
+done
 finish

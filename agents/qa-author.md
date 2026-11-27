@@ -27,7 +27,8 @@ canary: DFC-<8 random alphanumerics>
 ```
 
 Rules:
-- Every acceptance criterion is proved by at least one scenario.
+- Every acceptance criterion is proved by at least one scenario; each criterion tagged
+  `(from Qn)` (an answer the user accepted) has its own scenario, testing its full wording.
 - Add scenarios for: the empty or zero case, a boundary, a permission or invalid-input case,
   and (feature and bugfix tracks) one existing behaviour that must not change (`proves: -`).
 - Scenarios describe observable behaviour, never implementation. A "must not change"
