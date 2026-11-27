@@ -182,8 +182,9 @@ impact, goal, plan-coverage, adjudicate (folded into `check.md`).
 set: `max_agents` = 1.5x (high agent estimate), `budget_seconds` = 1.5x (high minutes).
 `df budget` runs before every spawn or resume (not the retro's, which a pause runs) and exits 3
 when a cap is reached; time counts from sign-off (`signoff_at`, as do the metrics seconds); only spawns
-count toward `max_agents` (a resume keeps its agent). The run then pauses; the user raises the
-value with `df conf-set` and resumes. Other limits: 3 attempts per step, 3 interrupts per step,
+count toward `max_agents` (a resume keeps its agent). The run then pauses; on `resume` the user
+says yes and `df extend` allows half as much again. A new session taking over a dead one credits
+the idle gap since its last lock heartbeat, so downtime never counts. Other limits: 3 attempts per step, 3 interrupts per step,
 3 review rounds, 6 steps per builder, 3 amends, 3 lanes.
 
 ## 9. State, status, resume, clean

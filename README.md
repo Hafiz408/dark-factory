@@ -117,9 +117,9 @@ offers `revert` (opens a revert PR) or `undo` (moves a local merge back).
 The sign-off screen shows a rough estimate (`estimate: 7-14 min, ~6-8 agents`) and a cap
 (`cap: up to 12 agents and 21 min`), by default 1.5x the high end. Time counts from sign-off, not
 while you answer questions. Past either, the run pauses
-instead of spending more. Raise it with
-`scripts/df conf-set <state-dir>/run.conf max_agents <n>` (or `budget_seconds`, or
-`max_review_rounds`) and `resume`. Estimates start from default figures and use this repo's
+instead of spending more. Run
+`/dark-factory:dark-factory resume`: it shows what was used and asks whether to allow about half
+as much again. Time spent stopped (a closed laptop, a usage limit) is not counted. Estimates start from default figures and use this repo's
 past runs once there are a few.
 
 ## Status, resume, cleanup
