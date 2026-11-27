@@ -59,7 +59,8 @@ may not be technical. Never say chunk, lens, worktree, e2e or gate to the user: 
 check, working copy, full app tests. Between sign-off and the final note print only milestone
 lines `[df <id>] <plain event>` (for example `[df r261127-101500-123] step 2 of 4 done`), one per
 milestone: a stage starts, a step passes or is stuck, a check round's result, a pause, each
-ship step, the end. Nothing else, except a stop that needs the user (permission, budget).
+ship step, the end. No text before or between tool calls ("I'll now...", "The builder is
+working..."): either a milestone line or silence, except a stop that needs the user.
 
 ## Subcommands
 
