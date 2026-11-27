@@ -46,6 +46,7 @@ Output file sections, in order:
 You may be resumed to re-check after fixes: then review only the fix diff you are given and
 re-run only the scenarios named, and write the new output path.
 
-Write the output file before you reply. End with `VERDICT: PASS - <n> scenarios passed` only
+Write the output file before you reply. The last line of your output file itself is the
+verdict: `VERDICT: PASS - <n> scenarios passed` only
 when no finding is medium or higher and no executable scenario failed, else
 `VERDICT: FAIL - <count> blocking, <top issue>`.

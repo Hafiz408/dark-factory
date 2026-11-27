@@ -26,8 +26,8 @@ If `{DF} fixed <id>` exits non-zero (a bugfix branch that changes no source), th
 
 ## 2. Retro (only when something went wrong)
 
-Run it only when the run had a retry (an attempt above 1, an infra retry), a fix round
-(`review_round` above 1) or a pause. Otherwise skip to 3. Set `stage retro` unless pausing.
+Run it only when the run had a retry (an attempt above 1), a fix round
+(`review_round` above 1) or a pause. An infra retry alone is a tool fault, not a repo lesson. Otherwise skip to 3. Set `stage retro` unless pausing.
 The retro skips `{DF} budget` (a pause at a cap runs it), and it never pauses the run: when it
 fails, log it, skip lessons and go on.
 Take `{DF} state-hash` and `{DF} snapshot {WT}`; spawn `retro` with the run directory, the

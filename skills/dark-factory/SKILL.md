@@ -80,18 +80,17 @@ and the start of a new run, never on `status`.
    Never invent it.
 2. Write the input to a temp file in the system temp directory, run `{DF} scrub` on it. Exit 3:
    tell the user which kinds of secret were redacted and ask them to confirm.
-3. In a git repo with a commit, ask: "Branch from `<current branch>` at `<short sha>`? (ok, or
-   give a base ref, and optionally a branch name)". ok, yes or empty keeps the defaults
-   ("detached HEAD" in place of a branch name). Skip it in an empty directory, a non-repo or a
-   repo with no commits.
+3. Do not ask about the base: the current branch is used and shown at sign-off. Ask only on a
+   detached `HEAD` ("Build from this commit? (ok, or give a branch)"). A base ref or branch
+   name the user already gave is used.
 4. `{DF} start <scrubbed-file>` (prefix `DF_ALLOW_INIT=1` only for an empty directory and a new
    application), adding `--base <ref>` and `--branch <name>` only when given. A refusal
    (one run executes per repo at a time) is relayed in one line, then stop. `could not fetch`: say
    the base may be out of date, and again at sign-off.
 5. Pick a session id once (`s` plus the epoch time) and pass it to every lock command:
    `{DF} lock <id> acquire <session-id>`.
-6. Tell the user the run id, base, branch and working copy path, and that uncommitted files
-   are not included when `dirty.txt` is non-empty.
+6. One line to the user: the run id, and that uncommitted files are not included when
+   `dirty.txt` is non-empty.
 
 ## Stages
 
@@ -128,9 +127,11 @@ Set the cursor with `{DF} conf-set {RD}/run.conf stage <name>` on entering each 
    during plan: wait for it, read its output). Write them one per line to `{RD}/install.commands`.
 2. Find the build, test, lint and typecheck commands; write them one per line to
    `{RD}/env.commands`, each with settings that leave no artefacts (for example
-   `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v`). Run each once: approvals happen now,
-   while the user is here. Record a denial or an environmental failure.
-3. Run the suite at `root_base_sha`; save to `{RD}/baseline.md`. Failures there are pre-existing.
+   `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v`). The one that runs the tests also goes
+   in `{DF} conf-set {RD}/run.conf test_cmd "<command>"`. Run each once, in one Bash call per
+   command: approvals happen now, while the user is here. Record a denial or env failure.
+3. Run the suite at `root_base_sha`; save to `{RD}/baseline.md`. Failures there are
+   pre-existing; each command that fails here goes verbatim on a line of `{RD}/baseline.failing`.
 4. List unmet needs (services, credentials, network). Allocate `DF_PORT_BASE` (a random free
    base; `{DF} conf-set {RD}/run.conf port_base <n>`) and database suffix `df_<run-id>`. Add step 00 (minimal test runner) if none exists.
 5. Repo profile. If `{PROFILE}` is missing, draft it: a `---` block with `e2e_cmd`,
@@ -205,23 +206,19 @@ wave base, set the joined steps `pending`, `serial yes`, interrupts +1, and reru
 1. `git -C <wt> rev-parse HEAD`; `{DF} fm-set <step> base_sha <sha>`, `status running`.
 2. For attempt 1..3 (`{DF} fm-set <step> attempts <n>`):
    a. Builder (spawn or resume) writes `{RD}/panel/NN-a<n>-builder.md`.
-   b. `{DF} check-diff <wt> <base_sha> <step>` and
-      `{DF} canary-scan {RD}/scenarios {RD}/panel/NN-a<n>-builder.md`; write both outputs to
-      `{RD}/panel/NN-a<n>-checks.md`. A leaked canary: hard reset, regenerate the scenarios
-      with `qa-author`, and use a fresh builder.
-   c. `{DF} commit <wt> "df(step NN): <title>"`.
-   d. `{DF} redcheck <wt> <base_sha> "<test command from env.commands>"`: exit 0 is good;
-      exit 1 is a `high` finding (the new tests pass without the change); exit 2 (no tests
-      changed) is good only when the step has `no_tests:`, else a `high` finding; exit 4 is an
-      infra failure (retry it once, not an attempt; again: pause).
-   e. Run the suite, lint and typecheck from `env.commands` in `<wt>`. A new failure (not in
-      `baseline.md`) is a `high` finding with its output as evidence.
-   f. `risk: high`: spawn `reviewer` with `{PLUGIN}/lenses/security.md`, the step, `<wt>`,
-      `base_sha`, output `{RD}/panel/NN-a<n>-security.md` (read-only hashes around it).
-   g. `{DF} gate` over every findings file of this attempt. Not blocking: `status PASS`,
-      milestone line, next step. Blocking: append one failure note to the step's
-      `## Failure notes` (scenario symptoms only, never scenario text), undo the commit with
-      `git -C <wt> reset -q <base_sha>` (keeps the files for the builder), next attempt.
+   b. One call does every mechanical check (scope and test integrity, canary, commit, redcheck,
+      each `env.commands` line, gate): `{DF} step-check <wt> <step> {RD}/panel/NN-a<n>-builder.md
+      {RD}/panel/NN-a<n>-checks.md "df(step NN): <title>"`. Exit 0: pass. 1: blocking. 4: infra
+      (retry once, not an attempt; again: pause). 5: a canary leaked: hard reset, regenerate the
+      scenarios with `qa-author`, use a fresh builder. 6: a command that already failed before
+      the run failed again: read its log; only a new failure is a `high` finding added to the
+      checks file; `{DF} gate` it.
+   c. `risk: high` and b passed: spawn `reviewer` with `{PLUGIN}/lenses/security.md`, the step,
+      `<wt>`, `base_sha`, output `{RD}/panel/NN-a<n>-security.md` (read-only hashes around it),
+      then `{DF} gate` over both findings files.
+   d. Not blocking: `status PASS`, milestone line, next step. Blocking: append one failure note
+      to the step's `## Failure notes` (scenario symptoms only, never scenario text), undo the
+      commit with `git -C <wt> reset -q <base_sha>` (keeps the files), next attempt.
 3. After attempt 3: reset is `git -C <wt> reset --hard <base_sha>` and `git -C <wt> clean -fd`
    (never `-x`); `status BLOCKED`. One re-plan per run: spawn `planner` with the failure
    notes. Still BLOCKED: mark SKIPPED every step that depends on it, directly or through other

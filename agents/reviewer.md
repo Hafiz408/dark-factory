@@ -20,6 +20,7 @@ directory are hashed before and after you run.
 Review `git diff <base_sha>` and what it touches, through the lens only. Tag `[pre-existing]`
 when the problem exists at `root_base_sha`. Every medium or higher finding carries `evidence:`.
 
-Write the output file before you reply. End with `VERDICT: PASS - <summary>` when no finding is
+Write the output file before you reply. The last line of your output file itself is the
+verdict: `VERDICT: PASS - <summary>` when no finding is
 medium or higher, else `VERDICT: FAIL - <count> blocking, <top issue>`. Add `unscanned` to the
 summary when no scanner was available.

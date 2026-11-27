@@ -28,7 +28,7 @@ Then, inside your project (or an empty folder, to build something new):
 > /dark-factory:dark-factory Add a --json flag to the export command
 ```
 
-1. Say `ok` to the starting branch, then answer the questions (`ok` takes every default).
+1. Answer the questions (`ok` takes every default).
 2. Read the sign-off screen and say `approve`. It shows an estimate such as
    `estimate: 7-14 min, ~6-8 agents`: a rough range, not a promise, and a cap the run will not
    exceed. Stay a moment: commands it will run may ask for permission now, so nothing stalls later.

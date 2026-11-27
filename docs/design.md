@@ -84,16 +84,18 @@ and in the step's `builder_agent`.
 Per step, up to 3 attempts, all deterministic except the optional security review:
 
 1. Builder writes the test first, then the code.
-2. `df check-diff`: files outside `scope` (high); existing tests changed without
-   `touches_tests` (critical); empty diff. `df canary-scan`: a leaked scenario token (critical;
-   scenarios regenerated, fresh builder).
-3. `df commit` (which logs `commit <sha> <message>` to `log.md`; resume checks the branch
-   head against these lines), then `df redcheck`: new or changed tests must fail with the
-   step's source changes reverted and pass with them (exit 4: it could not run, infra). A step with no testable behaviour declares `no_tests:`.
-4. Suite, lint, typecheck from `env.commands`; a failure not in `baseline.md` is high.
-5. `risk: high` (auth, payments, secrets, data deletion, migrations, shell/SQL string
+2. One `df step-check` call runs the rest, so it costs one orchestrator turn:
+   - `check-diff`: files outside `scope` (high); existing tests changed without `touches_tests`
+     (critical); empty diff. `canary-scan`: a leaked scenario token (critical; scenarios
+     regenerated, fresh builder).
+   - `commit` (logs `commit <sha> <message>` to `log.md`; resume checks the head against these).
+   - `redcheck` with `test_cmd`: new tests must fail with the step's source changes reverted
+     (exit 4: infra). A step with no testable behaviour declares `no_tests:`.
+   - Every `env.commands` line; a failure is high unless the command also failed before the run
+     (`baseline.failing`), which the orchestrator judges. Commands are pinned at sign-off.
+3. `risk: high` (auth, payments, secrets, data deletion, migrations, shell/SQL string
    building, new dependency): one read-only `reviewer` with `lenses/security.md`.
-6. `df gate`: medium or above blocks. Blocking: one failure note to the same builder (symptoms
+4. `df gate`: medium or above blocks. Blocking: one failure note to the same builder (symptoms
    only), soft reset, next attempt. After attempt 3: hard reset, BLOCKED, one re-plan per run;
    still blocked, every step depending on it, directly or not, is SKIPPED.
 

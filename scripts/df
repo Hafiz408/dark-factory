@@ -104,6 +104,7 @@ finding() { printf -- '- severity: %s\n  source: %s\n  where: %s\n  what: %s\n  
 # Interpreter and tool artefacts are not changes made by a role.
 ARTEFACT_RE='(^|/)(__pycache__|\.pytest_cache|\.mypy_cache|node_modules)/|\.pyc$'
 TEST_RE='(^|/)(tests?|spec|__tests__)/|(_test|\.test|\.spec)\.[A-Za-z]+$|(^|/)test_[^/]*$'
+CI_RE='^(\.github/workflows/|\.circleci/|\.buildkite/|\.gitlab-ci\.yml$|\.travis\.yml$|azure-pipelines\.yml$|bitbucket-pipelines\.yml$|Jenkinsfile$)'
 # High-confidence secret formats only: used on what leaves the machine (pushed commits, PR text), where a
 # keyword match such as 'password = request.form[...]' would block ordinary code.
 STRICT_SECRET_RE='AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|(^|[^A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|://[^/@ :]+:[^/@ ]+@[^/:" ]*'
@@ -234,10 +235,13 @@ cmd_profile_pin() { # df profile-pin <run-id>: at sign-off, record the profile's
   if [ -f "$p" ]; then conf_set "$c" profile_sha "$(sha < "$p")"; else conf_set "$c" profile_sha none; fi
   [ -n "$(conf_get "$c" signoff_at)" ] || conf_set "$c" signoff_at "$(date +%s)"
   conf_set "$c" ship_pin "$(ship_pin_of "$c")"
+  conf_set "$c" cmd_pin "$(cmd_pin_of "$c")"
 }
 # The ship settings chosen at sign-off; run.conf is writable by roles, so ship, merge and local-merge re-check them.
 # ponytail: a plain hash, so it catches a stray write, not a role that recomputes it; an HMAC with a key outside the run dir if that matters.
 ship_pin_of() { printf '%s\n%s\n%s\n' "$(conf_get "$1" ship_mode)" "$(conf_get "$1" ship_base)" "$(conf_get "$1" base_ref)" | sha; }
+# The commands df step-check runs were shown at sign-off; a role editing them afterwards is refused.
+cmd_pin_of() { { cat "$(dirname "$1")/env.commands" 2>/dev/null || true; conf_get "$1" test_cmd; } | sha; }
 ship_pin_check() { [ "$(conf_get "$1" ship_pin)" = "$(ship_pin_of "$1")" ] || die "$2: ship_mode, ship_base or base_ref changed since sign-off (or there was no sign-off)"; }
 # The run's start of unattended time: sign-off, else (a run from before v0.3 pinned it) the start.
 clock_start() { local s; s=$(conf_get "$1" signoff_at); case $s in ''|*[!0-9]*) s=$(conf_get "$1" started);; esac; echo "$s"; }
@@ -384,6 +388,49 @@ cmd_redcheck() { # df redcheck <worktree> <base_sha> <test-command>: 0 when the 
   cmd=$3; cmd=${cmd//"$(physpath "$wt")"/"$RC_TMP/w"}; cmd=${cmd//"$wt"/"$RC_TMP/w"}
   if ( cd "$RC_TMP/w" && bash -c "$cmd" ) 1>&2; then echo "redcheck: new tests pass without the change"; return 1; fi
   echo "redcheck: ok, new tests fail without the change"
+}
+
+cmd_step_check() { # df step-check <worktree> <step.md> <builder-output> <findings-out> <commit message>: every mechanical check of one attempt
+  local wt step bout out msg rd c base log leak rc tcmd line bad=0 judge="" n=0 own
+  [ $# -eq 5 ] || die "usage: df step-check <worktree> <step.md> <builder-output> <findings-out> <commit message>"
+  wt=$1; step=$2; bout=$3; out=$4; msg=$5; log="${out%.md}.log"
+  [ -f "$step" ] || die "step-check: no step file $step"
+  rd=$(dirname "$(dirname "$step")"); c="$rd/run.conf"; [ -f "$c" ] || die "step-check: $step is not inside a run directory"
+  base=$(fm_get "$step" base_sha)
+  git -C "$wt" rev-parse -q --verify "$base^{commit}" >/dev/null || die "step-check: the step has no valid base_sha"
+  [ "$(conf_get "$c" cmd_pin)" = "$(cmd_pin_of "$c")" ] || { echo "step-check: env.commands or test_cmd changed since sign-off"; return 4; }
+  tcmd=$(conf_get "$c" test_cmd); : > "$out"; : > "$log"
+  ( cmd_check_diff "$wt" "$base" "$step" ) >> "$out" # subshell: check-diff turns globbing off
+  if [ -f "$bout" ]; then
+    leak=$(cmd_canary_scan "$rd/scenarios" "$bout")
+    [ -z "$leak" ] || { printf '%s\n' "$leak" >> "$out"; echo "step-check: LEAK a hidden scenario reached the builder ($out)"; return 5; }
+  fi
+  if [ -z "$(changed_files "$wt" "$base")" ]; then echo "step-check: FAIL nothing changed ($out)"; return 1; fi
+  if [ -n "$( (cd "$wt" && { git diff --name-only HEAD; git ls-files -o --exclude-standard; }) | grep -Ev "$ARTEFACT_RE")" ]; then cmd_commit "$wt" "$msg"; fi
+  own=$(conf_get "$c" worktree)
+  if [ -z "$(fm_get "$step" no_tests)" ]; then
+    [ -n "$tcmd" ] || { echo "step-check: run.conf has no test_cmd"; return 4; }
+    rc=0; ( cmd_redcheck "$wt" "$base" "${tcmd//"$own"/"$wt"}" ) >>"$log" 2>&1 || rc=$?
+    case $rc in
+      0) ;;
+      1) cmd=redcheck; finding high correctness "$(basename "$step")" "the new tests pass without the change" >> "$out";;
+      2) cmd=redcheck; finding high correctness "$(basename "$step")" "no tests changed and the step has no no_tests reason" >> "$out";;
+      *) echo "step-check: INFRA redcheck could not run ($log)"; return 4;;
+    esac
+  fi
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ -n "$line" ] || continue; n=$((n + 1))
+    printf '\n$ %s\n' "$line" >> "$log"
+    rc=0; ( cd "$wt" && bash -c "${line//"$own"/"$wt"}" ) </dev/null >>"$log" 2>&1 || rc=$?
+    [ $rc -ne 0 ] || continue
+    if grep -qxF -- "$line" "$rd/baseline.failing" 2>/dev/null; then judge="$judge $n"; continue; fi
+    bad=$((bad + 1))
+    printf -- '- severity: high\n  source: correctness\n  where: command %s\n  what: command failed with exit %s\n  evidence: %s (output in %s)\n' "$n" "$rc" "$line" "$log" >> "$out"
+  done < "$rd/env.commands"
+  rc=0; line=$(cmd_gate "$out") || rc=$?
+  [ $rc -eq 0 ] || { echo "step-check: FAIL ${line%% *} blocking ($out; command output: $log)"; return 1; }
+  [ -z "$judge" ] || { echo "step-check: JUDGE command(s)$judge failed, and also failed before the run: read $log"; return 6; }
+  echo "step-check: PASS"
 }
 
 cmd_commit() { # df commit <worktree> <message>: stage everything except tool artefacts, commit, log it in the run's log.md
@@ -775,7 +822,10 @@ cmd_merge() { # df merge <run-id>: wait up to DF_CHECKS_WAIT s for the PR's chec
   case $(conf_get "$c" ship_mode) in pr|branch) die "merge: ship_mode is $(conf_get "$c" ship_mode); nothing is merged";; esac
   psha=$(conf_get "$c" pushed_sha); case $psha in ''|*[!0-9a-f]*) die "merge: no pushed sha recorded; ship first";; esac
   command -v gh >/dev/null 2>&1 || die "merge: gh is not on PATH"
-  w=${DF_CHECKS_WAIT:-90}; g=${DF_NO_CHECKS_GRACE:-60}
+  w=${DF_CHECKS_WAIT:-90}; g=${DF_NO_CHECKS_GRACE:-}
+  if [ -z "$g" ]; then # CI config in the pushed head: wait longer for checks to register; none: only external apps could post any
+    if git -C "$(conf_get "$c" worktree)" ls-tree -r --name-only "$psha" 2>/dev/null | grep -Eq "$CI_RE"; then g=60; else g=10; fi
+  fi
   case "$w:$g" in *[!0-9:]*|:*|*:) die "merge: DF_CHECKS_WAIT and DF_NO_CHECKS_GRACE must be integers";; esac
   # "No checks" right after the push can mean CI has not registered yet: it passes only once it has lasted g seconds.
   since=$(conf_get "$c" pushed_at)
@@ -1025,6 +1075,7 @@ case "$cmd" in
   srchash) cmd_srchash "$@";;
   redcheck) cmd_redcheck "$@";;
   commit) cmd_commit "$@";;
+  step-check) cmd_step_check "$@";;
   scrub) cmd_scrub "$@";;
   status) cmd_status "$@";;
   list) cmd_list;;

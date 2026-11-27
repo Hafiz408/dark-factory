@@ -12,8 +12,9 @@ source `security`.
 ## Output and verdict
 
 Your output file is the only thing read: write it before you reply, with the Write tool.
-A reply without the file counts as a failure. End both the file and your reply with
-exactly one line, and nothing after it:
+A reply without the file counts as a failure. The last line of every output file you are
+told to produce a verdict for, and of your reply, is exactly this, with nothing after it
+(a verdict only in the reply counts as no verdict):
 
 ```
 VERDICT: <PASS|FAIL|NEEDS_DECISION|BLOCKED|TOO_BIG|SCENARIO_INVALID> - <one line>

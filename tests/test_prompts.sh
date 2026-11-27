@@ -174,8 +174,7 @@ grep -q "SendMessage" "$S" && ok "SKILL.md: resumes agents with SendMessage" || 
 grep -q "fresh" "$S" && grep -q "6 steps" "$S" && ok "SKILL.md: fresh builder when a resume fails or after 6 steps" || bad "SKILL.md: fresh builder when a resume fails or after 6 steps"
 grep -q "{DF} fm-set <step> builder_agent" "$S" && ok "SKILL.md: builder id stored in the step file" || bad "SKILL.md: builder id stored in the step file"
 grep -q "checker_agent" "$S" && grep -q "refiner_agent" "$S" && ok "SKILL.md: checker and refiner ids stored in run.conf" || bad "SKILL.md: checker and refiner ids stored in run.conf"
-grep -q "{DF} redcheck" "$S" && grep -q "no_tests" "$S" && ok "SKILL.md: redcheck, exit 2 only with no_tests" || bad "SKILL.md: redcheck, exit 2 only with no_tests"
-grep -q "{DF} check-diff" "$S" && grep -q "{DF} canary-scan" "$S" && grep -q "{DF} gate" "$S" && ok "SKILL.md: deterministic per-step checks" || bad "SKILL.md: deterministic per-step checks"
+grep -q "{DF} step-check" "$S" && grep -q "redcheck, each \`env.commands\` line, gate\|redcheck," "$S" && grep -q "canary leaked" "$S" && ok "SKILL.md: deterministic per-step checks" || bad "SKILL.md: deterministic per-step checks"
 grep -q "risk: high" "$S" && grep -q "lenses/security.md" "$S" && ok "SKILL.md: security reviewer only on high-risk steps" || bad "SKILL.md: security reviewer only on high-risk steps"
 grep -q "{DF} pre <id> <session-id>" "$S" && grep -q "exit 3" "$S" && ok "SKILL.md: budget before every spawn, exit 3 pauses" || bad "SKILL.md: budget before every spawn, exit 3 pauses"
 grep -q "{DF} bump <id> review" "$S" && ok "SKILL.md: check rounds counted by df bump" || bad "SKILL.md: check rounds counted by df bump"
@@ -196,7 +195,7 @@ echo "$SO" | grep -q "ship_mode" && echo "$SO" | grep -q "no merge" && echo "$SO
 echo "$SO" | grep -q "side by side" && ok "sign-off: shows which steps run side by side" || bad "sign-off: shows which steps run side by side"
 echo "$SO" | grep -q "{DF} profile-pin <id>" && echo "$SO" | grep -q "verbatim" && ok "sign-off: profile shown verbatim and pinned" || bad "sign-off: profile shown verbatim and pinned"
 echo "$SO" | grep -q "at most ten lines" && echo "$SO" | grep -q "Recommend abort" && ok "sign-off: approach and recommend abort" || bad "sign-off: approach and recommend abort"
-grep -q "Branch from" "$S" && grep -q -- "--base <ref>" "$S" && grep -q -- "--branch <name>" "$S" && ok "start: base branch question" || bad "start: base branch question"
+grep -q -- "--base <ref>" "$S" && grep -q -- "--branch <name>" "$S" && ok "start: base and branch flags" || bad "start: base and branch flags"
 for w in chunk lens worktree e2e gate; do
   echo "$SO" | tr '\n' ' ' | grep -o '"[^"]*"' | grep -qiw "$w" && bad "sign-off quoted text avoids '$w'" || ok "sign-off quoted text avoids '$w'"
 done
@@ -267,4 +266,8 @@ grep -q "click.DateTime" "$B" && grep -q "mutable default" "$B" && grep -q "type
 grep -q "port_base <n>" "$S" && grep -q "\`port_base\` unchanged" "$S" && grep -q "preflight's base, as given" "$K" && grep -q "DF_PORT_BASE + 50" "$K" && ok "checker gets preflight's port base unchanged" || bad "checker gets preflight's port base unchanged"
 grep -q "{DF} extend <id>" "$ROOT/skills/dark-factory/resume.md" && grep -q "Never ask them to type a script command" "$ROOT/skills/dark-factory/SKILL.md" && ok "cap pause: plain resume, df extend on yes" || bad "cap pause: plain resume, df extend on yes"
 grep -q "last line of \`retro.md\` itself" "$ROOT/agents/retro.md" && ok "retro: verdict inside retro.md" || bad "retro: verdict inside retro.md"
+for a in $AGENTS; do grep -q "last line of .*itself" "$ROOT/agents/$a.md" && ok "agent $a: verdict is the last line of its own file" || bad "agent $a: verdict is the last line of its own file"; done
+grep -q "{DF} step-check <wt> <step>" "$ROOT/skills/dark-factory/SKILL.md" && grep -q "baseline.failing" "$ROOT/skills/dark-factory/SKILL.md" && grep -q "test_cmd" "$ROOT/skills/dark-factory/SKILL.md" && ok "SKILL.md: one step-check call, test_cmd and baseline.failing set in preflight" || bad "SKILL.md: step-check wiring"
+grep -q "Do not ask about the base" "$ROOT/skills/dark-factory/SKILL.md" && ok "SKILL.md: no separate base question" || bad "SKILL.md: no separate base question"
+grep -q "infra retry alone is a tool fault" "$ROOT/skills/dark-factory/ship.md" && ok "ship.md: infra retries do not trigger the retro" || bad "ship.md: infra retries do not trigger the retro"
 finish

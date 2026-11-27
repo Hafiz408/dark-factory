@@ -74,5 +74,6 @@ Step rules:
 - Follow the track profile for what step 01 must be.
 - If no test runner exists, step 00 adds the smallest runner and says so.
 
-Write every file before you reply. End with `VERDICT: PASS - <n> steps, <lanes> lanes`. If the
+Write every file before you reply. The last line of `plan.md` itself must be
+`VERDICT: PASS - <n> steps, <lanes> lanes`. If the
 spec cannot be built as written, write why in `plan.md` and end with `VERDICT: BLOCKED - <reason>`.

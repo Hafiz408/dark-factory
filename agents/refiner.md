@@ -53,7 +53,7 @@ faulty code path, never only the reported pattern.
 Then write `spec.md` as in the second pass, assuming every default answer (each marked
 `user (default)`), so that an `ok` needs no second pass.
 
-Write both files before you reply. End with `VERDICT: PASS - <n> gaps, <m> questions`.
+Write both files before you reply. The last line of each file itself must be the verdict: `VERDICT: PASS - <n> gaps, <m> questions`.
 
 ## Second pass (resumed only when an answer differs from its default): spec
 
@@ -69,3 +69,4 @@ If a blocking gap is still open, append at most 3 follow-up questions to `questi
 contradict each other or the code, say so under risks and end
 `VERDICT: NEEDS_DECISION - <the contradiction>`. No actionable goal:
 `VERDICT: BLOCKED - no actionable goal`. Otherwise `VERDICT: PASS - <n> criteria`.
+The last line of `spec.md` itself is that verdict.

@@ -50,3 +50,5 @@ you added, and the command results. Then end with one of:
 - `VERDICT: NEEDS_DECISION - <question>; default: <the most conservative choice>`: the spec is
   silent; implement the default and say so.
 - `VERDICT: BLOCKED - <reason>`: something outside your control prevents the work.
+
+The last line of your output file itself must be that verdict line.
