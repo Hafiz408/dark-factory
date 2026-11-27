@@ -611,7 +611,9 @@ cmd_estimate() { # df estimate <run-id> <steps> [lanes]: a rough time and agent 
       if (k >= 2) { pm = med(p, k); lo = 10 + n * pm * 0.8; hi = 15 + n * pm * 1.25; src = "based on " k " earlier runs in this repo" }
       else { lo = 3 + 2 * w; hi = 6 + 4 * w; src = "default figures, no history yet" }
       ag = (k >= 2 && s >= 2) ? r(8 + n * med(q, s)) : 4 + ENVIRON["L"] + up(n / 3)
-      printf "%d %d estimate: %d-%d min, ~%d-%d agents (%s)\n", up((ag + 2) * 1.5), up(r(hi) * 1.5) * 60, r(lo), r(hi), ag, ag + 2, src }' "$m")
+      # The caps are a runaway guard, not the estimate: max(14, 2x the high agents) and max(40 min, 3x the high minutes).
+      ca = 2 * (ag + 2); if (ca < 14) ca = 14; ct = 3 * r(hi); if (ct < 40) ct = 40
+      printf "%d %d estimate: %d-%d min, ~%d-%d agents (%s)\n", ca, ct * 60, r(lo), r(hi), ag, ag + 2, src }' "$m")
   read -r x y est <<EOF
 $est
 EOF
@@ -620,7 +622,7 @@ EOF
   printf '%s\ncap: up to %s agents and %s min\n' "$est" "$ma" $(( (bs + 59) / 60 ))
 }
 
-cmd_budget() { # df budget <run-id>: exit 3 when the agent or time cap is reached (call before every spawn)
+cmd_budget() { # df budget <run-id> [agents-only]: exit 3 when the agent or time cap is reached (call before every spawn)
   local c rd ma bs used st
   rd=$(run_dir "${1:-}"); c="$rd/run.conf"; [ -f "$c" ] || die "no such run: ${1:-}"
   ma=$(conf_get "$c" max_agents); bs=$(conf_get "$c" budget_seconds); st=$(clock_start "$c")
@@ -629,7 +631,7 @@ cmd_budget() { # df budget <run-id>: exit 3 when the agent or time cap is reache
     [ "${used:-0}" -lt "$ma" ] || { echo "budget: agents cap reached (${used:-0}/$ma)"; return 3; }
   fi
   case "$bs:$st" in *[!0-9:]*) die "budget: budget_seconds or the start time in $c is not a number";; esac
-  if [ -n "$bs" ] && [ -n "$st" ]; then
+  if [ -n "$bs" ] && [ -n "$st" ] && [ "${2:-}" != agents-only ]; then
     used=$(( $(date +%s) - st ))
     [ "$used" -lt "$bs" ] || { echo "budget: time cap reached ($(( (used + 59) / 60 ))/$(( (bs + 59) / 60 )) min)"; return 3; }
   fi
@@ -755,6 +757,11 @@ cmd_step_start() { # df step-start <run-id> <step-id> <session-id> [worktree]: e
   if [ "$a" -eq 0 ] || [ -z "$base" ]; then base=$(git -C "$w" rev-parse HEAD); fm_set "$st" base_sha "$base"
   else git -C "$w" reset -q "$base"; fi # a failed attempt's commit is undone; its files stay for the next attempt
   a=$((a + 1)); fm_set "$st" attempts "$a"; fm_set "$st" status running
+  case $2 in
+    FX-*) [ "$a" -gt 1 ] || echo "milestone: [df $1] fixing: $(fm_get "$st" title)";;
+    *) [ "$a" -gt 1 ] || [ -n "$(grep -l '^status: PASS' "$rd"/chunks/*.md 2>/dev/null)" ] ||
+         echo "milestone: [df $1] building step 1 of $(ls "$rd"/chunks/*.md | grep -vc '/FX-'): $(fm_get "$st" title)";;
+  esac
   printf 'base: %s\nattempt: %s of %s\nworktree: %s\nbuilder output: %s\nchecks: panel/%s-a%s-checks.md\n' "$base" "$a" "$ma" "$w" "$rd/panel/$2-a$a-builder.md" "$2" "$a"
 }
 
@@ -795,12 +802,13 @@ cmd_step_end() { # df step-end <run-id> <step-id> <lane> <agent-id> <tokens> <sp
   fm_set "$st" status PASS
   for f in "$rd"/chunks/*.md; do all=$((all + 1)); [ "$(fm_get "$f" status)" != PASS ] || passed=$((passed + 1)); done
   echo "step-end: PASS step $2 on attempt $a ($passed of $all steps done)$note"
+  echo "milestone: [df $1] step $passed of $all done"
 }
 
 e2e_configured() { [ -f "$(state_root)/profile.md" ] && [ -n "$(fm_get "$(state_root)/profile.md" e2e_cmd)" ]; }
 
 cmd_check_start() { # df check-start <run-id> <session-id>: exit 2 lock held elsewhere, 3 a cap, 8 a step is BLOCKED or SKIPPED (pause)
-  local rd c wt f n out
+  local rd c wt f n r out
   [ $# -eq 2 ] || die "usage: df check-start <run-id> <session-id>"
   run_ctx "$1"
   for f in "$rd"/chunks/*.md; do
@@ -808,15 +816,19 @@ cmd_check_start() { # df check-start <run-id> <session-id>: exit 2 lock held els
     case "$(fm_get "$f" status)" in BLOCKED|SKIPPED) echo "check-start: step $(fm_get "$f" id) is $(fm_get "$f" status); pause"; return 8;; esac
   done
   cmd_lock "$1" refresh "$2"
-  cmd_budget "$1" || return $?
+  # A round that started and never ended (a crash, an infra retry) is redone, not counted again.
+  n=$(conf_get "$c" check_round_open); case $n in ''|*[!0-9]*) n="";; esac
+  r=${n:-$(( $(conf_get "$c" review_round) + 1 ))}
+  # Re-checking a fix that is already applied is exempt from the time cap (not the agent cap):
+  # stopping there leaves finished work unmerged.
+  if [ "$r" -gt 1 ]; then cmd_budget "$1" agents-only || return $?; else cmd_budget "$1" || return $?; fi
   conf_set "$c" stage check
   cmd_validate "$1"
-  # A round that started and never ended (a crash, an infra retry) is redone, not counted again.
-  n=$(conf_get "$c" check_round_open)
-  case $n in ''|*[!0-9]*) n=$(cmd_bump "$1" review); conf_set "$c" check_round_open "$n";; esac
+  [ -n "$n" ] || { n=$(cmd_bump "$1" review); conf_set "$c" check_round_open "$n"; }
   out="$rd/panel/check-r$n.md"
   mark_epoch "$rd"
   ro_take "$1" "$wt" "$out" # after every write above: they are part of the hash
+  echo "milestone: [df $1] final check, round $n"
   echo "round: $n of $(conf_get "$c" max_review_rounds)"; echo "output: $out"
   [ "$n" -le 1 ] || echo "fix diff: git diff $(conf_get "$c" "check_head_r$((n - 1))")..HEAD"
 }
@@ -850,12 +862,14 @@ cmd_check_end() { # df check-end <run-id> <agent-id> <tokens> <spawn|resume>
   printf -- '- check round %s: checker %s %s, %s blocking of %s findings, %s failing commands\n' "$n" "$4" "$v" "${g%% *}" "${g##* }" "$bad" >> "$rd/log.md"
   if [ $rc -ne 0 ]; then
     mx=$(conf_get "$c" max_review_rounds); case $mx in ''|*[!0-9]*) mx=3;; esac
-    if [ "$n" -ge "$mx" ]; then echo "check-end: FAIL round $n of $mx: ${g%% *} blocking and no fix round left; pause"; else echo "check-end: FAIL round $n of $mx: ${g%% *} blocking"; fi
+    if [ "$n" -ge "$mx" ]; then echo "check-end: FAIL round $n of $mx: ${g%% *} blocking and no fix round left; pause"; else echo "check-end: FAIL round $n of $mx: ${g%% *} blocking"
+      echo "milestone: [df $1] the check found ${g%% *} problem(s) to fix"; fi
     check_items "$out" "$su"
     [ "$n" -ge "$mx" ] && return 3 || return 2
   fi
   [ -z "$judge" ] || { echo "check-end: JUDGE command(s)$judge failed, and also failed before the run: read panel/check-r$n-suite.log"; check_items "$out" "$su"; return 6; }
   echo "check-end: PASS round $n: nothing blocking, suite green; $e2e"
+  echo "milestone: [df $1] final check passed"
   check_items "$out" "$su"
 }
 check_items() { # the blocking findings and the failed or invalid scenarios, one line each

@@ -47,6 +47,7 @@ assert_eq "0" "$(run step-start "$id" 01 s1)" "step-start runs"
 assert_contains "base: $BASE" "$(out)" "step-start prints the base"
 assert_contains "attempt: 1 of 3" "$(out)" "step-start prints the attempt"
 assert_contains "builder output: $rd/panel/01-a1-builder.md" "$(out)" "step-start prints the builder output path"
+assert_contains "milestone: [df $id] building step 1 of 1: Fix add" "$(out)" "step_start_milestone: the line to repeat, at the first step"
 assert_eq "$BASE:1:running" "$("$DF" fm-get "$S" base_sha):$("$DF" fm-get "$S" attempts):$("$DF" fm-get "$S" status)" "step-start records base, attempt and status"
 assert_ok "step-start records the spawn epoch" test -s "$rd/spawn-epoch"
 
@@ -70,6 +71,7 @@ printf 'done\nVERDICT: PASS - ok\n' > "$rd/panel/01-a2-builder.md"
 : > "$rd/spawns.tsv"
 assert_eq "0" "$(run step-end "$id" 01 1 agentA 1200 resume "Fix add")" "step_end_pass: exit 0"
 assert_contains "step-end: PASS step 01 on attempt 2 (1 of 1 steps done)" "$(out)" "step-end prints one summary line"
+assert_contains "milestone: [df $id] step 1 of 1 done" "$(out)" "step-end prints the milestone line"
 assert_eq "PASS:agentA" "$("$DF" fm-get "$S" status):$("$DF" fm-get "$S" builder_agent)" "step-end marks PASS and stores builder_agent"
 assert_eq "agentA:1" "$("$DF" conf-get "$C" lane1_agent):$("$DF" conf-get "$C" lane1_steps)" "step-end stores lane agent and step count"
 assert_eq "df(step 01): Fix add" "$(git -C "$WT" log -1 --format=%s)" "step-end commits with the title"
@@ -120,6 +122,7 @@ assert_ok "pre at a cap still stores the hashes (the retro ignores exit 3)" test
 "$DF" conf-set "$C" ship_mode local; "$DF" profile-pin "$id" >/dev/null
 assert_eq "0" "$(run check-start "$id" s1)" "check-start runs"
 assert_contains "round: 1 of 3" "$(out)" "check-start prints the round"
+assert_contains "milestone: [df $id] final check, round 1" "$(out)" "check_start_milestone"
 assert_contains "output: $rd/panel/check-r1.md" "$(out)" "check-start prints the output path"
 assert_eq "check:1" "$("$DF" conf-get "$C" stage):$("$DF" conf-get "$C" review_round)" "check-start sets the stage and bumps the round"
 K="$rd/panel/check-r1.md"
@@ -139,8 +142,12 @@ printf '## findings\n- severity: high\n  source: functional\n  where: src/calc.s
 assert_eq "2" "$(run check-end "$id" chk1 300 resume)" "check_end_blocking: exit 2"
 assert_contains "high src/calc.sh: adds wrong for negatives" "$(out)" "check-end lists the blocking finding"
 assert_contains "S2 FAIL - wrong sum" "$(out)" "check-end lists the failed scenario"
-# round 3 = the cap, and the checker touches the worktree
-assert_eq "0" "$(run check-start "$id" s1)" "check-start round 3"
+# round 3 = the cap, and the checker touches the worktree; re-checking an applied fix ignores the time cap
+"$DF" conf-set "$C" budget_seconds 1; "$DF" conf-set "$C" signoff_at 1
+assert_eq "0" "$(run check-start "$id" s1)" "check_start_recheck_exempt_from_time_cap"
+"$DF" conf-set "$C" max_agents 1
+assert_eq "3" "$(run check-start "$id" s1)" "check_start_recheck_keeps_agent_cap"
+"$DF" conf-set "$C" max_agents 50
 echo x > "$WT/stray.txt"; printf 'VERDICT: PASS - 1 scenarios passed\n' > "$rd/panel/check-r3.md"
 assert_eq "10" "$(run check-end "$id" chk1 300 resume)" "check_end_read_only_violation: exit 10"
 rm "$WT/stray.txt"; echo 'exit 1' >> "$WT/tests/test_calc.sh"; run check-start "$id" s1 >/dev/null

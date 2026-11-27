@@ -72,12 +72,12 @@ assert_contains "	active	0	-	0" "$(grep "^$id	" "$SR/metrics.tsv")" "no known to
 rm -f "$SR/metrics.tsv"
 C="$rd/run.conf"; sed -i.bak '/^budget_seconds=/d' "$C"; rm -f "$C.bak"
 assert_eq "estimate: 9-18 min, ~6-8 agents (default figures, no history yet)
-cap: up to 12 agents and 27 min" "$(df_ estimate "$id" 3)" "estimate uses default figures with no history"
-assert_eq "12:1620" "$("$DF" conf-get "$C" max_agents):$("$DF" conf-get "$C" budget_seconds)" "estimate_writes_caps"
+cap: up to 16 agents and 54 min" "$(df_ estimate "$id" 3)" "estimate uses default figures with no history"
+assert_eq "16:3240" "$("$DF" conf-get "$C" max_agents):$("$DF" conf-get "$C" budget_seconds)" "estimate_writes_caps"
 "$DF" conf-set "$C" max_agents 50
 assert_eq "estimate: 9-18 min, ~8-10 agents (default figures, no history yet)
-cap: up to 50 agents and 27 min" "$(df_ estimate "$id" 5 2)" "estimate_keeps_user_caps (5 steps in 2 lanes)"
-assert_eq "50:1620" "$("$DF" conf-get "$C" max_agents):$("$DF" conf-get "$C" budget_seconds)" "estimate_keeps_user_caps: run.conf"
+cap: up to 50 agents and 54 min" "$(df_ estimate "$id" 5 2)" "estimate_keeps_user_caps (5 steps in 2 lanes)"
+assert_eq "50:3240" "$("$DF" conf-get "$C" max_agents):$("$DF" conf-get "$C" budget_seconds)" "estimate_keeps_user_caps: run.conf"
 assert_fail "estimate refuses zero lanes" df_ estimate "$id" 3 0
 # budget: resumes are not agents; either cap reached is exit 3
 "$DF" conf-set "$C" max_agents 2; "$DF" conf-set "$C" started "$(date +%s)"
@@ -115,7 +115,7 @@ e=$(df_ estimate "$id" 2)
 assert_contains "(based on 3 earlier runs in this repo)" "$e" "estimate counts finished runs only"
 # r3: (40 - 12.5) / 2 = 13.75 -> median of 18.75, 5, 13.75 = 13.75; lo 10 + 2*13.75*0.8 = 32, hi 15 + 2*13.75*1.25 = 49.375
 assert_eq "estimate: 32-49 min, ~26-28 agents (based on 3 earlier runs in this repo)
-cap: up to 42 agents and 74 min" "$e" "estimate scales the history median by chunk count"
+cap: up to 56 agents and 147 min" "$e" "estimate scales the history median by chunk count"
 # pre/post: one bookkeeping call each side of a spawn
 printf 'did it\nVERDICT: PASS - ok\n' > "$T_OUT_FILE"
 assert_eq "PASS" "$(cd "$R" && "$DF" post "$id" builder 12 3400 spawn "$T_OUT_FILE" "- builder step 01 PASS")" "post prints the verdict"
