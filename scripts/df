@@ -72,14 +72,31 @@ cmd_pause() { # df pause <run-id> <what is open>: stop the run's clock and mark 
   [ "$(conf_get "$c" status)" = paused ] || conf_set "$c" paused_at "$(date +%s)"
   conf_set "$c" status paused
 }
+credit_clock() { # credit_clock <run.conf> <seconds>: idle time never counts against the time cap or the metrics
+  local k s
+  for k in started signoff_at; do s=$(conf_get "$1" $k)
+    case "$s" in ''|*[!0-9]*) ;; *) conf_set "$1" $k $((s + $2));; esac
+  done
+}
 cmd_unpause() { # df unpause <run-id>: resume the clock, crediting the time spent paused
-  local c p s; c="$(run_dir "$1")/run.conf"; [ -f "$c" ] || die "no such run: $1"
+  local c p; c="$(run_dir "$1")/run.conf"; [ -f "$c" ] || die "no such run: $1"
   [ "$(conf_get "$c" status)" = paused ] || die "unpause: run is not paused"
   p=$(conf_get "$c" paused_at)
-  for k in started signoff_at; do s=$(conf_get "$c" $k)
-    case "$p$s" in *[!0-9]*|'') ;; *) [ ${#p} -gt 0 ] && [ ${#s} -gt 0 ] && conf_set "$c" $k $((s + $(date +%s) - p));; esac
-  done
+  case "$p" in ''|*[!0-9]*) ;; *) credit_clock "$c" $(($(date +%s) - p));; esac
   conf_set "$c" status active
+}
+cmd_extend() { # df extend <run-id>: the user said continue after a cap pause; allow half as much again
+  local c ma bs st now na nb; c="$(run_dir "${1:-}")/run.conf"; [ -f "$c" ] || die "no such run: ${1:-}"
+  ma=$(conf_get "$c" max_agents); bs=$(conf_get "$c" budget_seconds); st=$(clock_start "$c"); now=$(date +%s)
+  case "$ma:$bs:$st" in *[!0-9:]*) die "extend: a cap or the start time in $c is not a number";; esac
+  # ponytail: half the cap again, from whatever is already used; a knob if people want other amounts.
+  na=${ma:+$(( ma + (ma + 1) / 2 ))}
+  if [ -n "$bs" ]; then
+    nb=$bs; [ -z "$st" ] || [ $((now - st)) -le "$nb" ] || nb=$((now - st))
+    nb=$(( nb + (bs + 1) / 2 )); conf_set "$c" budget_seconds "$nb"
+  fi
+  [ -z "$na" ] || conf_set "$c" max_agents "$na"
+  echo "cap: up to ${na:-unlimited} agents and $(( (${nb:-0} + 59) / 60 )) min"
 }
 
 # A df check is its own evidence, so its medium+ findings block at the gate.
@@ -269,6 +286,13 @@ cmd_lock() { # df lock <run-id> acquire|refresh|release|check [session]
         case "$hb" in ''|*[!0-9]*) hb=0;; esac
         if [ "$cur" != "$sess" ] && [ $((now - hb)) -lt "$ttl" ]; then
           echo "df: run is live (session $cur)" >&2; exit 2
+        fi
+        # A new session taking over a dead one: the gap since its last heartbeat was idle.
+        # ponytail: the dead session's last agent after that heartbeat goes uncounted too; and
+        # a --force release removes the lock, so that path credits nothing.
+        if [ "$act" = acquire ] && [ "$cur" != "$sess" ] && [ "$hb" -gt 0 ] && [ -f "$rd/run.conf" ] &&
+           [ "$(conf_get "$rd/run.conf" status)" != paused ]; then
+          credit_clock "$rd/run.conf" $((now - hb))
         fi
       fi
       printf 'session=%s\nheartbeat=%s\n' "$sess" "$now" | atomic "$lf" ;;
@@ -1021,6 +1045,7 @@ case "$cmd" in
   metrics) cmd_metrics "$@";;
   pause) cmd_pause "$@";;
   unpause) cmd_unpause "$@";;
+  extend) cmd_extend "$@";;
   state-hash) cmd_state_hash;;
   rundir-hash) cmd_rundir_hash "$@";;
   spawn-log) cmd_spawn_log "$@";;

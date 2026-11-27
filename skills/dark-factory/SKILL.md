@@ -273,7 +273,7 @@ The run never finishes while something is open. To pause: write `report.md` (see
 with `PAUSED: <what is open>` as its first line; run the retro (`ship.md`, no budget check)
 without changing `stage`; `{DF} pause <id> "<what is open>"`; `{DF} metrics <id>` (its line
 verbatim into the report); `{DF} lock <id> release <session-id>`; print `[df <id>] paused: <what is open>`; and tell the
-user, in plain words, what is open and how to continue: a cap reached: raise it with
-`{DF} conf-set {RD}/run.conf max_review_rounds <n>` (or `max_agents`, `budget_seconds`), then
-`resume`; a step stuck: optionally edit its file or `plan.md`, then `resume`. Do not run
-`{DF} finish` for a paused run.
+user, in plain words, what is open and the one thing to say to go on:
+`/dark-factory:dark-factory resume` (at a cap, resume asks before allowing more; a stuck step:
+they may first say what to change). Never ask them to type a script command or edit state. Do
+not run `{DF} finish` for a paused run.

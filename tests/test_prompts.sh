@@ -265,4 +265,6 @@ i=$(grep -n "run_in_background\`; roles are never backgrounded" "$S" | cut -d: -
 grep -q "at most 5 user acceptance criteria" "$ROOT/agents/planner.md" && grep -q "At most 5 user acceptance criteria and at most 8 files: one chunk" "$ROOT/tracks/feature.md" && ok "small features are planned as one step" || bad "small features are planned as one step"
 grep -q "click.DateTime" "$B" && grep -q "mutable default" "$B" && grep -q "type: ignore" "$B" && ok "builder: framework input types, no mutable defaults, no needless type: ignore" || bad "builder: framework input types, no mutable defaults, no needless type: ignore"
 grep -q "port_base <n>" "$S" && grep -q "\`port_base\` unchanged" "$S" && grep -q "preflight's base, as given" "$K" && grep -q "DF_PORT_BASE + 50" "$K" && ok "checker gets preflight's port base unchanged" || bad "checker gets preflight's port base unchanged"
+grep -q "{DF} extend <id>" "$ROOT/skills/dark-factory/resume.md" && grep -q "Never ask them to type a script command" "$ROOT/skills/dark-factory/SKILL.md" && ok "cap pause: plain resume, df extend on yes" || bad "cap pause: plain resume, df extend on yes"
+grep -q "last line of \`retro.md\` itself" "$ROOT/agents/retro.md" && ok "retro: verdict inside retro.md" || bad "retro: verdict inside retro.md"
 finish

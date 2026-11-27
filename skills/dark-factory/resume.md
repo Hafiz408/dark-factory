@@ -22,7 +22,9 @@ diff since the step's `base_sha`) and store the new id.
 6. Status `paused` (only now, with the lock held): show `waiting_on`; `{DF} unpause <id>`
    (credits the paused time). Set every BLOCKED and SKIPPED step back to `status pending` and
    `attempts 0` with `{DF} fm-set`, log it, and build those first. Paused at a cap: continue
-   from the step that paused; if the counter still equals its cap, pause again and say so.
+   from the step that paused. Paused at a cap: say in plain words what was used and ask
+   "Allow about half as much again? (yes / no)"; on yes run `{DF} extend <id>` (agents or time) or
+   raise `max_review_rounds` with `{DF} conf-set` yourself; on no, pause again.
    Status `waiting_permission`: set `status active` once the user says it is allowed.
 7. An interrupted wave (a step file whose `sub_worktree` is not `null`): `{DF} sub-drop <id> NN`,
    set it `pending`, `interrupts` +1; reset `{WT}` to the last `commit` line in `log.md` (none: `root_base_sha`).

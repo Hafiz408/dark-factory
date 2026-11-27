@@ -123,4 +123,20 @@ assert_ok "post appended the log line" grep -q "builder step 01 PASS" "$rd/log.m
 assert_ok "post logged the spawn" grep -q "^builder	12	3400	spawn" "$rd/spawns.tsv"
 printf 'no verdict here\n' > "$T_OUT_FILE"
 assert_fail "post fails on a missing verdict" bash -c "cd '$R' && '$DF' post '$id' builder 1 1 resume '$T_OUT_FILE' x"
+# a dead session's idle time is credited when the next session takes the lock
+rm -f "$rd/lock"; "$DF" conf-set "$C" status active; t0=$(( $(date +%s) - 5000 )); "$DF" conf-set "$C" signoff_at $t0
+printf 'session=old\nheartbeat=%s\n' $t0 > "$rd/lock"
+assert_ok "acquire takes over a dead session" df_ lock "$id" acquire new
+got=$(( $("$DF" conf-get "$C" signoff_at) - t0 )); [ "$got" -ge 5000 ] && [ "$got" -le 5010 ] && ok "resume_credits_idle_time" || bad "resume_credits_idle_time ($got)"
+t1=$("$DF" conf-get "$C" signoff_at); assert_ok "refresh by the same session" df_ lock "$id" refresh new
+assert_eq "$t1" "$("$DF" conf-get "$C" signoff_at)" "refresh credits nothing"
+# a paused run is credited by unpause only, not twice
+"$DF" conf-set "$C" status paused; printf 'session=old\nheartbeat=%s\n' $t0 > "$rd/lock"
+assert_ok "acquire a paused run" df_ lock "$id" acquire newer
+assert_eq "$t1" "$("$DF" conf-get "$C" signoff_at)" "paused_run_not_credited_twice"
+# extend: half again, counted from what is already used
+"$DF" conf-set "$C" status active; "$DF" conf-set "$C" max_agents 10; "$DF" conf-set "$C" budget_seconds 600; "$DF" conf-set "$C" signoff_at $(( $(date +%s) - 900 ))
+assert_ok "extend runs" df_ extend "$id"
+assert_eq "15" "$("$DF" conf-get "$C" max_agents)" "extend_raises_agents"
+rc=0; df_ budget "$id" >/dev/null || rc=$?; assert_eq "0" "$rc" "extend_clears_time_cap"
 finish

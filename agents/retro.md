@@ -26,4 +26,5 @@ did not know existed, a convention the checker kept flagging, an infra failure, 
 3. `proposals-new.md`: the plugin proposals as `- ` bullets of at most 200 characters, or an
    empty file.
 
-Write every file before you reply. End with `VERDICT: PASS - <n> lessons, <m> proposals`.
+Write every file before you reply. The last line of `retro.md` itself must be
+`VERDICT: PASS - <n> lessons, <m> proposals`; the file is checked, your reply is not.
