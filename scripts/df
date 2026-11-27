@@ -1154,6 +1154,107 @@ cmd_revert_pr() { # df revert-pr <run-id>: open a PR that reverts the merge (nev
   conf_set "$c" revert_url "$url"; echo "$url"
 }
 
+# df land: the whole ending after the report is written, re-entrant by stage, one plain line at every stop.
+# exit 0 done (merged and verified, PR open, or left on its branch), 2 the push or PR was refused,
+# 3 the PR was not merged (red checks, refused, or no result in DF_MERGE_TIMEOUT s), 4 call again (checks still running),
+# 5 the local merge was refused, 6 the tests failed after the merge, 7 run the full app tests after the merge,
+# 8 NOT FIXED (a bugfix branch that changes no source). Every stop except 4 and 7 has finished the run.
+cmd_land() { # df land <run-id> <session-id> <pr-title>
+  local rd c wt id=${1:-} sess=${2:-} title=${3:-} t0 mode br target remote=1 out rc folder bad=0 judge="" ws now end r
+  [ $# -eq 3 ] || die "usage: df land <run-id> <session-id> <pr-title>"
+  run_ctx "$id"; t0=$(date +%s); br=$(conf_get "$c" branch)
+  [ "$(conf_get "$c" status)" = active ] || die "land: run is $(conf_get "$c" status)"
+  [ -f "$rd/report.md" ] || die "land: write report.md first"
+  cmd_lock "$id" refresh "$sess"
+  [ "$(conf_get "$c" cmd_pin)" = "$(cmd_pin_of "$c")" ] || die "land: env.commands or test_cmd changed since sign-off"
+  git -C "$wt" remote get-url origin >/dev/null 2>&1 && command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1 || remote=""
+  mode=$(conf_get "$c" ship_mode); [ -n "$mode" ] || mode=merge
+  case "$(conf_get "$c" stage)" in
+    merge|postmerge) ;;
+    *) conf_set "$c" stage ship
+      if no_source_change "$c"; then land_end "$id" "$sess" "NOT FIXED: the branch changes no source file (tests and docs only); nothing shipped"; return 8; fi
+      case $mode:$remote in
+        branch:*|pr:) land_end "$id" "$sess" "done: on branch $br; nothing pushed or merged"; return 0;;
+        merge:1|pr:1)
+          conf_set "$c" ship_confirmed yes
+          awk '/^## Technical changes/ { exit } 1' "$rd/report.md" > "$rd/pr-body.md"
+          rc=0; out=$( (cmd_ship "$id" "$title" "$rd/pr-body.md") 2>&1 ) || rc=$?
+          [ $rc -eq 0 ] || { land_end "$id" "$sess" "the PR could not be opened: $(printf '%s\n' "$out" | tail -1 | sed 's/^df: //'); kept on branch $br"; return 2; }
+          printf -- '- shipped: %s\n' "$out" >> "$rd/log.md"
+          [ "$mode" = merge ] || { land_end "$id" "$sess" "done: PR open: $out"; return 0; } ;;
+        *) target=$(ship_target "$c" local 2>/dev/null) || target=""
+          [ -z "$target" ] || conf_set "$c" premerge_sha "$(git -C "$(main_root)" rev-parse -q --verify "refs/heads/$target" || true)" ;;
+      esac
+      conf_set "$c" stage merge ;;
+  esac
+  if [ "$(conf_get "$c" stage)" = merge ]; then
+    if [ -n "$(conf_get "$c" pr_url)" ]; then
+      ws=$(conf_get "$c" merge_wait_since); case $ws in ''|*[!0-9]*) ws=$t0; conf_set "$c" merge_wait_since "$ws";; esac
+      while :; do
+        rc=0; out=$( (cmd_merge "$id") 2>&1 ) || rc=$?; now=$(date +%s)
+        [ $rc -eq 0 ] && break
+        if [ $rc -eq 4 ] && [ $((now - ws)) -lt "${DF_MERGE_TIMEOUT:-1200}" ]; then
+          [ $((now - t0)) -lt "${DF_LAND_WAIT:-300}" ] || { echo "land: the PR's checks are still running; run df land again"; return 4; }
+          continue
+        fi
+        [ $rc -ne 4 ] || out="the checks did not finish within $(( ${DF_MERGE_TIMEOUT:-1200} / 60 )) min"
+        conf_set "$c" stage ship
+        land_end "$id" "$sess" "the PR was not merged ($(printf '%s\n' "$out" | tail -1 | sed 's/^df: //; s/^merge: //')); it stays open: $(conf_get "$c" pr_url)"; return 3
+      done
+    else
+      rc=0; out=$( (cmd_local_merge "$id") 2>&1 ) || rc=$?
+      if [ $rc -ne 0 ]; then
+        conf_set "$c" stage ship; target=$(ship_target "$c" local 2>/dev/null || echo "the base branch")
+        land_end "$id" "$sess" "not merged: $(printf '%s\n' "$out" | tail -1 | sed 's/^df: //'); kept on branch $br (when your folder is clean and on $target, run git merge $br)"; return 5
+      fi
+    fi
+    printf -- '- merged: %s\n' "$(conf_get "$c" merge_sha)" >> "$rd/log.md"
+    conf_set "$c" stage postmerge
+    [ $(( $(date +%s) - t0 )) -lt "${DF_LAND_WAIT:-300}" ] || { echo "land: merged; run df land again for the test after the merge"; return 4; }
+  fi
+  # postmerge
+  rc=0; folder=$( (cmd_postmerge "$id") 2>&1 ) || rc=$?
+  [ $rc -eq 0 ] || die "land: ${folder#df: }"
+  if [ "$(conf_get "$c" postmerge_suite)" != green ]; then
+    : > "$rd/panel/postmerge.md"; : > "$rd/panel/postmerge.log"
+    run_cmds "$rd" "$folder" "$rd/panel/postmerge.md" "$rd/panel/postmerge.log"
+    if [ "$bad" -gt 0 ]; then
+      conf_set "$c" postmerge_suite red
+      printf '\n## After the merge\n\nThe tests FAILED after the merge (%s of the commands; output in panel/postmerge.log).\n' "$bad" >> "$rd/report.md"
+      land_end "$id" "$sess" "the tests failed after the merge (panel/postmerge.log); the working copy is kept"; return 6
+    fi
+    conf_set "$c" postmerge_suite green
+    printf '\n## After the merge\n\nThe tests passed again after the merge%s.\n' "${judge:+ (commands$judge failed as they did before the run)}" >> "$rd/report.md"
+  fi
+  if e2e_configured; then
+    case "$(conf_get "$c" postmerge_e2e)" in
+      green) ;;
+      red) printf 'The full app tests FAILED after the merge.\n' >> "$rd/report.md"
+        land_end "$id" "$sess" "the full app tests failed after the merge; the working copy is kept"; return 6;;
+      *) echo "land: run the full app tests in $folder (e2e.md), record postmerge_e2e green or red, then run df land again"; return 7;;
+    esac
+  fi
+  r=merged; [ "$(conf_get "$c" merged)" = yes ] || r=local
+  land_end "$id" "$sess" "" "$r"
+}
+land_end() { # land_end <run-id> <session-id> <line> [merged|local]: finish, metrics into the report, and after a verified merge clean up
+  local rd c wt id=$1 m line=$3 rp ec=0 eo
+  run_ctx "$id"
+  ( cmd_finish "$id" "$2" ) 2>/dev/null || true
+  m=$(cmd_metrics "$id")
+  { printf '\n## Time and agents\n\n%s\n' "$m"; grep -m1 '^estimate:' "$rd/log.md" || true; } >> "$rd/report.md"
+  rp="$rd/report.md"
+  if [ -n "${4:-}" ]; then
+    if [ "$4" = merged ]; then line="done: merged and verified: $(conf_get "$c" pr_url)"
+      eo=$( (cmd_clean "$id" --branch --archive) 2>&1 ) || ec=$?
+    else line="done: merged into your folder and verified"
+      eo=$( { git -C "$(main_root)" worktree remove "$wt" && git -C "$(main_root)" branch -q -d "$(conf_get "$c" branch)" && (cmd_clean "$id" --archive); } 2>&1 ) || ec=$?
+    fi
+    if [ $ec -eq 0 ]; then rp="$(state_root)/reports/$id/report.md"; else line="$line (tidy-up refused: $(printf '%s\n' "$eo" | tail -1 | sed 's/^df: //'))"; fi
+  fi
+  echo "land: $line"; echo "$m"; echo "report: $rp"
+}
+
 cmd_status() { # df status [run-id]: regenerate and print progress.md (no id: the only run)
   local rd c out f id=${1:-} n hb age
   if [ -z "$id" ]; then
@@ -1341,6 +1442,7 @@ case "$cmd" in
   steps) cmd_steps "$@";;
   step-start) cmd_step_start "$@";;
   step-end) cmd_step_end "$@";;
+  land) cmd_land "$@";;
   check-start) cmd_check_start "$@";;
   check-end) cmd_check_end "$@";;
   post) cmd_post "$@";;
@@ -1353,5 +1455,5 @@ case "$cmd" in
   fm-get) fm_get "$@";;
   fm-set) fm_set "$@";;
   write) atomic "$@";;
-  *) die "usage: df {start|validate|profile-pin|verdict|gate|lock|snapshot|check-diff|canary-scan|srchash|redcheck|commit|scrub|status|list|clean|fixed|finish|ship|merge|local-merge|postmerge|revert-pr|sweep|lessons-set|metrics|state-hash|rundir-hash|spawn-log|pre|post|signoff|steps|step-start|step-end|check-start|check-end|bump|estimate|budget|pause|unpause|wave|sub-add|sub-join|sub-drop|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
+  *) die "usage: df {start|validate|profile-pin|verdict|gate|lock|snapshot|check-diff|canary-scan|srchash|redcheck|commit|scrub|status|list|clean|fixed|finish|ship|merge|local-merge|postmerge|revert-pr|sweep|lessons-set|metrics|state-hash|rundir-hash|spawn-log|pre|post|signoff|steps|step-start|step-end|check-start|check-end|land|bump|estimate|budget|pause|unpause|wave|sub-add|sub-join|sub-drop|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
 esac
