@@ -300,4 +300,5 @@ done
 grep -q "{DF} accept <id>" "$ROOT/skills/dark-factory/resume.md" && ok "resume: accept only on the user's yes" || bad "resume: accept only on the user's yes"
 grep -q "Never call an \`advisor\` tool" "$ROOT/skills/dark-factory/rules.md" && ok "rules: no advisor calls" || bad "rules: no advisor calls"
 grep -q "contrived" "$ROOT/lenses/check.md" && ok "check lens: contrived layouts are low" || bad "check lens: contrived layouts are low"
+grep -q "answer \`strict\` to stop" "$ROOT/skills/dark-factory/SKILL.md" && grep -q "WITH KNOWN PROBLEMS" "$ROOT/skills/dark-factory/ship.md" && ok "sign-off offers strict; known problems lead the note" || bad "sign-off offers strict; known problems lead the note"
 finish

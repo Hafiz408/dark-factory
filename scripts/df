@@ -244,7 +244,8 @@ cmd_profile_pin() { # df profile-pin <run-id>: at sign-off, record the profile's
 }
 # The ship settings chosen at sign-off; run.conf is writable by roles, so ship, merge and local-merge re-check them.
 # ponytail: a plain hash, so it catches a stray write, not a role that recomputes it; an HMAC with a key outside the run dir if that matters.
-ship_pin_of() { printf '%s\n%s\n%s\n' "$(conf_get "$1" ship_mode)" "$(conf_get "$1" ship_base)" "$(conf_get "$1" base_ref)" | sha; }
+ship_pin_of() { local a; a=$(conf_get "$1" accept_minor); printf '%s\n%s\n%s\n%s' "$(conf_get "$1" ship_mode)" "$(conf_get "$1" ship_base)" "$(conf_get "$1" base_ref)" "${a:+$a
+}" | sha; }
 # The commands df step-check runs were shown at sign-off; a role editing them afterwards is refused.
 cmd_pin_of() { { cat "$(dirname "$1")/env.commands" 2>/dev/null || true; conf_get "$1" test_cmd; } | sha; }
 ship_pin_check() { [ "$(conf_get "$1" ship_pin)" = "$(ship_pin_of "$1")" ] || die "$2: ship_mode, ship_base or base_ref changed since sign-off (or there was no sign-off)"; }
@@ -519,14 +520,11 @@ cmd_finish() { # df finish <run-id> [session]: end state is written together, th
   cmd_lock "$1" release "${2:-}"
 }
 
-cmd_lessons_set() { # df lessons-set <run-id>: install the retro's lessons (max 30 lines), append its proposals once
-  local rd sr n prop=""
+cmd_lessons_set() { # df lessons-set <run-id>: install the retro's lessons (cut to 30 lines), append its proposals once
+  local rd sr prop=""
   rd=$(run_dir "$1"); sr=$(state_root)
   [ -f "$rd/lessons-new.md" ] || die "lessons-set: $rd/lessons-new.md not found"
-  n=$(grep -c '' "$rd/lessons-new.md" || true)
-  [ "$n" -le 30 ] || die "lessons-set: $n lines; at most 30 (old lessons kept)"
   ! grep -E "$SECRET_RE" "$rd/lessons-new.md" | grep -Fvq '[REDACTED]' || die "lessons-set: lessons look like they hold a secret (old lessons kept)"
-  ! awk 'length($0) > 200 { bad=1 } END { exit !bad }' "$rd/lessons-new.md" || die "lessons-set: a line is over 200 characters (old lessons kept)"
   # Later builders read lessons; holdout scenarios must never reach them.
   [ -z "$(cmd_canary_scan "$rd/scenarios" "$rd/lessons-new.md")" ] || die "lessons-set: a holdout scenario canary appears in the lessons (old lessons kept)"
   # Proposals are only collected for a human, so a bad one is dropped (long lines cut), never the lessons with it.
@@ -535,7 +533,8 @@ cmd_lessons_set() { # df lessons-set <run-id>: install the retro's lessons (max 
     elif [ -n "$(cmd_canary_scan "$rd/scenarios" "$rd/proposals-new.md")" ]; then echo "df: lessons-set: proposals dropped (a holdout scenario canary appears in them)" >&2
     else prop=1; fi
   fi
-  atomic "$sr/lessons.md" < "$rd/lessons-new.md"
+  # At most 30 lines of 200 characters: longer input is cut, never refused (one long line once lost every lesson).
+  awk 'NR <= 30 { if (length($0) > 200) $0 = substr($0, 1, 197) "..."; print }' "$rd/lessons-new.md" | atomic "$sr/lessons.md"
   if [ -n "$prop" ]; then # this run's latest retro replaces its earlier section
     { [ ! -f "$sr/proposals.md" ] || H="## $1" awk '$0 == ENVIRON["H"] { skip=1; next } /^## / { skip=0 } !skip' "$sr/proposals.md"
       printf '## %s\n' "$1"; awk 'length($0) > 200 { $0 = substr($0, 1, 197) "..." } 1' "$rd/proposals-new.md"; } | atomic "$sr/proposals.md"
@@ -733,8 +732,10 @@ cmd_post() { # df post <run-id> <role> <seconds|-> <tokens> <spawn|resume> <outp
 
 signoff_usage() { die "usage: df signoff <run-id> <merge|local|pr|branch|no merge> [ship-base]"; }
 cmd_signoff() { # df signoff <run-id> <merge|local|pr|branch|no merge> [ship-base]: record the approval, pin the profile, move the draft steps in
-  local rd c wt id=${1:-} w m f
+  local rd c wt id=${1:-} w m f am=yes
   [ $# -ge 2 ] || signoff_usage
+  # `strict`: stop, rather than finish with the open minor problems listed, when the last check round leaves some.
+  if [ "${!#}" = strict ] && [ $# -ge 3 ]; then am=no; set -- "${@:1:$(($# - 1))}"; fi
   run_ctx "$id"; w=$2; shift 2
   if [ "$w" = no ] && [ "${1:-}" = merge ]; then w="no merge"; shift; fi
   case $w in merge|local|pr|branch) m=$w;; "no merge"|no-merge) m=pr;; *) signoff_usage;; esac
@@ -743,7 +744,7 @@ cmd_signoff() { # df signoff <run-id> <merge|local|pr|branch|no merge> [ship-bas
     [ "$(git check-ref-format --branch "$1" 2>/dev/null)" = "$1" ] && case $1 in -*) false;; esac || die "signoff: invalid branch name '$1'"
     conf_set "$c" ship_base "$1"
   fi
-  conf_set "$c" ship_mode "$m"
+  conf_set "$c" ship_mode "$m"; conf_set "$c" accept_minor "$am"
   printf -- '- signoff: approved; ending %s%s\n' "$m" "${1:+ into $1}" >> "$rd/log.md"
   for f in "$rd"/chunks-draft/*.md; do [ ! -e "$f" ] || mv -f "$f" "$rd/chunks/"; done
   cmd_profile_pin "$id"
@@ -920,6 +921,18 @@ cmd_check_end() { # df check-end <run-id> <agent-id> <tokens> <spawn|resume> <di
 check_round_result() { # check_round_result <run-id> <round> <gate line> <judge> <files...>: one summary, the failing items, the exit code; records the pass
   local id=$1 n=$2 g=$3 judge=$4 rd c wt mx; shift 4; run_ctx "$id"
   mx=$(conf_get "$c" max_review_rounds); case $mx in ''|*[!0-9]*) mx=3;; esac
+  if [ "${g%% *}" -gt 0 ] && [ "$n" -ge "$mx" ] && [ -z "$judge" ] && [ "$(conf_get "$c" accept_minor)" = yes ] &&
+     [ "$(conf_get "$c" ship_pin)" = "$(ship_pin_of "$c")" ] && ! check_items "$@" | grep -Evq '^  medium '; then
+    # Agreed at sign-off: after the last round, known minor problems are listed, not a reason to stop.
+    if e2e_configured && [ ! -f "$rd/panel/e2e-r$n.md" ]; then
+      echo "check-end: only minor problems left: run the full app tests now (e2e.md), then df check-gate"; check_items "$@"; return 7
+    fi
+    if accept_record "$id" "$n" "$@" >/dev/null; then
+      echo "check-end: PASS round $n WITH KNOWN PROBLEMS (agreed at sign-off): list them first in the final note"
+      echo "milestone: [df $id] final check passed with known minor problems"
+      check_items "$@"; return 0
+    fi
+  fi
   if [ "${g%% *}" -gt 0 ]; then
     if [ "$n" -ge "$mx" ]; then echo "check-end: FAIL round $n of $mx: ${g%% *} blocking and no fix round left; pause"
     else echo "check-end: FAIL round $n of $mx: ${g%% *} blocking"; echo "milestone: [df $id] the check found ${g%% *} problem(s) to fix"; fi
@@ -947,22 +960,26 @@ cmd_check_gate() { # df check-gate <run-id>: gate the last round again after jud
   conf_set "$c" check_pass_sha "$(git -C "$wt" rev-parse HEAD)"
   echo "check-gate: PASS round $n: nothing blocking"; echo "milestone: [df $(basename "$rd")] final check passed"
 }
-cmd_accept() { # df accept <run-id>: the user said yes to merging with the open findings of the last check round; exit 2 when that is not allowed
-  local rd c wt n h bad
-  run_ctx "${1:-}"; n=$(conf_get "$c" check_last_round)
-  case $n in ''|*[!0-9]*) echo "accept: no: the final check has not finished a round"; return 2;; esac
-  [ -z "$(conf_get "$c" check_round_open)" ] || { echo "accept: no: check round $(conf_get "$c" check_round_open) has not ended"; return 2; }
-  [ "$(conf_get "$c" check_end_rc)" = 3 ] || [ "$(conf_get "$c" check_end_rc)" = 2 ] || { echo "accept: no: the last round did not end with open findings"; return 2; }
+accept_record() { # accept_record <run-id> <round> <files...>: record a pass with open findings when only medium ones are open; else say why (exit 2)
+  local id=$1 n=$2 rd c wt h bad f; shift 2; run_ctx "$id"
   h=$(git -C "$wt" rev-parse HEAD)
   [ "$h" = "$(conf_get "$c" "check_head_r$n")" ] || { echo "accept: no: the branch changed since that round was checked"; return 2; }
-  if e2e_configured && [ ! -f "$rd/panel/e2e-r$n.md" ]; then echo "accept: no: the full app tests have not run (e2e.md)"; return 2; fi
-  set -- "$rd/panel/check-r$n.md" "$rd/panel/check-r$n-suite.md"; [ ! -f "$rd/panel/e2e-r$n-findings.md" ] || set -- "$@" "$rd/panel/e2e-r$n-findings.md"
   # Only medium findings can be accepted: nothing critical or high, no failing hidden check, no failing command.
   bad=$(check_items "$@" | grep -Ev '^  medium ' || true)
   [ -z "$bad" ] || { echo "accept: no: more than known minor problems is open:"; printf '%s\n' "$bad"; return 2; }
   for f in "$rd"/chunks/*.md; do [ -e "$f" ] || continue; [ "$(fm_get "$f" status)" = PASS ] || { echo "accept: no: step $(fm_get "$f" id) is $(fm_get "$f" status)"; return 2; }; done
   conf_set "$c" check_pass_sha "$h"; conf_set "$c" accepted_round "$n"
-  { printf -- '- accepted by the user with open findings from check round %s:\n' "$n"; check_items "$@"; } >> "$rd/log.md"
+  { printf -- '- accepted with open findings from check round %s:\n' "$n"; check_items "$@"; } >> "$rd/log.md"
+}
+cmd_accept() { # df accept <run-id>: the user said yes to merging with the open findings of the last check round; exit 2 when that is not allowed
+  local rd c wt n
+  run_ctx "${1:-}"; n=$(conf_get "$c" check_last_round)
+  case $n in ''|*[!0-9]*) echo "accept: no: the final check has not finished a round"; return 2;; esac
+  [ -z "$(conf_get "$c" check_round_open)" ] || { echo "accept: no: check round $(conf_get "$c" check_round_open) has not ended"; return 2; }
+  [ "$(conf_get "$c" check_end_rc)" = 3 ] || [ "$(conf_get "$c" check_end_rc)" = 2 ] || { echo "accept: no: the last round did not end with open findings"; return 2; }
+  if e2e_configured && [ ! -f "$rd/panel/e2e-r$n.md" ]; then echo "accept: no: the full app tests have not run (e2e.md)"; return 2; fi
+  set -- "$rd/panel/check-r$n.md" "$rd/panel/check-r$n-suite.md"; [ ! -f "$rd/panel/e2e-r$n-findings.md" ] || set -- "$@" "$rd/panel/e2e-r$n-findings.md"
+  accept_record "$(basename "$rd")" "$n" "$@" || return $?
   echo "accept: recorded. Known problems merged as they are:"; check_items "$@"
 }
 check_items() { # the blocking findings and the failed or invalid scenarios, one line each

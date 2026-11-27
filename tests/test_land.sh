@@ -164,7 +164,22 @@ assert_fail "accept_refuses_failing_scenario" df "$C" accept "$E"
 printf -- '- severity: medium\n  source: correctness\n  where: c.txt:1\n  what: rare layout\n  evidence: x\nVERDICT: FAIL - 1\n' > "$erd/panel/check-r3.md"
 assert_ok "accept_medium_only" df "$C" accept "$E"
 assert_eq "$(git -C "$ewt" rev-parse HEAD)" "$(df "$C" conf-get "$EC" check_pass_sha)" "accept records the pass"
-assert_ok "accept is logged" grep -q "accepted by the user" "$erd/log.md"
+assert_ok "accept is logged" grep -q "accepted with open findings" "$erd/log.md"
 git -C "$ewt" commit -q --allow-empty -m later
 assert_fail "accept_refuses_changed_branch" df "$C" accept "$E"
+# agreed at sign-off: the last round with only medium findings passes, listed; strict or a high finding still stops
+newround() { # newround <ship words...> <severity>: a signed-off run whose last check round is about to be judged
+  local sev=${!#} id rd wt; set -- "${@:1:$(($# - 1))}"
+  id=$(newrun "$C" "$*"); rd=$(df "$C" run-dir "$id"); wt=$(df "$C" conf-get "$rd/run.conf" worktree)
+  df "$C" conf-set "$rd/run.conf" check_pass_sha ""; df "$C" conf-set "$rd/run.conf" max_review_rounds 1
+  printf -- '- severity: %s\n  source: correctness\n  where: c.txt:1\n  what: rare layout\n  evidence: x\nVERDICT: FAIL - 1\n' "$sev" > "$rd/panel/check-r1.md"
+  : > "$rd/panel/check-r1-suite.md"; df "$C" conf-set "$rd/run.conf" check_head_r1 "$(git -C "$wt" rev-parse HEAD)"
+  df "$C" conf-set "$rd/run.conf" check_last_round 1; echo "$id"
+}
+gate_() { local rc=0; df "$C" check-gate "$1" >"$T/out" 2>&1 || rc=$?; echo "$rc"; }
+F=$(newround merge medium)
+assert_eq "0" "$(gate_ "$F")" "minor_ok_passes"
+assert_contains "WITH KNOWN PROBLEMS" "$(cat "$T/out")" "minor_ok_passes: says so"
+G=$(newround "merge strict" medium); assert_eq "3" "$(gate_ "$G")" "strict_still_stops"
+H=$(newround merge high); assert_eq "3" "$(gate_ "$H")" "high_still_stops"
 finish

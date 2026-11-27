@@ -116,6 +116,9 @@ the target branch (fast-forward only); otherwise the work stays on its branch wi
 saying how to bring it in. If the re-test after merging fails, the note says so first and
 offers `revert` (opens a revert PR) or `undo` (moves a local merge back).
 
+If only minor problems are left after the last check round, it finishes and lists them first
+(you can answer `strict` at sign-off to stop instead). Serious problems always stop it.
+
 ## Budget cap
 
 The sign-off screen shows a rough estimate (`estimate: 7-14 min, ~6-8 agents`) and a cap

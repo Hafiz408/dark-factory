@@ -71,8 +71,7 @@ milestone line.
 ## Subcommands
 
 - `list`: `{DF} list`, then Sweep. `sweep`: Sweep. `status [run-id]`: `{DF} status <id>`, read-only.
-- `resume [run-id]`: read `{PLUGIN}/skills/dark-factory/resume.md` and follow it.
-- `clean <run-id>`: `{DF} clean <id>`; say the branch is kept.
+- `resume [run-id]`: read `{PLUGIN}/skills/dark-factory/resume.md` and follow it. `clean <run-id>`: `{DF} clean <id>`; say the branch is kept.
 - anything else is the input (text, a file path, a URL or ticket id): start a run.
 
 **Sweep.** `{DF} sweep` prints `<run-id> <pr_url> <branch>` per run whose PR merged. For each
@@ -167,7 +166,8 @@ words. First block, at most 12 lines, no YAML, file names or tool names:
   clean and on `<target>`; otherwise I leave it on `<branch>`." `pr`: "I will open a PR and
   leave the merge to you" (without both: as `branch`). `branch`: "I will leave it on
   `<branch>`; nothing is pushed or merged." Quote a repo rule that set it in one line.
-  Other answers: `merge`, `no merge` (stop at the PR), `local`, `branch`.
+  Other answers: `merge`, `no merge` (stop at the PR), `local`, `branch`. Then: "If only minor
+  problems are left after the last check, I finish and list them; answer `strict` to stop."
 - The estimate line, "This is a rough range, not a promise.", the `cap:` line: "This is a
   safety limit well above the estimate; I stop and ask only if the run goes past it."
   `Recommend abort: <reason>` if any. Then the question, then `Details`:
@@ -183,7 +183,7 @@ words. First block, at most 12 lines, no YAML, file names or tool names:
   are unknown in advance, your plan usage is unseen, it improves after a few runs here.
 Ask: approve, amend `<what>` (re-run only the affected stages; at most 3 amends), or abort; the
 ship words may come with approve. On approve: `{DF} signoff <id> <word> [<target>]` with the
-word given or the default (it records `ship_mode`, `no merge` as `pr`, the target if asked,
+word given or the default, adding `strict` if said (it records `ship_mode`, `no merge` as `pr`, the target if asked,
 the approval, pins the profile, moves the steps in, validates and sets stage `build`). This is
 the last question before the report: nothing is asked after it except a permission stop, and
 the screen says so. If the profile has an `e2e_cmd`, run it once now at `root_base_sha`

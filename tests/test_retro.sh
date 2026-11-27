@@ -8,8 +8,8 @@ ls_() { bash -c "cd '$R' && '$DF' lessons-set '$id'"; }
 assert_fail "lessons-set refuses when the retro wrote nothing" ls_
 printf 'old lesson\n' > "$SR/lessons.md"
 seq 1 31 | sed 's/^/lesson /' > "$rd/lessons-new.md"
-assert_fail "more than 30 lines is refused" ls_
-assert_eq "old lesson" "$(cat "$SR/lessons.md")" "a refused lessons file leaves the old one"
+assert_ok "more than 30 lines is cut, not refused" ls_
+assert_eq "30:lesson 30" "$(grep -c '' "$SR/lessons.md"):$(tail -1 "$SR/lessons.md")" "lessons cut to 30 lines"
 printf 'tests run with PYTHONDONTWRITEBYTECODE=1 (run %s, chunk 01)\napi key: sk-abcdefghijklmnopqrstuvwx\n' "$id" > "$rd/lessons-new.md"
 assert_fail "a lessons file holding a secret is refused" ls_
 printf 'tests run with PYTHONDONTWRITEBYTECODE=1 (run %s, chunk 01)\n' "$id" > "$rd/lessons-new.md"
@@ -50,7 +50,8 @@ assert_eq "long-proposal lesson" "$(cat "$SR/lessons.md")" "lessons_kept_with_lo
 l=$(grep -- '- ppp' "$SR/proposals.md"); assert_eq "200:..." "${#l}:${l#"${l%???}"}" "lessons_kept_with_long_proposal: line cut to 197 + ..."
 : > "$rd/proposals-new.md"
 python3 -c "print('x'*300)" > "$rd/lessons-new.md"
-assert_fail "a lesson line over 200 characters is refused" ls_
+assert_ok "a lesson line over 200 characters is cut" ls_
+assert_eq "200" "$(awk '{ print length($0) }' "$SR/lessons.md")" "long lesson cut to 200"
 : > "$rd/lessons-new.md"; assert_ok "an empty lessons file clears the lessons" ls_
 assert_eq "" "$(cat "$SR/lessons.md")" "lessons cleared"
 printf 'x\n' > "$SR/profile.md"; h1=$(cd "$R" && "$DF" state-hash); echo y >> "$SR/lessons.md"

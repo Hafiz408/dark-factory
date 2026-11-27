@@ -5,6 +5,9 @@ SKILL.md: literal absolute paths, no shell variables, no assistant text beside a
 No question to the user here: the ship mode was chosen at sign-off. The only stop is a
 permission denial.
 
+When check-end said `WITH KNOWN PROBLEMS`, the report's anything-left section and the first
+lines of the final note name each one in plain words.
+
 ## 1. Report
 
 Write `{RD}/report.md`, plain words first:
