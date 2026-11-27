@@ -947,6 +947,24 @@ cmd_check_gate() { # df check-gate <run-id>: gate the last round again after jud
   conf_set "$c" check_pass_sha "$(git -C "$wt" rev-parse HEAD)"
   echo "check-gate: PASS round $n: nothing blocking"; echo "milestone: [df $(basename "$rd")] final check passed"
 }
+cmd_accept() { # df accept <run-id>: the user said yes to merging with the open findings of the last check round; exit 2 when that is not allowed
+  local rd c wt n h bad
+  run_ctx "${1:-}"; n=$(conf_get "$c" check_last_round)
+  case $n in ''|*[!0-9]*) echo "accept: no: the final check has not finished a round"; return 2;; esac
+  [ -z "$(conf_get "$c" check_round_open)" ] || { echo "accept: no: check round $(conf_get "$c" check_round_open) has not ended"; return 2; }
+  [ "$(conf_get "$c" check_end_rc)" = 3 ] || [ "$(conf_get "$c" check_end_rc)" = 2 ] || { echo "accept: no: the last round did not end with open findings"; return 2; }
+  h=$(git -C "$wt" rev-parse HEAD)
+  [ "$h" = "$(conf_get "$c" "check_head_r$n")" ] || { echo "accept: no: the branch changed since that round was checked"; return 2; }
+  if e2e_configured && [ ! -f "$rd/panel/e2e-r$n.md" ]; then echo "accept: no: the full app tests have not run (e2e.md)"; return 2; fi
+  set -- "$rd/panel/check-r$n.md" "$rd/panel/check-r$n-suite.md"; [ ! -f "$rd/panel/e2e-r$n-findings.md" ] || set -- "$@" "$rd/panel/e2e-r$n-findings.md"
+  # Only medium findings can be accepted: nothing critical or high, no failing hidden check, no failing command.
+  bad=$(check_items "$@" | grep -Ev '^  medium ' || true)
+  [ -z "$bad" ] || { echo "accept: no: more than known minor problems is open:"; printf '%s\n' "$bad"; return 2; }
+  for f in "$rd"/chunks/*.md; do [ -e "$f" ] || continue; [ "$(fm_get "$f" status)" = PASS ] || { echo "accept: no: step $(fm_get "$f" id) is $(fm_get "$f" status)"; return 2; }; done
+  conf_set "$c" check_pass_sha "$h"; conf_set "$c" accepted_round "$n"
+  { printf -- '- accepted by the user with open findings from check round %s:\n' "$n"; check_items "$@"; } >> "$rd/log.md"
+  echo "accept: recorded. Known problems merged as they are:"; check_items "$@"
+}
 check_items() { # the blocking findings and the failed or invalid scenarios, one line each
   awk '/^- severity:/ { s = $3 } /^[ \t]+where:/ { w = $0; sub(/^[ \t]+where:[ \t]*/, "", w) }
     /^[ \t]+what:/ { x = $0; sub(/^[ \t]+what:[ \t]*/, "", x); if (s ~ /^(critical|high|medium)$/) print "  " s " " w ": " x }
@@ -1570,6 +1588,7 @@ case "$cmd" in
   check-start) cmd_check_start "$@";;
   check-end) cmd_check_end "$@";;
   check-gate) cmd_check_gate "$@";;
+  accept) cmd_accept "$@";;
   post) cmd_post "$@";;
   bump) cmd_bump "$@";;
   estimate) cmd_estimate "$@";;

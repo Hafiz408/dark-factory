@@ -152,4 +152,19 @@ assert_eq "0" "$(land "$C" GH_MERGE_SHA="$(git -C "$ORIGIN" rev-parse main)" "$D
 
 # usage and refusals
 assert_eq "1" "$(land "$C" "$DF" land "$B" s1)" "land needs a title"
+# accept: the user's yes after the last check round, medium findings only
+E=$(newrun "$C" merge); erd=$(df "$C" run-dir "$E"); EC="$erd/run.conf"; ewt=$(df "$C" conf-get "$EC" worktree)
+df "$C" conf-set "$EC" check_pass_sha ""; df "$C" conf-set "$EC" check_last_round 3; df "$C" conf-set "$EC" check_end_rc 3
+df "$C" conf-set "$EC" check_head_r3 "$(git -C "$ewt" rev-parse HEAD)"
+printf -- '- severity: high\n  source: goal\n  where: c.txt:1\n  what: broken\n  evidence: x\nVERDICT: FAIL - 1\n' > "$erd/panel/check-r3.md"; : > "$erd/panel/check-r3-suite.md"
+assert_fail "accept_refuses_high" df "$C" accept "$E"
+assert_eq "" "$(df "$C" conf-get "$EC" check_pass_sha)" "accept_refuses_high: nothing recorded"
+printf -- '- severity: medium\n  source: correctness\n  where: c.txt:1\n  what: rare layout\n  evidence: x\nS2 FAIL wrong\nVERDICT: FAIL - 1\n' > "$erd/panel/check-r3.md"
+assert_fail "accept_refuses_failing_scenario" df "$C" accept "$E"
+printf -- '- severity: medium\n  source: correctness\n  where: c.txt:1\n  what: rare layout\n  evidence: x\nVERDICT: FAIL - 1\n' > "$erd/panel/check-r3.md"
+assert_ok "accept_medium_only" df "$C" accept "$E"
+assert_eq "$(git -C "$ewt" rev-parse HEAD)" "$(df "$C" conf-get "$EC" check_pass_sha)" "accept records the pass"
+assert_ok "accept is logged" grep -q "accepted by the user" "$erd/log.md"
+git -C "$ewt" commit -q --allow-empty -m later
+assert_fail "accept_refuses_changed_branch" df "$C" accept "$E"
 finish

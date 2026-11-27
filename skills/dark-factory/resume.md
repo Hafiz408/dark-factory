@@ -22,7 +22,12 @@ diff since the step's `base_sha`) and store the new id.
 6. Status `paused` (only now, with the lock held): show `waiting_on`; `{DF} unpause <id>`
    (credits the paused time and clears an open read-only violation the user has now heard about). Set every BLOCKED and SKIPPED step back to `status pending` and
    `attempts 0` with `{DF} fm-set`, log it, and build those first. Paused at a cap: continue
-   from the step that paused. Paused at a cap: say in plain words what was used and ask
+   from the step that paused. Paused after the last check round with only medium findings: say
+   the problem in plain words and ask "Merge it as it is, with this known problem? (yes / try
+   once more / no)". yes: `{DF} accept <id>` (exit 2: it is not allowed; say why), list the
+   problem under `## Anything left`, then `ship.md` section 3. try once more: raise
+   `max_review_rounds` by 1 with `{DF} conf-set`. no: pause again.
+   Paused at a cap: say in plain words what was used and ask
    "Allow about half as much again? (yes / no)"; on yes run `{DF} extend <id>` (agents or time) or
    raise `max_review_rounds` with `{DF} conf-set` yourself; on no, pause again.
    Status `waiting_permission`: set `status active` once the user says it is allowed.

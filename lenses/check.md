@@ -28,12 +28,17 @@ breaks it). No evidence, no blocking finding.
    (evidence: the input and both outputs); any other mismatch is low, tagged `adjacent`.
    State the number of cases tried; never claim agreement on every case from a few examples.
 7. **Code that judges input** (parsers, validators, linters, checkers). A false alarm on valid
-   input or a silent miss on a documented form is high. With no reference implementation, build
+   input or a silent miss on a documented form that ordinary files contain is high; a layout
+   only a contrived or generated input produces (several rare constructs combined) is low,
+   listed under known gaps. With no reference implementation, build
    the valid inputs from the format's own specification (every documented form; for CommonMark
    links: parentheses in targets, single-quoted titles, reference and shortcut links, images
    inside links) and run them; state how many cases were tried.
 8. **Promises in the answers.** Read `questions.md` with `spec.md`: an accepted answer that the
    spec or the code narrowed (fewer cases, weaker wording) is high.
+
+Checks 6 and 7 run in full once, in round 1, within about 5 minutes; later rounds re-test only
+the fix diff and what failed.
 
 ## Severity rubric
 
@@ -42,7 +47,8 @@ breaks it). No evidence, no blocking finding.
 | An acceptance criterion is not met; an existing caller or test now breaks | high |
 | Exploitable injection, auth bypass, secret committed | critical |
 | Wrong behaviour on a reachable input; public interface changed with a consumer not updated | high |
-| A checker flags valid input or misses a documented form; an accepted answer narrowed | high |
+| A checker flags ordinary valid input or misses a documented form; an accepted answer narrowed | high |
+| The same, only for a contrived combination of rare constructs | low |
 | A real defect with limited reach; reinvented stdlib; fix wider than its cause | medium |
 | A differential mismatch on the fixed code path | medium |
 | A differential mismatch elsewhere (`adjacent`) | low |

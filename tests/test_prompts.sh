@@ -297,4 +297,7 @@ grep -q "^- 9: refused" "$SH" && grep -q "^- 11: merged, but" "$SH" && grep -q '
 for gone in "{DF} snapshot" "{DF} rundir-hash" "{DF} estimate" "{DF} profile-pin" "{DF} bump" "{DF} ship <id>" "{DF} merge <id>" "{DF} local-merge" "{DF} postmerge" "ship_confirmed"; do
   grep -qF "$gone" $ALL && bad "old chain gone from the prompts: $gone" || ok "old chain gone from the prompts: $gone"
 done
+grep -q "{DF} accept <id>" "$ROOT/skills/dark-factory/resume.md" && ok "resume: accept only on the user's yes" || bad "resume: accept only on the user's yes"
+grep -q "Never call an \`advisor\` tool" "$ROOT/skills/dark-factory/rules.md" && ok "rules: no advisor calls" || bad "rules: no advisor calls"
+grep -q "contrived" "$ROOT/lenses/check.md" && ok "check lens: contrived layouts are low" || bad "check lens: contrived layouts are low"
 finish

@@ -64,7 +64,9 @@ check, working copy, full app tests. Between sign-off and the final note the onl
 write is milestone lines `[df <id>] <plain event>`: repeat each `milestone:` line df prints,
 word for word, and add one for a pause, a stuck step, a PASS you set yourself, and the end. No other assistant text,
 ever, before, between or after tool calls ("Step 1 is being built now.", "The final check is
-running."): a milestone line or silence, except a stop that needs the user.
+running."): a milestone line or silence, except a stop that needs the user. If a spawn returns
+before the agent is done and your turn must say something while waiting, say only the latest
+milestone line.
 
 ## Subcommands
 
@@ -272,6 +274,7 @@ with `PAUSED: <what is open>` first; run the retro (`ship.md`; it ignores exit 3
 changing `stage`; `{DF} pause <id> "<what is open>"`; `{DF} metrics <id>` (its line verbatim
 into the report); `{DF} lock <id> release <session-id>`; print `[df <id>] paused: <what is
 open>`; and tell the user, in plain words, what is open and the one thing to say to go on:
-`/dark-factory:dark-factory resume` (at a cap, resume asks before allowing more; a stuck step:
-they may first say what to change). Never ask them to type a script command or edit state. Do
+`/dark-factory:dark-factory resume` (at a cap, resume asks before allowing more; after the
+last check round it offers to merge with the known problem when only minor ones are open; a
+stuck step: they may first say what to change). Never ask them to type a script command. Do
 not run `{DF} finish` for a paused run.
