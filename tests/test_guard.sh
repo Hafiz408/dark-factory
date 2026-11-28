@@ -38,6 +38,11 @@ assert_fail "substitution before -exec is not exempt" call 'find $(echo /etc) -e
 assert_fail "substitution in a later word is not exempt" call 'find . $(rm -rf /etc) -exec rm -rf {} +'
 assert_fail "backtick before -exec is not exempt" call 'find . `echo /etc` -exec rm -rf {} +'
 assert_ok "find cleanup with a quoted name allowed" call "find . -name '*.pyc' -exec rm -f {} +"
+assert_fail "quoted start path is not exempt" call "find '/etc' -exec rm -rf {} +"
+assert_fail "glob start path is not exempt" call 'find * -exec rm -rf {} +'
+assert_fail "relative start path other than . is not exempt" call 'find link -follow -exec rm -rf {} +'
+assert_fail "a name filter with a slash is not exempt" call "find . -name 'a/b' -exec rm -rf {} +"
+assert_ok "find cleanup with type and name allowed" call "find . -type d -name __pycache__ -exec rm -rf {} +"
 assert_fail "a second find action is not exempt" call 'find . -exec rm -rf {} \; -exec rm -rf /etc \;'
 assert_fail "rm -rf ~ blocked" call "rm -rf ~/projects"
 assert_ok "rm -f of a temp file allowed" call "rm -f /tmp/df_s1.db"

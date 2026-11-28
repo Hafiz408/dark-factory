@@ -45,14 +45,11 @@ echo "$input" | grep -Eq 'git[ ]+([^|;&"]*[ ])?push([ "]|\\|$)' && deny "git pus
 q=$(printf '\001'); bs='\'; nl='
 '
 s=${input//"$bs\""/$q}; s=${s//"$bs$bs${bs}n"/" $bs "}; s=${s//"${bs}n"/$nl}; s=${s//"${bs}t"/" $bs "}
-# The one exception: a command that is only `find <relative dir> ... -exec rm -rf {} \;` (or `{} +`). The part before
-# -exec may hold nothing but plain characters and quotes (no ; & | \ $ ` ~ braces), and only the matched ending is
-# set aside: every check below still runs on the rest.
-find_rm='"command" *: *"find [A-Za-z0-9_.][A-Za-z0-9_./*?=@ '"$q'"'-]* (-exec rm -(r|f|rf|fr) [{][}] (\\\\;|[+]))"'
-if [[ $s =~ $find_rm ]]; then
-  tail_part=${BASH_REMATCH[1]}
-  case "$s" in *' /'*|*..*) ;; *) s=${s/"$tail_part"/};; esac
-fi
+# The one exception, one fixed shape and nothing else: `find . [-name <pattern without />] [-type f|d]... -exec rm -rf {} \;`
+# (or `{} +`) as the whole command. It starts at `.`, follows no links, and only its ending is set aside.
+qc="[$q']?"
+find_rm='"command" *: *"find [.](( -type [fd]| -name '"$qc"'[A-Za-z0-9_.*?-]+'"$qc"')*) (-exec rm -(r|f|rf|fr) [{][}] (\\\\;|[+]))"'
+[[ $s =~ $find_rm ]] && s=${s/"${BASH_REMATCH[3]}"/}
 set -f
 while IFS= read -r seg; do
   seg=${seg#*rm}; rf=0
