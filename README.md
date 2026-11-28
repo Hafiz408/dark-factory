@@ -248,7 +248,7 @@ like for like. Scores are evaluators' ratings out of 10.
 
 | Task | Dark Factory | Plain Claude | Scores |
 |---|---|---|---|
-| Larger spec | 31 min | 5.7 min | developer 8, non-technical 6, unattended 8 (plain Claude: 7 and 8); both passed 66/66 blind checks |
+| Larger spec | 31 min | 5.7 min | developer 8, non-technical 6, unattended 8 (plain Claude: developer 7, non-technical 8); both passed 66/66 blind checks |
 | Newcomer build | 27 min | 77 s | developer 7, non-technical 7, onboarding 7, unattended 8 |
 | Bugfix | 13 min | about 3 min | developer 8, non-technical 8, unattended 8 |
 | Feature | 22 min | about 4 min | developer 7, non-technical 8, unattended 8 |
