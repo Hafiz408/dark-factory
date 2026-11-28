@@ -36,14 +36,18 @@ first such question while you are away. The sign-off screen reminds you if auto 
 
 ## Quickstart
 
-Install it once per project:
+Install it once per project. Type these two lines in your terminal (not inside Claude), in your
+project folder, pressing Enter after each:
 
 ```bash
 claude plugin marketplace add Hafiz408/dark-factory
 claude plugin install dark-factory@dark-factory --scope project
 ```
 
-Try it without installing: clone this repo, then `claude --plugin-dir ./dark-factory`.
+Then type `claude` and press Enter. Everything below that starts with `/` is typed inside Claude.
+
+Try it without installing:
+`git clone https://github.com/Hafiz408/dark-factory`, then `claude --plugin-dir ./dark-factory`.
 
 Start a run with your request (text, a file path, or a link or ticket id it can fetch):
 
