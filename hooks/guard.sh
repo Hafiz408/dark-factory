@@ -45,14 +45,17 @@ echo "$input" | grep -Eq 'git[ ]+([^|;&"]*[ ])?push([ "]|\\|$)' && deny "git pus
 q=$(printf '\001'); bs='\'; nl='
 '
 s=${input//"$bs\""/$q}; s=${s//"$bs$bs${bs}n"/" $bs "}; s=${s//"${bs}n"/$nl}; s=${s//"${bs}t"/" $bs "}
+# The one exception, matched against the whole command: `find <relative dir> ... -exec rm -rf {} \;` (or `{} +`) with
+# nothing after it and no other ; & | or backslash. Anything looser lets text after the cut hide a target.
+find_rm='"command" *: *"find [^-/~$ ;&|"\\][^;&|"\\]* -exec rm -(r|f|rf|fr) [{][}] (\\\\;|[+])"'
+cleanup=0; [[ $s =~ $find_rm ]] && case "$s" in *' /'*|*..*) ;; *) cleanup=1;; esac
 set -f
 while IFS= read -r seg; do
+  [ "$cleanup" = 0 ] || break
   seg=${seg#*rm}; rf=0
   for t in $seg; do case "$t" in --recursive|--force|-[!-]*[rRfF]*|-[rRfF]*) rf=1;; esac; done
   [ "$rf" = 1 ] || continue
-  # `find ... -exec rm -rf {} \;` and `{} +` are ordinary cleanup: only that placeholder and its terminator are set aside.
-  chk=${seg%"{} $bs$bs"}; chk=${chk%"{} $bs"}; chk=${chk//"{}"/}
-  case "$chk" in *"$bs"*|*[{}\`]*|*'$('*|*'${'*) deny "forced or recursive rm with an escape, brace or substitution";; esac
+  case "$seg" in *"$bs"*|*[{}\`]*|*'$('*|*'${'*) deny "forced or recursive rm with an escape, brace or substitution";; esac
   d=${seg//[!$q]/}; o=${seg//[!\']/}
   [ $((${#d} % 2)) = 0 ] && [ $((${#o} % 2)) = 0 ] || deny "forced or recursive rm with a quoted separator"
 done < <(printf '%s\n' "$s" | grep -aoE '(^|[^A-Za-z0-9_.-])rm [^;&|"]*')
