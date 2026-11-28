@@ -308,6 +308,7 @@ cmd_gate() { # df gate <findings-file>...: prints "<blocking> <total>", exit 1 i
 $out
 EOF2
   [ "$bw" -eq 0 ] || die "gate: unknown severity word (use critical|high|medium|low)"
+  # ponytail: one non-blocking finding can also explain a FAIL whose real finding was unreadable; per-finding counts if seen.
   # vf: VERDICT FAIL that no non-blocking medium+ finding explains, or that comes with a failed hidden check.
   [ "$vf" -eq 0 ] || [ "$b" -gt 0 ] || die "gate: a checker's VERDICT is FAIL but no blocking finding was read: write each one as - severity: <word> with an evidence: line, then gate again"
   out="$b $t"

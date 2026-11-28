@@ -250,6 +250,8 @@ One run per task, compared with asking plain Claude Code directly, against a sta
 GitHub, in auto mode. Plain Claude ran with permissions skipped, so the times are not strictly
 like for like. Scores are evaluators' ratings out of 10.
 
+These results were measured on build `cef1097`. The safety fixes made after it are covered by the tests and one small end-to-end run, not by these four tasks.
+
 | Task | Dark Factory | Plain Claude | Scores |
 |---|---|---|---|
 | Larger spec | 31 min | 5.7 min | developer 8, non-technical 6, unattended 8 (plain Claude: developer 7, non-technical 8); both passed 66/66 blind checks |
