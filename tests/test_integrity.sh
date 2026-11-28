@@ -170,4 +170,12 @@ out=$("$DF" check-diff "$R" "$GBASE" "$T/chg.md")
 assert_contains "tests/test_a.py" "$out" "a test file the glob does not match is still flagged"
 git checkout -q tests/test_a.py tests/fixtures
 
+# a FAIL verdict explained only by a pre-existing finding passes; with a failed hidden check it does not
+G=$(mktemp)
+printf -- '- severity: high\n  where: a.py:1\n  what: old bug\n  evidence: x\n  tags: pre-existing\nS1 PASS - ok\nVERDICT: FAIL - 0 blocking\n' > "$G"
+assert_ok "gate_pre_existing_only_with_fail_verdict_passes" "$DF" gate "$G"
+printf -- '- severity: high\n  where: a.py:1\n  what: old bug\n  evidence: x\n  tags: pre-existing\nS1 FAIL - broke\nVERDICT: FAIL - 1\n' > "$G"
+assert_fail "gate_fail_verdict_with_failed_check_refused" "$DF" gate "$G"
+printf -- '- severity: high\n  where: a.py:1\n  what: no proof\nVERDICT: FAIL - 1\n' > "$G"
+assert_fail "gate_fail_verdict_high_without_evidence_refused" "$DF" gate "$G"
 finish

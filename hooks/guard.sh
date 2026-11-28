@@ -50,7 +50,9 @@ while IFS= read -r seg; do
   seg=${seg#*rm}; rf=0
   for t in $seg; do case "$t" in --recursive|--force|-[!-]*[rRfF]*|-[rRfF]*) rf=1;; esac; done
   [ "$rf" = 1 ] || continue
-  case "$seg" in *"$bs"*|*[{}\`]*|*'$('*|*'${'*) deny "forced or recursive rm with an escape, brace or substitution";; esac
+  # `find ... -exec rm -rf {} \;` and `{} +` are ordinary cleanup: only that placeholder and its terminator are set aside.
+  chk=${seg%"{} $bs$bs"}; chk=${chk%"{} $bs"}; chk=${chk//"{}"/}
+  case "$chk" in *"$bs"*|*[{}\`]*|*'$('*|*'${'*) deny "forced or recursive rm with an escape, brace or substitution";; esac
   d=${seg//[!$q]/}; o=${seg//[!\']/}
   [ $((${#d} % 2)) = 0 ] && [ $((${#o} % 2)) = 0 ] || deny "forced or recursive rm with a quoted separator"
 done < <(printf '%s\n' "$s" | grep -aoE '(^|[^A-Za-z0-9_.-])rm [^;&|"]*')

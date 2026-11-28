@@ -280,6 +280,7 @@ FINDINGS_AWK='
     if (sev != "") {
       if (sev!="critical" && sev!="high" && sev!="medium" && sev!="low") bad++
       t++
+      if ((sev=="medium"||sev=="high"||sev=="critical") && tags ~ /pre-existing/ || sev=="medium" && (tags ~ /late-find/ || !ev)) ex++
       if ((sev=="medium"||sev=="high"||sev=="critical") && ev && tags !~ /pre-existing/ && !(sev=="medium" && tags ~ /late-find/)) {
         b++; if (mode == "list") print "  " sev " " (w == "" ? "?" : w) ": " (x == "" ? "(no what: line)" : x)
       }
@@ -297,9 +298,9 @@ FINDINGS_AWK='
   /^[ \t]+evidence:[ \t]*[^ \t]/ { ev=1 }
   /^[ \t]+where:/ { w=$0; sub(/^[ \t]+where:[ \t]*/, "", w) }
   /^[ \t]+what:/ { x=$0; sub(/^[ \t]+what:[ \t]*/, "", x) }
-  mode == "list" { u=toupper($0)
-    if (u ~ /(^|[^A-Z0-9])S[0-9]+[ \t*|:-]*(FAIL|FAILS|FAILED|FAILING|INVALID)([^A-Z]|$)/) { l=$0; sub(/^[ \t]+/, "", l); print "  scenario " l } }
-  END { flush(); verdict(); if (mode == "count") printf "%d %d %d %d\n", b+0, t+0, bad+0, vf+0 }'
+  { u=toupper($0)
+    if (u ~ /(^|[^A-Z0-9])S[0-9]+[ \t*|:-]*(FAIL|FAILS|FAILED|FAILING|INVALID)([^A-Z]|$)/) { sf++; if (mode == "list") { l=$0; sub(/^[ \t]+/, "", l); print "  scenario " l } } }
+  END { flush(); verdict(); if (mode == "count") printf "%d %d %d %d\n", b+0, t+0, bad+0, (vf && (sf || !ex)) }'
 cmd_gate() { # df gate <findings-file>...: prints "<blocking> <total>", exit 1 if blocking > 0
   local out b t bw vf
   [ $# -ge 1 ] || die "usage: df gate <findings-file>..."
@@ -307,6 +308,7 @@ cmd_gate() { # df gate <findings-file>...: prints "<blocking> <total>", exit 1 i
 $out
 EOF2
   [ "$bw" -eq 0 ] || die "gate: unknown severity word (use critical|high|medium|low)"
+  # vf: VERDICT FAIL that no non-blocking medium+ finding explains, or that comes with a failed hidden check.
   [ "$vf" -eq 0 ] || [ "$b" -gt 0 ] || die "gate: a checker's VERDICT is FAIL but no blocking finding was read: write each one as - severity: <word> with an evidence: line, then gate again"
   out="$b $t"
   echo "$out"

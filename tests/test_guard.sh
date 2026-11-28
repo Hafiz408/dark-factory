@@ -28,6 +28,9 @@ id=$("$DF" start "$R/in.txt")
 
 assert_fail "git push blocked" call "git push origin main"
 assert_fail "rm -rf / blocked" call "rm -rf /"
+assert_ok "find -exec rm -rf {} + allowed" call "find . -name __pycache__ -exec rm -rf {} +"
+assert_ok "find -exec rm -f {} ; allowed" call 'find . -name x.pyc -exec rm -f {} \\;'
+assert_fail "escaped separator still blocked" call 'rm -rf x\\; /etc'
 assert_fail "rm -rf ~ blocked" call "rm -rf ~/projects"
 assert_ok "rm -f of a temp file allowed" call "rm -f /tmp/df_s1.db"
 assert_ok "rm -f of a macOS temp file allowed" call "rm -f /var/folders/ab/T/x.db"
