@@ -28,6 +28,12 @@ s3=$("$DF" snapshot "$R")
 [ "$s1" != "$s3" ] && ok "snapshot sees untracked file" || bad "snapshot sees untracked file"
 rm src/new.py
 assert_eq "$s1" "$("$DF" snapshot "$R")" "snapshot returns to baseline"
+echo "x" >> src/a.py; git stash -q
+[ "$s1" != "$("$DF" snapshot "$R")" ] && ok "snapshot_sees_stash" || bad "snapshot_sees_stash"
+git stash drop -q
+echo "x" >> src/a.py; git add src/a.py; s4=$("$DF" snapshot "$R"); git reset -q src/a.py
+[ "$s4" != "$("$DF" snapshot "$R")" ] && ok "snapshot sees the index" || bad "snapshot sees the index"
+git checkout -q src/a.py
 
 # empty diff
 out=$("$DF" check-diff "$R" "$BASE" "$T/ch.md")
@@ -44,6 +50,8 @@ echo "oops" > README.md
 out=$("$DF" check-diff "$R" "$BASE" "$T/ch.md")
 assert_contains "README.md" "$out" "out-of-scope file flagged"
 assert_contains "severity: high" "$out" "out-of-scope is high"
+printf '%s\n' "$out" > "$T/cd.md"
+assert_fail "gate_blocks_df_findings: a check-diff scope finding blocks" "$DF" gate "$T/cd.md"
 rm README.md
 
 # existing test modified, undeclared
@@ -136,6 +144,11 @@ assert_contains "src/new.py" "$(git ls-files)" "commit stages real changes"
 case "$(git ls-files)" in *__pycache__*|*.pyc*) bad "commit leaves artefacts out";; *) ok "commit leaves artefacts out";; esac
 assert_contains "df(chunk 07)" "$(git log -1 --format=%s)" "commit message used"
 assert_fail "commit with nothing to commit is an error, not an empty commit" "$DF" commit "$R" "df(chunk 08): nothing"
+# df commit logs the commit in its run's log.md, found by the worktree
+echo i > "$T/in.txt"; cid=$("$DF" start "$T/in.txt"); crd=$("$DF" run-dir "$cid"); cwt=$("$DF" conf-get "$crd/run.conf" worktree)
+echo c > "$cwt/c.py"; "$DF" commit "$cwt" "df(step 01): c"
+assert_eq "commit $(git -C "$cwt" rev-parse HEAD) df(step 01): c" "$(tail -1 "$crd/log.md")" "commit_logs_to_run: commit <sha> <message> in log.md"
+git worktree remove --force "$cwt"
 
 # Eval J3: touches_tests may use globs, like scope does (a glob was flagged critical)
 mkdir -p tests/fixtures
@@ -157,4 +170,12 @@ out=$("$DF" check-diff "$R" "$GBASE" "$T/chg.md")
 assert_contains "tests/test_a.py" "$out" "a test file the glob does not match is still flagged"
 git checkout -q tests/test_a.py tests/fixtures
 
+# a FAIL verdict explained only by a pre-existing finding passes; with a failed hidden check it does not
+G=$(mktemp)
+printf -- '- severity: high\n  where: a.py:1\n  what: old bug\n  evidence: x\n  tags: pre-existing\nS1 PASS - ok\nVERDICT: FAIL - 0 blocking\n' > "$G"
+assert_ok "gate_pre_existing_only_with_fail_verdict_passes" "$DF" gate "$G"
+printf -- '- severity: high\n  where: a.py:1\n  what: old bug\n  evidence: x\n  tags: pre-existing\nS1 FAIL - broke\nVERDICT: FAIL - 1\n' > "$G"
+assert_fail "gate_fail_verdict_with_failed_check_refused" "$DF" gate "$G"
+printf -- '- severity: high\n  where: a.py:1\n  what: no proof\nVERDICT: FAIL - 1\n' > "$G"
+assert_fail "gate_fail_verdict_high_without_evidence_refused" "$DF" gate "$G"
 finish

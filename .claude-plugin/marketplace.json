@@ -1,6 +1,6 @@
 {
   "name": "dark-factory",
-  "description": "Dark Factory: refine a request, sign off once, then build, test and QA unattended with a routed team of subagents.",
+  "description": "Dark Factory: answer a few questions, approve once, get merged and re-tested work.",
   "owner": {
     "name": "Hafiz408"
   },
@@ -8,8 +8,8 @@
     {
       "name": "dark-factory",
       "source": "./",
-      "description": "Spec in, tested software out. Refine with the user, sign off once, then a routed team of subagents builds, tests and QAs in a loop.",
-      "version": "0.1.0"
+      "description": "Asks the questions Claude would otherwise assume, gets one sign-off, then builds, checks, merges and re-tests unattended.",
+      "version": "0.3.0"
     }
   ]
 }

@@ -15,12 +15,116 @@ assert_fail "nothing is written under .git" test -e "$R/.git/df"
 ( cd "$R" && git clean -fdxq )
 assert_ok "git clean -fdx cannot reach the state" test -f "$SR/$id/run.conf"
 assert_ok "input copied" test -f "$rd/input.md"
-assert_eq "14400" "$(cd "$R" && "$DF" conf-get "$rd/run.conf" budget_seconds)" "wall-clock budget recorded"
+assert_eq "" "$(cd "$R" && "$DF" conf-get "$rd/run.conf" budget_seconds)" "no wall-clock budget until the sign-off estimate sets one"
 case "$(cd "$R" && "$DF" conf-get "$rd/run.conf" started)" in ''|*[!0-9]*) bad "start time recorded";; *) ok "start time recorded";; esac
 assert_contains "untracked.txt" "$(cat "$rd/dirty.txt")" "dirty files recorded"
 assert_eq "" "$(cd "$R" && git status --porcelain | grep -v untracked.txt | grep -v in.txt)" "main clone working tree untouched"
 assert_ok "validate passes on fresh run" bash -c "cd '$R' && '$DF' validate '$id'"
 assert_contains "$id" "$(cd "$R" && "$DF" list)" "list shows run"
+
+# --base / --branch / base_ref (AC-1..AC-5)
+B=$(mkrepo); echo "x" > "$B/in.txt"
+git -C "$B" tag v1
+git -C "$B" commit -q --allow-empty -m second
+H1=$(git -C "$B" rev-parse HEAD); T1=$(git -C "$B" rev-parse "v1^{commit}")
+cf() { (cd "$B" && "$DF" conf-get "$(cd "$B" && "$DF" run-dir "$1")/run.conf" "$2"); }
+s1=$(cd "$B" && "$DF" start "$B/in.txt")
+case $s1 in r*[0-9]) assert_eq "1" "$(printf '%s\n' "$s1" | wc -l | tr -d ' ')" "no flags prints only the run id";; *) bad "no flags prints only the run id";; esac
+w1=$(cf "$s1" worktree)
+assert_eq "df/$s1" "$(git -C "$w1" rev-parse --abbrev-ref HEAD)" "default branch df/<id>"
+assert_eq "$H1" "$(git -C "$w1" rev-parse HEAD)" "worktree at main HEAD"
+assert_eq "df/$s1" "$(cf "$s1" branch)" "run.conf branch default"
+assert_eq "$H1" "$(cf "$s1" root_base_sha)" "run.conf root_base_sha is HEAD"
+assert_eq "$(git -C "$B" symbolic-ref --short HEAD)" "$(cf "$s1" base_ref)" "base_ref is current branch"
+assert_eq "1" "$(grep -c '^stage=' "$(cd "$B" && "$DF" run-dir "$s1")/run.conf")" "run.conf has exactly one stage line"
+sed -i.bak '/^base_ref=/d' "$(cd "$B" && "$DF" run-dir "$s1")/run.conf"
+assert_ok "validate passes without base_ref" bash -c "cd '$B' && '$DF' validate '$s1'"
+D=$(mkrepo); git -C "$D" checkout -q --detach
+sd=$(cd "$D" && "$DF" start "$B/in.txt")
+assert_eq "detached" "$(cd "$D" && "$DF" conf-get "$("$DF" run-dir "$sd")/run.conf" base_ref)" "base_ref detached"
+for order in "--base v1 --branch feat-a" "--branch feat-b --base v1"; do
+  case $order in "--base"*) nm=feat-a;; *) nm=feat-b;; esac
+  out=$(cd "$B" && "$DF" start "$B/in.txt" $order)
+  assert_eq "$out" "$(printf '%s' "$out" | head -1)" "flags '$order': single-line output"
+  case $out in r*) ok "flags '$order': prints run id";; *) bad "flags '$order': prints run id";; esac
+  wf=$(cf "$out" worktree)
+  assert_eq "$nm" "$(git -C "$wf" rev-parse --abbrev-ref HEAD)" "flags '$order': worktree on branch"
+  assert_eq "$T1" "$(git -C "$wf" rev-parse HEAD)" "flags '$order': worktree at base"
+  assert_eq "$nm" "$(cf "$out" branch)" "flags '$order': branch in conf"
+  assert_eq "v1" "$(cf "$out" base_ref)" "flags '$order': base_ref verbatim"
+  assert_eq "$T1" "$(cf "$out" root_base_sha)" "flags '$order': root_base_sha"
+done
+
+# refusals leave nothing behind (AC-6, AC-11)
+X=$(mkrepo); echo x > "$X/in.txt"; git -C "$X" branch existing
+SX="$(dirname "$X")/.df-$(basename "$X")"
+snap() { echo "$(ls "$SX" 2>/dev/null | wc -l | tr -d ' ')|$(git -C "$X" worktree list)|$(git -C "$X" branch --list)"; }
+refuse() { # <desc> <expected stderr> <args...>   (runs in $X; asserts exit 1, exact stderr, no leftovers)
+  local d=$1 want=$2 before err rc; shift 2; before=$(snap)
+  err=$(cd "$X" && "$DF" start "$@" 2>&1 >/dev/null); rc=$?
+  assert_eq "1" "$rc" "$d: exit 1"
+  assert_eq "$want" "$err" "$d: message"
+  assert_eq "$before" "$(snap)" "$d: no leftovers"
+}
+U="df: usage: df start <input-file> [--base <ref>] [--branch <name>]"
+EX=$(git -C "$X" rev-parse existing)
+refuse "unresolved base" "df: start: base ref 'nope' not found" "$X/in.txt" --base nope
+refuse "invalid branch" "df: start: invalid branch name 'a..b'" "$X/in.txt" --branch a..b
+git -C "$X" checkout -q -b other; git -C "$X" checkout -q -
+refuse "branch @{-1}" "df: start: invalid branch name '@{-1}'" "$X/in.txt" --branch '@{-1}'
+refuse "existing branch" "df: start: branch 'existing' already exists" "$X/in.txt" --branch existing
+assert_eq "$EX" "$(git -C "$X" rev-parse existing)" "existing branch SHA unchanged"
+refuse "missing input" "df: start: input file '$X/nope.txt' not found" "$X/nope.txt"
+refuse "usage: no input" "$U"
+refuse "usage: input starts with -" "$U" -x
+refuse "usage: flag without value" "$U" "$X/in.txt" --base
+refuse "usage: value starts with -" "$U" "$X/in.txt" --branch -x
+refuse "usage: empty --base" "$U" "$X/in.txt" --base ""
+refuse "usage: empty --branch" "$U" "$X/in.txt" --branch ""
+git -C "$X" commit -q --allow-empty -m "$(printf 'x\nstage=done')"
+refuse "usage: control char in --base (forged line would resolve)" "$U" "$X/in.txt" --base "HEAD^{/x
+stage=done}"
+refuse "usage: tab in --base" "$U" "$X/in.txt" --base "$(printf 'a\tb')"
+refuse "usage: unknown flag" "$U" "$X/in.txt" --bogus v
+refuse "usage: repeated flag" "$U" "$X/in.txt" --base HEAD --base HEAD
+refuse "usage: extra positional" "$U" "$X/in.txt" extra
+G=$(mktemp -d); echo x > "$G/in.txt"
+( cd "$G" && DF_ALLOW_INIT=1 "$DF" start "$G/in.txt" --bogus v >/dev/null 2>&1 )
+assert_fail "usage error under DF_ALLOW_INIT leaves no .git" test -e "$G/.git"
+
+# remote base fetch (AC-7..AC-10)
+O=$(mkrepo); ob=$(git -C "$O" symbolic-ref --short HEAD); git -C "$O" branch x
+C="$(mktemp -d)/c"; git clone -q "$O" "$C"; echo y > "$C/in.txt"
+SC="$(dirname "$C")/.df-$(basename "$C")"
+git -C "$O" commit -q --allow-empty -m advanced; OH=$(git -C "$O" rev-parse "$ob")
+fr=$(cd "$C" && "$DF" start "$C/in.txt" --base "origin/$ob")
+fw=$(cd "$C" && "$DF" conf-get "$SC/$fr/run.conf" worktree)
+assert_eq "$OH" "$(git -C "$fw" rev-parse HEAD)" "fetch: worktree at origin's new head"
+assert_eq "$OH" "$(cd "$C" && "$DF" conf-get "$SC/$fr/run.conf" root_base_sha)" "fetch: root_base_sha is origin's new head"
+CACHED=$(git -C "$C" rev-parse "origin/$ob")
+git -C "$C" remote set-url origin /nonexistent/remote
+fr=$(cd "$C" && "$DF" start "$C/in.txt" --base "origin/$ob" 2>"$C/err")
+assert_contains "df: could not fetch origin/$ob; using the cached copy" "$(cat "$C/err")" "unreachable remote: could not fetch line"
+assert_eq "$CACHED" "$(cd "$C" && "$DF" conf-get "$SC/$fr/run.conf" root_base_sha)" "unreachable remote: cached commit used"
+sc() { echo "$(ls "$SC" | wc -l | tr -d ' ')|$(git -C "$C" worktree list)|$(git -C "$C" branch --list)"; }
+b4=$(sc); err=$(cd "$C" && "$DF" start "$C/in.txt" --base origin/nocache 2>&1 >/dev/null); rc=$?
+assert_eq "1" "$rc" "uncached base, unreachable remote: exit 1"
+assert_eq "df: could not fetch origin/nocache; using the cached copy
+df: start: base ref 'origin/nocache' not found" "$err" "uncached base, unreachable remote: messages"
+assert_eq "$b4" "$(sc)" "uncached base, unreachable remote: no leftovers"
+# guarded refs: a real fetch here would create a branch, move a stale tracking ref, or run a command
+git -C "$C" remote set-url origin "$O"
+git -C "$C" update-ref refs/remotes/origin/x "$CACHED"
+git -C "$O" commit -q --allow-empty -m x2; git -C "$O" checkout -q x; git -C "$O" commit -q --allow-empty -m xx; git -C "$O" checkout -q "$ob"
+refs() { git -C "$C" for-each-ref; }
+for bad in "origin/x:refs/heads/created" "origin/+x" "origin/--upload-pack=touch $C/pwned" "origin/--tags"; do
+  r4=$(refs); b4=$(sc); err=$(cd "$C" && "$DF" start "$C/in.txt" --base "$bad" 2>&1 >/dev/null); rc=$?
+  assert_eq "1" "$rc" "no fetch '$bad': exit 1"
+  assert_eq "df: start: base ref '$bad' not found" "$err" "no fetch '$bad': refused, nothing fetched"
+  assert_eq "$r4" "$(refs)" "no fetch '$bad': refs unchanged"
+  assert_eq "$b4" "$(sc)" "no fetch '$bad': no leftovers"
+done
+assert_fail "no fetch: no command executed" test -e "$C/pwned"
 
 # not a git repo
 N=$(mktemp -d); echo x > "$N/in.txt"
@@ -28,8 +132,10 @@ assert_fail "non-git dir refused" bash -c "cd '$N' && '$DF' start '$N/in.txt'"
 
 # build track in empty dir
 E=$(mktemp -d); echo "build a thing" > "$E/in.txt"
-id2=$(cd "$E" && DF_ALLOW_INIT=1 "$DF" start "$E/in.txt")
+id2=$(cd "$E" && DF_ALLOW_INIT=1 "$DF" start "$E/in.txt" 2>"$E/../init-err")
 assert_ok "git init plus initial commit works" git -C "$E" rev-parse HEAD
+assert_contains "started a new git repository" "$(cat "$E/../init-err")" "start_git_init_notice: said on stderr, stdout is the run id"
+assert_eq "yes" "$(cd "$E" && "$DF" conf-get "$("$DF" run-dir "$id2")/run.conf" git_init)" "start_git_init_notice: recorded in run.conf"
 assert_ok "worktree created for empty dir run" test -d "$(cd "$E" && "$DF" conf-get "$("$DF" run-dir "$id2")/run.conf" worktree)"
 
 # validation rejects corruption
@@ -61,5 +167,17 @@ SP="$(mktemp -d)/my repo"; mkdir -p "$SP"
 echo "do it" > "$SP/../in.txt"
 id3=$(cd "$SP" && "$DF" start "$SP/../in.txt")
 assert_ok "run starts in a path with spaces" bash -c "cd '$SP' && '$DF' validate '$id3'"
+
+# Slice 1 branch review: no leftovers under DF_ALLOW_INIT, single-branch clones, refs/ branch names
+for flags in "--base nope" "--branch a..b"; do
+  EI=$(mktemp -d); echo x > "$EI/in.txt"
+  assert_fail "DF_ALLOW_INIT refuses $flags" bash -c "cd '$EI' && DF_ALLOW_INIT=1 '$DF' start '$EI/in.txt' $flags"
+  assert_fail "refused $flags leaves no .git behind" test -e "$EI/.git"
+done
+RO=$(mkrepo); ( cd "$RO" && git checkout -q -b side && echo s > s.txt && git add s.txt && git commit -qm side && git checkout -q - )
+RC="$(mktemp -d)/c"; git clone -q --single-branch "$RO" "$RC"; echo x > "$RC/../in.txt"
+i6=$(cd "$RC" && "$DF" start "$RC/../in.txt" --base origin/side)
+assert_eq "$(git -C "$RO" rev-parse side)" "$(cd "$RC" && "$DF" conf-get "$("$DF" run-dir "$i6")/run.conf" root_base_sha)" "a remote branch the clone does not track is fetched"
+assert_fail "a branch name under refs/ is refused" bash -c "cd '$RC' && '$DF' start '$RC/../in.txt' --branch refs/heads/zz"
 
 finish

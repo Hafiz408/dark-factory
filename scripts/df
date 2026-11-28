@@ -15,12 +15,25 @@ atomic() { local t="$1.tmp.$$"; cat > "$t" && mv "$t" "$1"; }
 # key=value files (run.conf)
 conf_get() { tr -d '\r' < "$1" | sed -n "s/^$2=//p" | head -1; }
 conf_set() {
+  case "$3" in *[[:cntrl:]]*) die "conf-set: $2 must be a single line";; esac
   case "$2=$3" in
+    parallel=on|parallel=off) ;;
+    parallel=*) die "conf-set: parallel must be on or off";;
+    max_review_rounds=*|max_qa_rounds=*|review_round=*|qa_round=*|review_rounds_total=*|qa_rounds_total=*|max_agents=*|started=*|budget_seconds=*|max_attempts=*|paused_at=*|signoff_at=*|pushed_at=*|checks_first_seen=*)
+      case "$3" in ''|*[!0-9]*) die "conf-set: $2 must be an integer";; esac ;;
     status=active|status=waiting_permission|status=paused|status=done|status=unresolved|status=aborted) ;;
     status=*) die "conf-set: invalid status '$3'";;
-    stage=intake|stage=route|stage=refine|stage=plan|stage=preflight|stage=signoff|stage=slice|stage=loop|stage=integrate|stage=done) ;;
+    stage=intake|stage=route|stage=refine|stage=plan|stage=preflight|stage=signoff|stage=build|stage=check|stage=slice|stage=loop|stage=integrate|stage=review|stage=qa|stage=e2e|stage=retro|stage=ship|stage=merge|stage=postmerge|stage=done) ;; # v0.2 stages (slice loop review qa e2e) and v0.1 integrate kept for old runs
     stage=*) die "conf-set: invalid stage '$3'";;
+    ship_confirmed=yes|ship_confirmed=no) ;;
+    ship_mode=merge|ship_mode=pr|ship_mode=local|ship_mode=branch) ;;
+    ship_mode=*) die "conf-set: ship_mode must be merge, pr, local or branch";;
+    merged=yes|merged=local) ;;
+    merged=*) die "conf-set: merged must be yes or local";;
+    ship_confirmed=*) die "conf-set: ship_confirmed must be yes or no";;
     track=unrouted|track=bugfix|track=feature|track=build) ;;
+    lane=fast|lane=full) ;;
+    lane=*) die "conf-set: lane must be fast or full";;
     track=*) die "conf-set: invalid track '$3'";;
   esac
   { grep -v "^$2=" "$1" 2>/dev/null || true; echo "$2=$3"; } | atomic "$1"; }
@@ -35,44 +48,151 @@ fm_set() {
     { print }' "$1" | atomic "$1"
 }
 
-finding() { printf -- '- severity: %s\n  source: %s\n  where: %s\n  what: %s\n' "$1" "$2" "$3" "$4"; }
+# strict_secret: stdin has a high-confidence secret. A credential URL whose password is an
+# environment variable, or whose host is this machine (a test fixture), does not count.
+# A host with no dot (localhost, a docker-compose service such as db) is this machine or a local fixture.
+strict_secret() { grep -Eo "$STRICT_SECRET_RE" | grep -Evq '://[^/@ :]+:\$|@(127\.0\.0\.1|[A-Za-z0-9_-]+)([:/]|$)'; }
+
+# One run executes per repo at a time, so the files every run shares (profile, lessons,
+# proposals, metrics) have a single writer and need no lock of their own.
+# ponytail: one live run per repo; a lock-guarded multi-writer scheme if concurrent runs are ever needed.
+other_live_run() { # other_live_run <run-id>: prints another run of this repo whose lock is live
+  local lf r
+  for lf in "$(state_root)"/*/lock; do
+    [ -f "$lf" ] || continue; r=$(basename "$(dirname "$lf")"); [ "$r" != "${1:-}" ] || continue
+    [ "$(cmd_lock "$r" check)" != live ] || { echo "$r"; return 0; }
+  done
+  return 1
+}
+
+cmd_pause() { # df pause <run-id> <what is open>: stop the run's clock and mark it paused
+  local c; c="$(run_dir "$1")/run.conf"; [ -f "$c" ] || die "no such run: $1"
+  case "$(conf_get "$c" status)" in active|waiting_permission|paused) ;; *) die "pause: run is $(conf_get "$c" status)";; esac
+  conf_set "$c" waiting_on "${2:?df pause <run-id> <what is open>}"
+  [ "$(conf_get "$c" status)" = paused ] || conf_set "$c" paused_at "$(date +%s)"
+  conf_set "$c" status paused
+}
+credit_clock() { # credit_clock <run.conf> <seconds>: idle time never counts against the time cap or the metrics
+  local k s
+  for k in started signoff_at; do s=$(conf_get "$1" $k)
+    case "$s" in ''|*[!0-9]*) ;; *) conf_set "$1" $k $((s + $2));; esac
+  done
+}
+cmd_mode() { # df mode: the permission mode the guard hook last saw in this repo, or unknown
+  local m; m=$(cat "$(state_root)/permission-mode" 2>/dev/null || true)
+  case "$m" in default|acceptEdits|plan|auto|dontAsk|bypassPermissions) echo "$m";; *) echo unknown;; esac
+}
+cmd_unpause() { # df unpause <run-id>: resume the clock, crediting the time spent paused
+  local c p; c="$(run_dir "$1")/run.conf"; [ -f "$c" ] || die "no such run: $1"
+  [ "$(conf_get "$c" status)" = paused ] || die "unpause: run is not paused"
+  p=$(conf_get "$c" paused_at)
+  case "$p" in ''|*[!0-9]*) ;; *) credit_clock "$c" $(($(date +%s) - p));; esac
+  conf_set "$c" status active
+  rm -f "$(dirname "$c")/ro-violation" # the user resumed after hearing about it
+}
+cmd_extend() { # df extend <run-id> [rounds]: the user said continue after a cap pause; allow half as much again (rounds: one more check round)
+  local c ma bs st now na nb mx; c="$(run_dir "${1:-}")/run.conf"; [ -f "$c" ] || die "no such run: ${1:-}"
+  if [ "${2:-}" = rounds ]; then
+    ship_pin_check "$c" extend # never bless a change made since sign-off
+    mx=$(conf_get "$c" max_review_rounds); case $mx in ''|*[!0-9]*) mx=3;; esac
+    conf_set "$c" max_review_rounds $((mx + 1)); conf_set "$c" ship_pin "$(ship_pin_of "$c")"
+    echo "rounds: up to $((mx + 1)) check rounds"; return 0
+  fi
+  [ -z "${2:-}" ] || die "usage: df extend <run-id> [rounds]"
+  ma=$(conf_get "$c" max_agents); bs=$(conf_get "$c" budget_seconds); st=$(clock_start "$c"); now=$(date +%s)
+  case "$ma:$bs:$st" in *[!0-9:]*) die "extend: a cap or the start time in $c is not a number";; esac
+  # ponytail: half the cap again, from whatever is already used; a knob if people want other amounts.
+  na=${ma:+$(( ma + (ma + 1) / 2 ))}
+  if [ -n "$bs" ]; then
+    nb=$bs; [ -z "$st" ] || [ $((now - st)) -le "$nb" ] || nb=$((now - st))
+    nb=$(( nb + (bs + 1) / 2 )); conf_set "$c" budget_seconds "$nb"
+  fi
+  [ -z "$na" ] || conf_set "$c" max_agents "$na"
+  echo "cap: up to ${na:-unlimited} agents and $(( (${nb:-0} + 59) / 60 )) min"
+}
+
+# A df check is its own evidence, so its medium+ findings block at the gate.
+finding() { printf -- '- severity: %s\n  source: %s\n  where: %s\n  what: %s\n  evidence: df %s\n' "$1" "$2" "$3" "$4" "$cmd"; }
 # Interpreter and tool artefacts are not changes made by a role.
 ARTEFACT_RE='(^|/)(__pycache__|\.pytest_cache|\.mypy_cache|node_modules)/|\.pyc$'
 TEST_RE='(^|/)(tests?|spec|__tests__)/|(_test|\.test|\.spec)\.[A-Za-z]+$|(^|/)test_[^/]*$'
-SECRET_RE='AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|([Pp]assword|[Pp]asswd|PASSWORD|[Ss]ecret|SECRET|[Tt]oken|TOKEN|[Aa]pi[_-]?[Kk]ey|API[_-]?KEY)[ ]*[=:][ ]*[^ ]+'
+CI_RE='^(\.github/workflows/|\.circleci/|\.buildkite/|\.gitlab-ci\.yml$|\.travis\.yml$|azure-pipelines\.yml$|bitbucket-pipelines\.yml$|Jenkinsfile$)'
+# High-confidence secret formats only: used on what leaves the machine (pushed commits, PR text), where a
+# keyword match such as 'password = request.form[...]' would block ordinary code.
+STRICT_SECRET_RE='AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|(^|[^A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|://[^/@ :]+:[^/@ ]+@[^/:" ]*'
+SECRET_RE='AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|([Pp]assword|[Pp]asswd|PASSWORD|[Ss]ecret|SECRET|[Tt]oken|TOKEN|[Aa]pi[_-]?[Kk]ey|API[_-]?KEY)[ ]*[=:][ ]*[^ ]+|[Ss]ecret[_A-Za-z]*[ ]*[=:][ ]*[^ ]+|[Bb]earer [A-Za-z0-9._~+/-]{20,}|://[^/@ :]+:[^/@ ]+@'
 
-cmd_start() { # df start <input-file>   (DF_ALLOW_INIT=1 permits git init, build track only)
-  local input=$1 top id wt rd base
+cmd_start() { # df start <input-file> [--base <ref>] [--branch <name>]   (DF_ALLOW_INIT=1 permits git init, build track only)
+  local input=${1:-} rem rest top id wt rd base bref="" branch="" baseref="" hb="" hr="" usage gi=""
+  usage="usage: df start <input-file> [--base <ref>] [--branch <name>]"
+  case $input in ""|-*) die "$usage" ;; esac
+  shift
+  while [ $# -gt 0 ]; do
+    [ $# -ge 2 ] || die "$usage"
+    case $2 in ""|-*|*[[:cntrl:]]*) die "$usage" ;; esac
+    case $1 in
+      --base) [ -z "$hb" ] || die "$usage"; hb=1; bref=$2 ;;
+      --branch) [ -z "$hr" ] || die "$usage"; hr=1; branch=$2 ;;
+      *) die "$usage" ;;
+    esac
+    shift 2
+  done
+  [ -f "$input" ] && [ -r "$input" ] || die "start: input file '$input' not found"
+  # ponytail: check then claim (the lock comes with the next `df lock acquire`, which re-checks);
+  # two starts within the same instant could both pass. Claim the lock here if that ever matters.
+  if git rev-parse --git-dir >/dev/null 2>&1 && r=$(other_live_run ""); then
+    die "start: run $r is live in this repo; one run executes per repo at a time (resume or finish it first)"
+  fi
+  # Everything that can refuse runs before git init, so a refusal leaves nothing behind.
+  if [ -n "$hr" ]; then
+    case $branch in refs/*) die "start: invalid branch name '$branch'" ;; esac
+    [ "$(git check-ref-format --branch "$branch" 2>/dev/null)" = "$branch" ] || die "start: invalid branch name '$branch'"
+  fi
+  [ -z "$hb" ] || git rev-parse -q --verify HEAD >/dev/null 2>&1 || die "start: --base needs a repo with at least one commit"
   if ! git rev-parse --git-dir >/dev/null 2>&1; then
     [ "${DF_ALLOW_INIT:-}" = 1 ] || die "not a git repo (DF_ALLOW_INIT=1 allows git init for the build track)"
-    git init -q
+    git init -q; gi=1
+    echo "df: started a new git repository in $(pwd -P)" >&2 # the orchestrator tells the user before the questions
   fi
   git rev-parse HEAD >/dev/null 2>&1 ||
     git -c user.name=dark-factory -c user.email=df@localhost commit -q --allow-empty -m "df: initial commit"
+  [ -z "$hr" ] || ! git show-ref --verify -q "refs/heads/$branch" || die "start: branch '$branch' already exists"
   top=$(git rev-parse --show-toplevel)
   id="r$(date +%y%m%d-%H%M%S)-$$"
   wt="$(dirname "$top")/$(basename "$top")-df-$id"
-  base=$(git rev-parse HEAD)
-  git worktree add -q -b "df/$id" "$wt"
+  [ -n "$hr" ] || branch="df/$id"
+  if [ -n "$hb" ]; then # fetch only <remote>/<branch> with a plain branch: never a caller-supplied option or refspec.
+    # Other spellings (origin/HEAD, refs/remotes/..., origin/x~1) resolve from the local copy, unfetched.
+    rem=${bref%%/*}; rest=${bref#*/}
+    case $rest in ""|"$bref"|*:*|+*|-*) rem="" ;; esac
+    if [ -n "$rem" ] && git remote | grep -qxF -- "$rem" && git check-ref-format "refs/remotes/$bref"; then
+      if ! GIT_TERMINAL_PROMPT=0 git fetch -q -- "$rem" "+refs/heads/$rest:refs/remotes/$rem/$rest" 2>/dev/null; then
+        echo "df: could not fetch $bref; using the cached copy" >&2
+      fi
+    fi
+  fi
+  base=$(git rev-parse --verify -q "${bref:-HEAD}^{commit}") || die "start: base ref '$bref' not found"
+  baseref=${hb:+$bref}; [ -n "$hb" ] || baseref=$(git symbolic-ref -q --short HEAD || echo detached)
+  git worktree add -q -b "$branch" "$wt" "$base" || die "start: could not create the worktree on '$branch'"
   rd=$(run_dir "$id")
   mkdir -p "$rd/chunks" "$rd/scenarios" "$rd/panel"
   git status --porcelain > "$rd/dirty.txt"
   cp "$input" "$rd/input.md"
-  { echo "track=unrouted"; echo "worktree=$wt"; echo "branch=df/$id"; echo "root_base_sha=$base"
-    echo "stage=intake"; echo "status=active"
-    echo "started=$(date +%s)"; echo "budget_seconds=${DF_BUDGET_SECONDS:-14400}"; echo "max_attempts=3"; } | atomic "$rd/run.conf"
+  { echo "track=unrouted"; echo "worktree=$wt"; echo "branch=$branch"; echo "root_base_sha=$base"; echo "base_ref=$baseref"
+    echo "stage=intake"; echo "status=active"; [ -z "$gi" ] || echo "git_init=yes"
+    echo "started=$(date +%s)"; [ -z "${DF_BUDGET_SECONDS:-}" ] || echo "budget_seconds=$DF_BUDGET_SECONDS"; echo "max_attempts=3"; echo "max_review_rounds=3"; echo "max_qa_rounds=2"; echo "review_round=0"; echo "qa_round=0"; echo "parallel=off"; } | atomic "$rd/run.conf"
   echo "$id"
 }
 
 cmd_validate() { # df validate <run-id>
-  local rd c f b
+  local rd c f b pin
   rd=$(run_dir "$1"); c="$rd/run.conf"
   [ -f "$c" ] || die "missing $c"
   for k in track worktree branch root_base_sha stage status; do
     [ -n "$(conf_get "$c" $k)" ] || die "$c: missing $k"
   done
   case "$(conf_get "$c" track)" in unrouted|bugfix|feature|build) ;; *) die "$c: bad track";; esac
-  case "$(conf_get "$c" stage)" in intake|route|refine|plan|preflight|signoff|slice|loop|integrate|done) ;; *) die "$c: bad stage";; esac
+  case "$(conf_get "$c" stage)" in intake|route|refine|plan|preflight|signoff|build|check|slice|loop|integrate|review|qa|e2e|retro|ship|merge|postmerge|done) ;; *) die "$c: bad stage";; esac
   case "$(conf_get "$c" status)" in active|waiting_permission|paused|done|unresolved|aborted) ;; *) die "$c: bad status";; esac
   git cat-file -e "$(conf_get "$c" root_base_sha)^{commit}" 2>/dev/null || die "$c: root_base_sha not found"
   for f in "$rd"/chunks/*.md; do
@@ -80,12 +200,69 @@ cmd_validate() { # df validate <run-id>
     case "$(fm_get "$f" status)" in pending|running|PASS|BLOCKED|SKIPPED) ;; *) die "$f: bad status";; esac
     case "$(fm_get "$f" attempts)" in ''|*[!0-9]*) die "$f: attempts is not an integer";; esac
     [ -n "$(fm_get "$f" scope | tr -d '[] ')" ] || die "$f: chunk declares no scope"
+    [ "$(fm_get "$f" id)" = "$(basename "$f" .md)" ] || die "$f: id '$(fm_get "$f" id)' is not the file name"
+    b=$(fm_get "$f" sub_worktree)
+    case $b in ''|null) ;; *) [ "$b" = "$(conf_get "$c" worktree)-c$(basename "$f" .md)" ] || die "$f: sub_worktree '$b' is not this step's own sub-worktree";; esac
     b=$(fm_get "$f" base_sha)
     if [ -n "$b" ] && [ "$b" != null ]; then
       git cat-file -e "$b^{commit}" 2>/dev/null || die "$f: base_sha not found"
     fi
   done
+  # The profile is shared by every run in the repo; it binds only a run that will still execute it.
+  if [ "$(conf_get "$c" status)" = active ] && [ -z "${DF_NO_PROFILE_CHECK:-}" ]; then
+    [ ! -f "$(state_root)/profile.md" ] || profile_check "$(state_root)/profile.md"
+    [ "$(conf_get "$c" profile_sha)" != none ] || [ ! -f "$(state_root)/profile.md" ] ||
+      die "$(state_root)/profile.md appeared after sign-off (none was shown); abort and start again"
+  fi
+  # Pinned at sign-off: the profile's commands run unattended later, so they must be the ones shown.
+  pin=$(conf_get "$c" profile_sha)
+  if [ -n "$pin" ] && [ "$pin" != none ] && [ "$(conf_get "$c" status)" = active ] && [ -z "${DF_NO_PROFILE_CHECK:-}" ]; then
+    [ -f "$(state_root)/profile.md" ] || die "$(state_root)/profile.md was pinned at sign-off and is now missing"
+    [ "$(sha < "$(state_root)/profile.md")" = "$pin" ] || die "$(state_root)/profile.md changed since sign-off; restore it, or abort and start again"
+  fi
 }
+
+# The repo profile (beside the clone, never committed): commands the run will execute, so the
+# app it starts must be local and the file must name credentials, never hold them.
+profile_check() { # profile_check <profile.md>
+  local p=$1 u
+  # The key block must be exactly the known keys, once each, spelled plainly.
+  tr -d '\r' < "$p" | awk '/^---$/{n++; next} n==1' | awk '
+    /^[ \t]*$/ { next }
+    !/^(e2e_cmd|e2e_needs_app|start_cmd|ready_url|stop_cmd):( .*)?$/ { print "bad"; exit }
+    { k=$0; sub(/:.*/, "", k); if (seen[k]++) { print "dup"; exit } }' | grep -q . &&
+    die "$p: the --- block may hold only e2e_cmd, e2e_needs_app, start_cmd, ready_url, stop_cmd, once each, as 'key: value'"
+  u=$(fm_get "$p" ready_url)
+  if [ -n "$u" ] && ! printf '%s\n' "$u" | grep -Eq '^https?://(localhost|127\.0\.0\.1)(:([0-9]+|<PORT>))?(/[A-Za-z0-9._~/<>?=&%-]*)?$'; then
+    die "$p: ready_url must be a plain http(s) URL on localhost or 127.0.0.1 (got $u)"
+  fi
+  case "$(fm_get "$p" e2e_needs_app)" in ""|yes|no) ;; *) die "$p: e2e_needs_app must be yes or no";; esac
+  # A value that names an environment variable ($NAME, or `$NAME` in prose) or says none is not a secret.
+  if grep -Eq '([Pp]assword|PASSWORD|PASSWD|[Tt]oken|TOKEN|[Ss]ecret|SECRET|KEY|[Kk]ey)[A-Za-z_]*[ ]*=[ ]*[^$`" ]' "$p" ||
+     grep -E "$SECRET_RE" "$p" | grep -Ev '\$[A-Za-z_{]|[A-Z][A-Z0-9_]*(PASSWORD|PASSWD|TOKEN|SECRET|KEY)([^=A-Z0-9_]|$)|[=:][ ]*([Nn]one|N/A|n/a|-)([ .,;]|$)' | grep -q . ||
+     strict_secret < "$p"; then
+    die "$p: looks like it holds a secret; name credentials by environment variable instead"
+  fi
+}
+
+cmd_profile_pin() { # df profile-pin <run-id>: at sign-off, record the profile's hash (or none), signoff_at and ship_pin
+  local c p; c="$(run_dir "$1")/run.conf"; p="$(state_root)/profile.md"
+  [ -f "$c" ] || die "no such run: $1"
+  if [ -f "$p" ]; then conf_set "$c" profile_sha "$(sha < "$p")"; else conf_set "$c" profile_sha none; fi
+  [ -n "$(conf_get "$c" signoff_at)" ] || conf_set "$c" signoff_at "$(date +%s)"
+  conf_set "$c" ship_pin "$(ship_pin_of "$c")"
+  conf_set "$c" cmd_pin "$(cmd_pin_of "$c")"
+}
+# The ship settings chosen at sign-off; run.conf is writable by roles, so ship, merge and local-merge re-check them.
+# ponytail: a plain hash, so it catches a stray write, not a role that recomputes it; an HMAC with a key outside the run dir if that matters.
+# max_review_rounds is in it: lowering it would turn open findings into an accepted merge sooner (raise it with df extend <id> rounds).
+ship_pin_of() { local a; a=$(conf_get "$1" accept_minor); printf '%s\n%s\n%s\n%s%s' "$(conf_get "$1" ship_mode)" "$(conf_get "$1" ship_base)" "$(conf_get "$1" base_ref)" "${a:+$a
+}" "$(conf_get "$1" max_review_rounds)" | sha; }
+# The commands df step-check runs were shown at sign-off; a role editing them afterwards is refused.
+cmd_pin_of() { { cat "$(dirname "$1")/env.commands" 2>/dev/null || true; conf_get "$1" test_cmd; } | sha; }
+ship_pin_check() { [ "$(conf_get "$1" ship_pin)" = "$(ship_pin_of "$1")" ] || die "$2: ship_mode, ship_base, base_ref or max_review_rounds changed since sign-off (or there was no sign-off)"; }
+# The run's start of unattended time: sign-off, else (a run from before v0.3 pinned it) the start.
+clock_start() { local s; s=$(conf_get "$1" signoff_at); case $s in ''|*[!0-9]*) s=$(conf_get "$1" started);; esac; echo "$s"; }
 
 cmd_verdict() { # df verdict <role-output-file>: prints the verdict word, exit 1 if invalid
   local last
@@ -94,36 +271,79 @@ cmd_verdict() { # df verdict <role-output-file>: prints the verdict word, exit 1
   echo "$last" | sed -E 's/^VERDICT: ([A-Z_]+).*/\1/'
 }
 
-cmd_gate() { # df gate <findings-file>: prints "<blocking> <total>", exit 1 if blocking > 0
-  local out
-  out=$(awk '
-    function flush() {
-      if (sev != "") {
-        if (sev!="critical" && sev!="high" && sev!="medium" && sev!="low") bad++
-        t++
-        if ((sev=="medium"||sev=="high"||sev=="critical") && tags !~ /pre-existing/ && !(sev=="medium" && tags ~ /late-find/)) b++
+# One reading of findings files for the gate and for acceptance, so they never disagree.
+# A medium+ finding without an evidence: line (a failing command, scenario id, or file:line + input) counts as low.
+# mode=count prints "<blocking> <total> <bad severity words> <a VERDICT: FAIL seen>"; mode=list prints each blocking finding (with or without
+# a what: line) and every line pairing a scenario id with FAIL or INVALID, in any format (fail closed).
+FINDINGS_AWK='
+  function flush() {
+    if (sev != "") {
+      if (sev!="critical" && sev!="high" && sev!="medium" && sev!="low") bad++
+      t++
+      if ((sev=="medium"||sev=="high"||sev=="critical") && tags ~ /pre-existing/ || sev=="medium" && (tags ~ /late-find/ || !ev)) ex++
+      if ((sev=="medium"||sev=="high"||sev=="critical") && ev && tags !~ /pre-existing/ && !(sev=="medium" && tags ~ /late-find/)) {
+        b++; if (mode == "list") print "  " sev " " (w == "" ? "?" : w) ": " (x == "" ? "(no what: line)" : x)
       }
-      sev=""; tags=""
     }
-    /^- severity:/ { flush(); sev=$3 }
-    /^[ \t]+tags:/ { tags=$0 }
-    END { flush(); printf "%d %d %d\n", b+0, t+0, bad+0 }' "$1")
-  if [ "${out##* }" -ne 0 ]; then die "gate: unknown severity word in $1 (use critical|high|medium|low, lowercase)"; fi
-  out="${out% *}"
+    sev=""; tags=""; ev=0; w=""; x=""
+  }
+  function verdict() { if (last ~ /^VERDICT: FAIL/) vf=1; last="" }
+  FNR == 1 { flush(); verdict() }
+  NF { last=$0 }
+  # Any line that opens with a severity key, in any case, bullet or bold, starts a finding (fail closed);
+  # its value must be exactly critical|high|medium|low once lowercased and stripped of markdown.
+  { l=tolower($0) }
+  l ~ /^[ \t]*([-*][ \t]*)?(\*\*)?severity(\*\*)?[ \t]*:/ { flush(); sub(/^[^:]*:/, "", l); gsub(/[*`_ \t\r]/, "", l); sev=(l == "" ? "?" : l) }
+  /^[ \t]+tags:/ { tags=$0 }
+  /^[ \t]+evidence:[ \t]*[^ \t]/ { ev=1 }
+  /^[ \t]+where:/ { w=$0; sub(/^[ \t]+where:[ \t]*/, "", w) }
+  /^[ \t]+what:/ { x=$0; sub(/^[ \t]+what:[ \t]*/, "", x) }
+  { u=toupper($0)
+    if (u ~ /(^|[^A-Z0-9])S[0-9]+[ \t*|:-]*(FAIL|FAILS|FAILED|FAILING|INVALID)([^A-Z]|$)/) { sf++; if (mode == "list") { l=$0; sub(/^[ \t]+/, "", l); print "  scenario " l } } }
+  END { flush(); verdict(); if (mode == "count") printf "%d %d %d %d\n", b+0, t+0, bad+0, (vf && (sf || !ex)) }'
+cmd_gate() { # df gate <findings-file>...: prints "<blocking> <total>", exit 1 if blocking > 0
+  local out b t bw vf
+  [ $# -ge 1 ] || die "usage: df gate <findings-file>..."
+  out=$(awk -v mode=count "$FINDINGS_AWK" "$@") || die "gate: could not read $*"; read -r b t bw vf <<EOF2
+$out
+EOF2
+  [ "$bw" -eq 0 ] || die "gate: unknown severity word (use critical|high|medium|low)"
+  # ponytail: one non-blocking finding can also explain a FAIL whose real finding was unreadable; per-finding counts if seen.
+  # vf: VERDICT FAIL that no non-blocking medium+ finding explains, or that comes with a failed hidden check.
+  [ "$vf" -eq 0 ] || [ "$b" -gt 0 ] || die "gate: a checker's VERDICT is FAIL but no blocking finding was read: write each one as - severity: <word> with an evidence: line, then gate again"
+  out="$b $t"
   echo "$out"
   [ "${out%% *}" -eq 0 ]
 }
 
 cmd_lock() { # df lock <run-id> acquire|refresh|release|check [session]
-  local rd lf act sess now cur hb ttl
+  local rd lf act sess now cur hb ttl r
   rd=$(run_dir "$1"); act=$2; sess=${3:-${DF_SESSION:-$PPID}}; lf="$rd/lock"; now=$(date +%s); ttl=${DF_LOCK_TTL:-3600}
   case "$act" in
     acquire|refresh)
+      if [ "$act" = acquire ] && r=$(other_live_run "$1"); then
+        echo "df: another run in this repo is live ($r); one run executes per repo at a time" >&2; exit 2
+      fi
       if [ -f "$lf" ]; then
         cur=$(sed -n 's/^session=//p' "$lf"); hb=$(sed -n 's/^heartbeat=//p' "$lf")
         case "$hb" in ''|*[!0-9]*) hb=0;; esac
         if [ "$cur" != "$sess" ] && [ $((now - hb)) -lt "$ttl" ]; then
           echo "df: run is live (session $cur)" >&2; exit 2
+        fi
+        # A new session taking over a dead one: the gap since its last heartbeat was idle.
+        # ponytail: the dead session's last agent after that heartbeat goes uncounted too; and
+        # a --force release removes the lock, so that path credits nothing.
+        if [ "$act" = acquire ] && [ "$cur" != "$sess" ] && [ "$hb" -gt 0 ] && [ -f "$rd/run.conf" ] &&
+           [ "$(conf_get "$rd/run.conf" status)" != paused ]; then
+          credit_clock "$rd/run.conf" $((now - hb))
+        fi
+        # The same session back after a long silence (a usage limit, a closed laptop): idle, not work.
+        # Not while paused: unpause credits that. A role's return and the end of each command run inside df beat the
+# heartbeat, so a long role or suite is not idle.
+        # ponytail: a wait inside a role (the limit hit mid-builder) still counts; it ends with that role's post.
+        if [ "$act" = refresh ] && [ "$cur" = "$sess" ] && [ "$hb" -gt 0 ] && [ $((now - hb)) -ge 1200 ] &&
+           [ -f "$rd/run.conf" ] && [ "$(conf_get "$rd/run.conf" status)" != paused ]; then
+          credit_clock "$rd/run.conf" $((now - hb))
         fi
       fi
       printf 'session=%s\nheartbeat=%s\n' "$sess" "$now" | atomic "$lf" ;;
@@ -141,14 +361,22 @@ cmd_snapshot() { # df snapshot <worktree>: hash of everything a read-only role m
   ( cd "$1" && {
       git status --porcelain | cut -c4- | grep -Ev "$ARTEFACT_RE" || true
       git diff HEAD
+      # ponytail: the stash list is shared by every worktree of the clone, so a stash made in another
+      # worktree (a parallel lane) also changes this hash; per-worktree stash tracking if that bites.
+      git ls-files -s; git stash list   # a role that stashes or stages leaves the files looking clean
       git ls-files -o --exclude-standard | grep -Ev "$ARTEFACT_RE" | while IFS= read -r p; do printf '%s ' "$p"; sha < "$p"; done
     } | sha )
+}
+
+changed_files() { # changed_files <worktree> <base_sha>: every file changed since base, committed or not, minus tool artefacts
+  ( cd "$1" && { git -c core.quotePath=false diff --no-renames --name-only "$2"; git -c core.quotePath=false ls-files -o --exclude-standard; } |
+    grep -Ev "$ARTEFACT_RE" | sort -u ) || true
 }
 
 cmd_check_diff() { # df check-diff <worktree> <base_sha> <chunk.md>: findings on stdout
   set -f
   local wt=$1 base=$2 ch=$3 files scope allow p g hit st rest ok a
-  files=$( cd "$wt" && { git -c core.quotePath=false diff --no-renames --name-only "$base"; git -c core.quotePath=false ls-files -o --exclude-standard; } | grep -Ev "$ARTEFACT_RE" | sort -u || true )
+  files=$(changed_files "$wt" "$base")
   if [ -z "$files" ]; then finding medium integrity "-" "empty diff for chunk"; return 0; fi
   scope=$(fm_get "$ch" scope | tr -d '[]' | tr ',' ' ')
   allow=$(fm_get "$ch" touches_tests | tr -d '[]' | tr ',' ' ')
@@ -179,15 +407,89 @@ EOF
 }
 
 cmd_srchash() { # df srchash <worktree> <base_sha>: hash of every non-test, non-artefact file changed since base
-  ( cd "$1" && {
-      git -c core.quotePath=false diff --no-renames --name-only "$2"
-      git -c core.quotePath=false ls-files -o --exclude-standard
-    } | sort -u | grep -Ev "$ARTEFACT_RE" | grep -Ev "$TEST_RE" | while IFS= read -r p; do
+  changed_files "$1" "$2" | { grep -Ev "$TEST_RE" || true; } | ( cd "$1" && while IFS= read -r p; do
       if [ -f "$p" ]; then printf '%s ' "$p"; sha < "$p"; else printf '%s deleted\n' "$p"; fi
     done | sha )
 }
 
-cmd_commit() { # df commit <worktree> <message>: stage everything except tool artefacts, then commit
+cmd_redcheck() { # df redcheck <worktree> <base_sha> <test-command>: 0 when the changed tests fail without the other changes; 1 they pass; 2 no tests changed; 4 infra
+  local wt=${1:-} base=${2:-} tests p cmd
+  infra() { echo "df: redcheck: $*" >&2; exit 4; } # exit 4: redcheck could not run; not a verdict on the tests
+  [ $# -eq 3 ] || infra "usage: df redcheck <worktree> <base_sha> <test-command>"
+  git -C "$wt" rev-parse -q --verify "$base^{commit}" >/dev/null || infra "base $base not found"
+  tests=$(changed_files "$wt" "$base" | { grep -E "$TEST_RE" || true; })
+  [ -n "$(printf '%s\n' "$tests" | while IFS= read -r p; do [ ! -f "$wt/$p" ] || echo "$p"; done)" ] || { echo "redcheck: no tests changed"; return 2; }
+  RC_TMP=$(mktemp -d); RC_WT=$wt
+  trap 'git -C "$RC_WT" worktree remove --force "$RC_TMP/w" >/dev/null 2>&1; rm -rf "$RC_TMP"; git -C "$RC_WT" worktree prune' EXIT
+  git -C "$wt" worktree add -q --detach "$RC_TMP/w" "$base" || infra "could not create a temporary checkout"
+  # ponytail: base plus the changed test files is HEAD with every changed non-test file restored to base
+  # (and ones added since base gone). A file changed and then changed back since base is not seen.
+  printf '%s\n' "$tests" | while IFS= read -r p; do
+    if [ -f "$wt/$p" ]; then mkdir -p "$(dirname "$RC_TMP/w/$p")"; cp "$wt/$p" "$RC_TMP/w/$p"; else rm -f "$RC_TMP/w/$p"; fi
+  done
+  # Ignored top-level entries (node_modules, .venv, .env) are linked in, so tests fail for the change, not a missing install.
+  ( cd "$wt" && git ls-files -o -i --exclude-standard --directory ) | sed 's,/$,,' | grep -v / | while IFS= read -r p; do
+    [ -e "$RC_TMP/w/$p" ] || ln -s "$wt/$p" "$RC_TMP/w/$p"
+  done
+  # A command that names the worktree by absolute path (cd, PYTHONPATH) must run the old-code copy instead.
+  cmd=$3; cmd=${cmd//"$(physpath "$wt")"/"$RC_TMP/w"}; cmd=${cmd//"$wt"/"$RC_TMP/w"}
+  if ( cd "$RC_TMP/w" && bash -c "$cmd" ) 1>&2; then echo "redcheck: new tests pass without the change"; return 1; fi
+  echo "redcheck: ok, new tests fail without the change"
+}
+
+run_cmds() { # run_cmds <run-dir> <worktree> <findings-out> <log>: each env.commands line in the worktree; sets the caller's bad and judge
+  local rd=$1 w=$2 out=$3 log=$4 own line rc n=0
+  own=$(conf_get "$rd/run.conf" worktree)
+  [ -f "$rd/env.commands" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ -n "$line" ] || continue; n=$((n + 1))
+    printf '\n$ %s\n' "$line" >> "$log"
+    rc=0; ( cd "$w" && bash -c "${line//"$own"/"$w"}" ) </dev/null >>"$log" 2>&1 || rc=$?
+    [ $rc -ne 0 ] || continue
+    # A command that failed before the run too is judged by the orchestrator, not blamed on the change.
+    if grep -qxF -- "$line" "$rd/baseline.failing" 2>/dev/null; then judge="$judge $n"; continue; fi
+    bad=$((bad + 1))
+    printf -- '- severity: high\n  source: correctness\n  where: command %s\n  what: command failed with exit %s\n  evidence: %s (output in %s)\n' "$n" "$rc" "$line" "$log" >> "$out"
+  done < "$rd/env.commands"
+}
+
+cmd_step_check() { # df step-check <worktree> <step.md> <builder-output> <findings-out> <commit message>: every mechanical check of one attempt
+  local wt step bout out msg rd c base log leak rc tcmd line bad=0 judge="" n=0 own
+  [ $# -eq 5 ] || die "usage: df step-check <worktree> <step.md> <builder-output> <findings-out> <commit message>"
+  wt=$1; step=$2; bout=$3; out=$4; msg=$5; log="${out%.md}.log"
+  [ -f "$step" ] || die "step-check: no step file $step"
+  rd=$(dirname "$(dirname "$step")"); c="$rd/run.conf"; [ -f "$c" ] || die "step-check: $step is not inside a run directory"
+  base=$(fm_get "$step" base_sha)
+  git -C "$wt" rev-parse -q --verify "$base^{commit}" >/dev/null || die "step-check: the step has no valid base_sha"
+  [ "$(conf_get "$c" cmd_pin)" = "$(cmd_pin_of "$c")" ] || { echo "step-check: env.commands or test_cmd changed since sign-off"; return 4; }
+  tcmd=$(conf_get "$c" test_cmd); : > "$out"; : > "$log"
+  ( cmd_check_diff "$wt" "$base" "$step" ) >> "$out" # subshell: check-diff turns globbing off
+  if [ -f "$bout" ]; then
+    leak=$(cmd_canary_scan "$rd/scenarios" "$bout")
+    [ -z "$leak" ] || { printf '%s\n' "$leak" >> "$out"; echo "step-check: LEAK a hidden scenario reached the builder ($out)"; return 5; }
+  fi
+  if [ -z "$(changed_files "$wt" "$base")" ]; then echo "step-check: FAIL nothing changed ($out)"; return 1; fi
+  if [ -n "$( (cd "$wt" && { git diff --name-only HEAD; git ls-files -o --exclude-standard; }) | grep -Ev "$ARTEFACT_RE")" ]; then cmd_commit "$wt" "$msg"; fi
+  own=$(conf_get "$c" worktree)
+  if [ -z "$(fm_get "$step" no_tests)" ]; then
+    [ -n "$tcmd" ] || { echo "step-check: run.conf has no test_cmd"; return 4; }
+    rc=0; ( cmd_redcheck "$wt" "$base" "${tcmd//"$own"/"$wt"}" ) >>"$log" 2>&1 || rc=$?
+    case $rc in
+      0) ;;
+      1) cmd=redcheck; finding high correctness "$(basename "$step")" "the new tests pass without the change" >> "$out";;
+      2) cmd=redcheck; finding high correctness "$(basename "$step")" "no tests changed and the step has no no_tests reason" >> "$out";;
+      *) echo "step-check: INFRA redcheck could not run ($log)"; return 4;;
+    esac
+  fi
+  run_cmds "$rd" "$wt" "$out" "$log"; beat "$rd"
+  rc=0; line=$(cmd_gate "$out") || rc=$?
+  [ $rc -eq 0 ] || { echo "step-check: FAIL ${line%% *} blocking ($out; command output: $log)"; return 1; }
+  [ -z "$judge" ] || { echo "step-check: JUDGE command(s)$judge failed, and also failed before the run: read $log"; return 6; }
+  echo "step-check: PASS"
+}
+
+cmd_commit() { # df commit <worktree> <message>: stage everything except tool artefacts, commit, log it in the run's log.md
+  local c me
   ( cd "$1" || exit 1
     git -c core.quotePath=false add -A
     git -c core.quotePath=false diff --cached --name-only | grep -E "$ARTEFACT_RE" | while IFS= read -r p; do
@@ -198,7 +500,12 @@ cmd_commit() { # df commit <worktree> <message>: stage everything except tool ar
       git -c user.name=dark-factory -c user.email=df@localhost commit -q -m "$2"
     else
       git commit -q -m "$2"
-    fi )
+    fi
+    me=$(pwd -P)
+    for c in "$(state_root)"/*/run.conf; do # resume checks the branch head against these lines
+      [ -f "$c" ] && [ "$(physpath "$(conf_get "$c" worktree)")" = "$me" ] || continue
+      printf 'commit %s %s\n' "$(git rev-parse HEAD)" "$(printf '%s\n' "$2" | head -1)" >> "$(dirname "$c")/log.md"
+    done )
 }
 
 cmd_canary_scan() { # df canary-scan <scenarios-dir> <output-file>: finding on stdout if a canary leaked
@@ -211,40 +518,1016 @@ cmd_canary_scan() { # df canary-scan <scenarios-dir> <output-file>: finding on s
 cmd_scrub() { # df scrub <file>: scrubbed copy on stdout, exit 3 if anything was redacted
   local n
   n=$(grep -Ec "$SECRET_RE" "$1" || true)
-  sed -E "s/($SECRET_RE)/[REDACTED]/g" "$1"
+  sed -E "s#($SECRET_RE)#[REDACTED]#g" "$1"
   [ "${n:-0}" -eq 0 ] || return 3
 }
 
-cmd_finish() { # df finish <run-id> [session]: end state is written together, then the lock is released
-  local rd c st=done wt base track tre prose
-  rd=$(run_dir "$1"); c="$rd/run.conf"
-  [ -f "$c" ] || die "no such run: $1"
-  track=$(conf_get "$c" track); wt=$(conf_get "$c" worktree); base=$(conf_get "$c" root_base_sha)
+no_source_change() { # no_source_change <conf>: 0 when the run is a bugfix whose branch changes no source file
+  local c=$1 wt base tre prose
+  wt=$(conf_get "$c" worktree); base=$(conf_get "$c" root_base_sha)
   # eval P1: a bugfix run whose branch changed no source is not a fix; say so, loudly.
   # Test support files and prose do not count as source; config and requirements files do.
   tre="$TEST_RE|(^|/)(conftest\.py|testdata|fixtures?)(/|$)|(Test|Tests)\.(java|kt|cs)$|_spec\.rb$"
   prose='(^|/)(docs?|doc)/|(^|/)CHANGELOG[^/]*$|\.(md|rst)$'
-  if [ "$track" = bugfix ] && [ -d "$wt" ] && git -C "$wt" rev-parse --verify -q "$base^{commit}" >/dev/null; then
-    if [ -z "$(git -C "$wt" -c core.quotePath=false diff --name-only --no-renames "$base" HEAD |
-         grep -Ev "$ARTEFACT_RE" | grep -Ev "$tre" | grep -Eiv "$prose")" ]; then
-      st=unresolved
-      echo "NOT FIXED: the branch changes no source file (tests and docs only); see report.md" >&2
-    fi
+  [ "$(conf_get "$c" track)" = bugfix ] && [ -d "$wt" ] && git -C "$wt" rev-parse --verify -q "$base^{commit}" >/dev/null || return 1
+  [ -z "$(git -C "$wt" -c core.quotePath=false diff --name-only --no-renames "$base" HEAD |
+       grep -Ev "$ARTEFACT_RE" | grep -Ev "$tre" | grep -Eiv "$prose")" ]
+}
+
+cmd_fixed() { # df fixed <run-id>: exit 1 when a bugfix run changed no source file
+  local c; c="$(run_dir "${1:-}")/run.conf"
+  [ -f "$c" ] || die "no such run: ${1:-}"
+  ! no_source_change "$c" || { echo "df: fixed: the branch changes no source file (tests and docs only)" >&2; return 1; }
+}
+
+cmd_finish() { # df finish <run-id> [session]: end state is written together, then the lock is released
+  local rd c st=done f
+  rd=$(run_dir "$1"); c="$rd/run.conf"
+  [ -f "$c" ] || die "no such run: $1"
+  # Only a run that came through QA clean may finish; anything else pauses and stays resumable.
+  # QA must have passed: e2e or later. (A v0.1 run at integrate goes through review, QA and e2e first.)
+  case "$(conf_get "$c" stage)" in e2e|retro|ship|merge|postmerge|done) ;; *) die "finish: run has not completed QA (stage $(conf_get "$c" stage))";; esac
+  case "$(conf_get "$c" status)" in active|done|unresolved) ;; *) die "finish: run is $(conf_get "$c" status): $(conf_get "$c" waiting_on)";; esac
+  for f in "$rd"/chunks/*.md; do
+    [ -e "$f" ] || continue
+    case "$(fm_get "$f" status)" in BLOCKED|SKIPPED) die "finish: chunk $(fm_get "$f" id) is $(fm_get "$f" status)";; esac
+  done
+  if no_source_change "$c"; then
+    st=unresolved
+    echo "NOT FIXED: the branch changes no source file (tests and docs only); see report.md" >&2
   fi
   conf_set "$c" stage done
   conf_set "$c" status "$st"
   cmd_lock "$1" release "${2:-}"
 }
 
-cmd_status() { # df status <run-id>: regenerate and print progress.md
-  local rd c out f
-  rd=$(run_dir "$1"); c="$rd/run.conf"
-  cmd_validate "$1"
-  out="Run $1   track: $(conf_get "$c" track)   stage: $(conf_get "$c" stage)   status: $(conf_get "$c" status)"
-  if [ "$(conf_get "$c" status)" = waiting_permission ]; then
-    out="$out
-  needs permission: $(conf_get "$c" waiting_on)"
+cmd_lessons_set() { # df lessons-set <run-id>: install the retro's lessons (cut to 30 lines), append its proposals once
+  local rd sr prop=""
+  rd=$(run_dir "$1"); sr=$(state_root)
+  [ -f "$rd/lessons-new.md" ] || die "lessons-set: $rd/lessons-new.md not found"
+  ! grep -E "$SECRET_RE" "$rd/lessons-new.md" | grep -Fvq '[REDACTED]' || die "lessons-set: lessons look like they hold a secret (old lessons kept)"
+  # Later builders read lessons; holdout scenarios must never reach them.
+  [ -z "$(cmd_canary_scan "$rd/scenarios" "$rd/lessons-new.md")" ] || die "lessons-set: a holdout scenario canary appears in the lessons (old lessons kept)"
+  # Proposals are only collected for a human, so a bad one is dropped (long lines cut), never the lessons with it.
+  if [ -s "$rd/proposals-new.md" ]; then
+    if grep -E "$SECRET_RE" "$rd/proposals-new.md" | grep -Fvq '[REDACTED]'; then echo "df: lessons-set: proposals dropped (they look like they hold a secret)" >&2
+    elif [ -n "$(cmd_canary_scan "$rd/scenarios" "$rd/proposals-new.md")" ]; then echo "df: lessons-set: proposals dropped (a holdout scenario canary appears in them)" >&2
+    else prop=1; fi
   fi
+  # At most 30 lines of 200 bytes: longer input is cut, never refused (one long line once lost every lesson).
+  cut_lines 30 lessons < "$rd/lessons-new.md" | atomic "$sr/lessons.md"
+  if [ -n "$prop" ]; then # this run's latest retro replaces its earlier section
+    { [ ! -f "$sr/proposals.md" ] || H="## $1" awk '$0 == ENVIRON["H"] { skip=1; next } /^## / { skip=0 } !skip' "$sr/proposals.md"
+      printf '## %s\n' "$1"; cut_lines 0 proposals < "$rd/proposals-new.md"; } | atomic "$sr/proposals.md"
+  fi
+}
+cut_lines() { # cut_lines <max lines, 0 = all> <name>: stdin to stdout, lines over 200 bytes cut to 197 + "...", says on stderr what was dropped
+  # Bytes, not characters (LC_ALL=C, so every awk counts the same); a cut drops the last, possibly partial,
+  # UTF-8 character instead of splitting it.
+  LC_ALL=C awk -v max="$1" -v name="$2" '
+    max && NR > max { d++; next }
+    length($0) > 200 { s = substr($0, 1, 197); sub(/[\200-\277]*$/, "", s); sub(/[\300-\377]$/, "", s); $0 = s "..."; k++ }
+    { print }
+    END { if (d) printf "df: lessons-set: %d line(s) over %d dropped from the %s\n", d, max, name > "/dev/stderr"
+          if (k) printf "df: lessons-set: %d line(s) cut to 200 bytes in the %s\n", k, name > "/dev/stderr" }'
+}
+
+cmd_state_hash() { # df state-hash: one hash over the shared per-repo files, to check a role did not write them
+  local sr f; sr=$(state_root)
+  for f in profile.md lessons.md proposals.md metrics.tsv; do
+    if [ -f "$sr/$f" ]; then printf '%s ' "$f"; sha < "$sr/$f"; else echo "$f absent"; fi
+  done | sha
+}
+
+cmd_rundir_hash() { # df rundir-hash <run-id> <allowed-output-file>...: hash of the run files a role could tamper with, except those
+  local rd p a skip
+  # Only the inputs that steer later work: other panel outputs, logs and the lock are written alongside by the orchestrator.
+  rd=$(run_dir "${1:-}"); [ -f "$rd/run.conf" ] || die "no such run: ${1:-}"
+  [ $# -ge 2 ] || die "usage: df rundir-hash <run-id> <allowed-output-file>..."
+  shift
+  ( cd "$rd" && { find scenarios chunks -type f 2>/dev/null || true; for p in spec.md plan.md run.conf questions.md; do [ ! -f "$p" ] || echo "$p"; done; } | sort | while IFS= read -r p; do
+      skip=0
+      for a in "$@"; do [ "$p" != "${a#"$rd"/}" ] || skip=1; done
+      [ $skip = 1 ] || { printf '%s ' "$p"; sha < "$p"; }
+    done | sha )
+}
+
+# router, tester, qa-functional: v0.2 roles, still accepted so an old run can log while it finishes.
+ROLES=" refiner planner qa-author builder checker reviewer retro router tester qa-functional "
+cmd_spawn_log() { # df spawn-log <run-id> <role> <seconds> <tokens> [spawn|resume [key]]: one line per spawn or resume in spawns.tsv
+  local rd v k=${5:-spawn} key=${6:-} now last ts
+  [ $# -ge 4 ] && [ $# -le 6 ] || die "usage: df spawn-log <run-id> <role> <seconds> <tokens> [spawn|resume]"
+  rd=$(run_dir "$1"); [ -f "$rd/run.conf" ] || die "no such run: $1"
+  case "$ROLES" in *" $2 "*) ;; *) die "spawn-log: unknown role '$2'";; esac
+  for v in "$3" "$4"; do case "$v" in -) ;; ''|*[!0-9]*) die "spawn-log: seconds and tokens must be integers or -";; esac; done
+  case "$k" in spawn|resume) ;; *) die "spawn-log: kind must be spawn or resume";; esac
+  now=$(date +%s)
+  if [ -n "$key" ]; then # <pre epoch>:<output file>: a retried tool call repeats it, an infra retry (a new pre) does not
+    [ ! -f "$rd/spawns.tsv" ] || ! R="$2" K="$k" Y="$key" awk -F'\t' '$1 == ENVIRON["R"] && $4 == ENVIRON["K"] && $6 == ENVIRON["Y"] { f = 1 } END { exit !f }' "$rd/spawns.tsv" || return 0
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$2" "$3" "$4" "$k" "$now" "$key" >> "$rd/spawns.tsv"; return 0
+  fi
+  # The same row logged twice within 5 s is one spawn logged twice (a retried tool call), not two spawns.
+  last=$( [ ! -f "$rd/spawns.tsv" ] || tail -1 "$rd/spawns.tsv")
+  ts=$(printf '%s\n' "$last" | cut -f5) # spawns.tsv is writable by roles: the epoch is checked before any arithmetic touches it
+  case "$3$4" in *[!0-9]*) ts="";; esac # unknown usage (-) cannot tell a retry from parallel spawns: always kept
+  case "$last:$ts" in "$2	$3	$4	$k	"*:*[!0-9]*|*:) ;; "$2	$3	$4	$k	"*) [ $((now - ts)) -gt 5 ] || return 0;; esac
+  printf '%s\t%s\t%s\t%s\t%s\n' "$2" "$3" "$4" "$k" "$now" >> "$rd/spawns.tsv"
+}
+
+cmd_bump() { # df bump <run-id> review|qa: add 1 to the round (reset per cycle) and to its total (never reset); prints the round
+  local c r t
+  c="$(run_dir "${1:-}")/run.conf"; [ -f "$c" ] || die "no such run: ${1:-}"
+  case "${2:-}" in review|qa) ;; *) die "usage: df bump <run-id> review|qa";; esac
+  r=$(conf_get "$c" "$2_round"); case "$r" in ''|*[!0-9]*) r=0;; esac
+  t=$(conf_get "$c" "$2_rounds_total"); case "$t" in ''|*[!0-9]*) t=$r;; esac # a v0.2 run has no total yet
+  conf_set "$c" "$2_rounds_total" $((t + 1)); conf_set "$c" "$2_round" $((r + 1))
+  echo $((r + 1))
+}
+
+cmd_estimate() { # df estimate <run-id> <steps> [lanes]: a rough time and agent range, and the run's caps, for the sign-off screen
+  local m c est ma bs x y
+  case "${2:-}" in ''|*[!0-9]*|0) die "usage: df estimate <run-id> <steps> [lanes] (positive integers)";; esac
+  case "${3:-1}" in ''|*[!0-9]*|0) die "usage: df estimate <run-id> <steps> [lanes] (positive integers)";; esac
+  c="$(run_dir "$1")/run.conf"; [ -f "$c" ] || die "no such run: $1"
+  m="$(state_root)/metrics.tsv"; [ -f "$m" ] || m=/dev/null
+  # ponytail: metrics.tsv has no per-stage times, so the v0.2 fixed overhead (12.5 min, 8 agents) is
+  # taken off each finished run and the rest is per step. Record stage times if this proves too coarse.
+  # Defaults: refiner, planner, qa-author, checker, one builder per lane, and one fix or security pass per 3 steps.
+  est=$(ID="$1" N="$2" L="${3:-1}" awk -F'\t' '
+    function med(a, k,   i, j, t) { for (i = 2; i <= k; i++) for (j = i; j > 1 && a[j-1] > a[j]; j--) { t = a[j]; a[j] = a[j-1]; a[j-1] = t }
+      return k % 2 ? a[(k+1)/2] : (a[k/2] + a[k/2+1]) / 2 }
+    function r(x) { return int(x + 0.5) }
+    function up(x) { return x == int(x) ? x : int(x) + 1 }
+    NR > 1 && $1 != ENVIRON["ID"] && ($8 == "done" || $8 == "unresolved") && $3 > 0 && $7 ~ /^[0-9]+$/ {
+      p[++k] = ($7 / 60 - 12.5) / $3; if (p[k] < 1) p[k] = 1
+      if ($9 ~ /^[0-9]+$/) { q[++s] = ($9 - 8) / $3; if (q[s] < 1) q[s] = 1 } }
+    END { n = ENVIRON["N"]; w = up(n / ENVIRON["L"])
+      if (k >= 2) { pm = med(p, k); lo = 10 + n * pm * 0.8; hi = 15 + n * pm * 1.25; src = "based on " k " earlier runs in this repo" }
+      else { lo = 3 + 2 * w; hi = 6 + 4 * w; src = "default figures, no history yet" }
+      ag = (k >= 2 && s >= 2) ? r(8 + n * med(q, s)) : 4 + ENVIRON["L"] + up(n / 3)
+      # The caps are a runaway guard, not the estimate: max(14, 2x the high agents) and max(40 min, 3x the high minutes).
+      ca = 2 * (ag + 2); if (ca < 14) ca = 14; ct = 3 * r(hi); if (ct < 40) ct = 40
+      printf "%d %d estimate: %d-%d min, ~%d-%d agents (%s)\n", ca, ct * 60, r(lo), r(hi), ag, ag + 2, src }' "$m")
+  read -r x y est <<EOF
+$est
+EOF
+  ma=$(conf_get "$c" max_agents); [ -n "$ma" ] || { ma=$x; conf_set "$c" max_agents "$ma"; }
+  bs=$(conf_get "$c" budget_seconds); [ -n "$bs" ] || { bs=$y; conf_set "$c" budget_seconds "$bs"; }
+  printf '%s\ncap: up to %s agents and %s min\n' "$est" "$ma" $(( (bs + 59) / 60 ))
+}
+
+cmd_budget() { # df budget <run-id> [agents-only]: exit 3 when the agent or time cap is reached (call before every spawn)
+  local c rd ma bs used st
+  rd=$(run_dir "${1:-}"); c="$rd/run.conf"; [ -f "$c" ] || die "no such run: ${1:-}"
+  ma=$(conf_get "$c" max_agents); bs=$(conf_get "$c" budget_seconds); st=$(clock_start "$c")
+  if [ -n "$ma" ]; then # resumes keep their agent, so only spawns count
+    used=$( [ ! -f "$rd/spawns.tsv" ] || awk -F'\t' '$4 != "resume"' "$rd/spawns.tsv" | grep -c '' || true)
+    [ "${used:-0}" -lt "$ma" ] || { echo "budget: agents cap reached (${used:-0}/$ma)"; return 3; }
+  fi
+  case "$bs:$st" in *[!0-9:]*) die "budget: budget_seconds or the start time in $c is not a number";; esac
+  if [ -n "$bs" ] && [ -n "$st" ] && [ "${2:-}" != agents-only ]; then
+    used=$(( $(date +%s) - st ))
+    [ "$used" -lt "$bs" ] || { echo "budget: time cap reached ($(( (used + 59) / 60 ))/$(( (bs + 59) / 60 )) min)"; return 3; }
+  fi
+  return 0
+}
+
+# Composite commands take the run id and find the run dir, worktree and files themselves, so
+# the orchestrator spends one short call per event, not a chain of calls with long paths.
+# Exit codes: 1 is always a df error (usage, missing file); a deliberate outcome is never 1.
+run_ctx() { rd=$(run_dir "${1:-}"); c="$rd/run.conf"; [ -f "$c" ] || die "no such run: ${1:-}"; wt=$(conf_get "$c" worktree); }
+in_rd() { case $2 in /*) echo "$2";; *) echo "$1/$2";; esac; } # in_rd <run-dir> <path>: a relative path is relative to the run dir
+step_wt() { # step_wt <step.md> [worktree]: the run worktree or this step's own sub-worktree, never anything else
+  local s id; id=$(basename "$1" .md); s=${2:-$(fm_get "$1" sub_worktree)}
+  case $s in ''|null) echo "$wt"; return 0;; esac
+  [ "$s" = "$wt" ] || [ "$s" = "$wt-c$id" ] || die "step $id: worktree '$s' is neither the run's nor its own sub-worktree"
+  echo "$s"
+}
+run_wt_ok() { # run_wt_ok <run.conf> <path>: the path is the run worktree or one of its step sub-worktrees
+  local w; w=$(conf_get "$1" worktree)
+  [ "$2" = "$w" ] && return 0
+  case $2 in "$w-c"*) printf '%s\n' "${2#"$w-c"}" | grep -Eqx '[0-9]{1,3}|FX-[0-9]+';; *) return 1;; esac
+}
+beat() { # beat <run-dir>: a role or a command run just finished, so the session is working: move the heartbeat, keep its session
+  [ -f "$1/lock" ] || return 0
+  printf 'session=%s\nheartbeat=%s\n' "$(sed -n 's/^session=//p' "$1/lock")" "$(date +%s)" | atomic "$1/lock"
+}
+mark_epoch() { date +%s | atomic "$1/spawn-epoch"; } # not hashed for read-only roles; one pre may serve several spawns (a wave)
+elapsed() { local e; e=$(cat "$1/spawn-epoch" 2>/dev/null || true); case $e in ''|*[!0-9]*) echo -;; *) echo $(( $(date +%s) - e ));; esac; }
+spawn_record() { # spawn_record <run-id> <role> <seconds-or-> <tokens> <kind> <output-file>: seconds measured from the last pre when there was one
+  local rd s e; rd=$(run_dir "$1"); e=$(cat "$rd/spawn-epoch" 2>/dev/null || true)
+  beat "$rd"
+  case $e in ''|*[!0-9]*) cmd_spawn_log "$1" "$2" "$3" "$4" "$5";; *) cmd_spawn_log "$1" "$2" "$(elapsed "$rd")" "$4" "$5" "$e:$(basename "$6")";; esac
+}
+ro_hashes() { # ro_hashes <run-id> <worktree> <allowed-file>...: what a read-only role must leave as it is
+  local id=$1 w=$2; shift 2
+  echo "worktree $(cmd_snapshot "$w")"; echo "run files $(cmd_rundir_hash "$id" "$@")"; echo "shared files $(cmd_state_hash)"
+}
+ro_key() { local r=${2#"$1"/}; printf '%s' "$r" | tr '/' '%'; } # ro_key <run-dir> <abs path>: the full relative path, one file name
+ro_take() { # ro_take <run-id> <worktree> <allowed-file>...: prints the digest the orchestrator hands back to post or check-end
+  local id=$1 w=$2 rd f k; local -a fs=(); rd=$(run_dir "$id"); shift 2
+  for f in "$@"; do fs+=("$(in_rd "$rd" "$f")"); done
+  mkdir -p "$rd/ro"; k="$rd/ro/$(ro_key "$rd" "${fs[0]}")"
+  { printf 'wt\t%s\n' "$w"; printf 'head\t%s\n' "$(git -C "$w" rev-parse -q --verify HEAD 2>/dev/null || true)"
+    if [ -z "$(git -C "$w" status --porcelain 2>/dev/null)" ]; then printf 'clean\tyes\n'; else printf 'clean\tno\n'; fi
+    for f in "${fs[@]}"; do printf 'file\t%s\n' "$f"; done; ro_hashes "$id" "$w" "${fs[@]}"; } > "$k.tmp"
+  mv "$k.tmp" "$k"
+  # The digest lives in the orchestrator's context, which no role can write: a role that rewrites the stored hashes is caught.
+  echo "ro: $(sha < "$k")"
+}
+ro_check() { # ro_check <run-id> <output-file> <digest>: 0 when the role changed nothing; else says what, undoes a worktree change, returns 1
+  local rd k w h l ch="" cl; local -a fs=(); rd=$(run_dir "$1"); k="$rd/ro/$(ro_key "$rd" "$2")"
+  [ -f "$k" ] || { echo "read-only violation: no hashes were stored for $(basename "$2") (df pre with its output files first)"; return 1; }
+  [ -n "${3:-}" ] || { echo "read-only violation: no digest given for $(basename "$2") (pass the ro: digest that df pre printed)"; return 1; }
+  if [ "$(sha < "$k")" != "$3" ]; then ch="stored hashes"
+  else
+    w=$(sed -n 's/^wt	//p' "$k")
+    while IFS= read -r l; do case $l in "file	"*) fs+=("${l#file	}");; esac; done < "$k"
+    ch=$(ro_hashes "$1" "$w" "${fs[@]}" | while IFS= read -r l; do grep -qxF -- "$l" "$k" || echo "${l% *}"; done | tr '\n' ',' | sed 's/,$//')
+  fi
+  [ -n "$ch" ] || { rm -f "$k"; return 0; }
+  w=$(sed -n 's/^wt	//p' "$k"); h=$(sed -n 's/^head	//p' "$k"); cl=$(sed -n 's/^clean	//p' "$k")
+  printf -- '- critical integrity: %s changed while the read-only role behind %s ran\n' "$ch" "$(basename "$2")" >> "$rd/log.md"
+  # Undo it, so a retry starts from the tree the role was given: only a run worktree that was clean, never another folder.
+  if [ "$ch" = worktree ] && [ "$cl" = yes ] && run_wt_ok "$rd/run.conf" "$w" && git -C "$w" rev-parse -q --verify "$h^{commit}" >/dev/null 2>&1; then
+    git -C "$w" reset -q --hard "$h"; git -C "$w" clean -fdq
+    echo "read-only violation: the worktree changed while the role behind $(basename "$2") ran; it is back at $h"
+  else
+    printf '%s changed while the read-only role behind %s ran\n' "$ch" "$(basename "$2")" > "$rd/ro-violation"
+    echo "read-only violation: the $ch changed while the role behind $(basename "$2") ran; pause (resume clears it)"
+  fi
+  rm -f "$k"; return 1
+}
+ro_blocked() { [ ! -f "$1/ro-violation" ] || { echo "read-only violation still open: $(cat "$1/ro-violation"); pause"; return 0; }; return 1; }
+
+cmd_pre() { # df pre <run-id> <session-id> [--wt <worktree>] [allowed-output-file...]: before a spawn or resume; exit 3 at a cap
+  local rd c wt id=${1:-} s=${2:-}
+  [ $# -ge 2 ] || die "usage: df pre <run-id> <session-id> [--wt <worktree>] [allowed-output-file...]"
+  run_ctx "$id"; shift 2
+  if [ "${1:-}" = --wt ]; then [ $# -ge 2 ] || die "pre: --wt needs a path"; wt=$2; shift 2; fi
+  ! ro_blocked "$rd" || return 10
+  [ $# -eq 0 ] || run_wt_ok "$c" "$wt" || die "pre: --wt must be the run worktree or one of its step sub-worktrees"
+  mark_epoch "$rd"
+  # Output files given: the role is read-only; df post compares these hashes when it returns.
+  [ $# -eq 0 ] || ro_take "$id" "$wt" "$@"
+  cmd_lock "$id" refresh "$s"
+  cmd_budget "$id" # last, so the retro (which ignores exit 3) still gets its hashes and lock
+}
+
+READONLY_ROLES=" checker reviewer retro "
+cmd_post() { # df post <run-id> <role> <seconds|-> <tokens> <spawn|resume> <output-file> <log line> [digest]: exit 1 no valid verdict, 10 a read-only role changed something
+  local rd c wt out
+  [ $# -eq 7 ] || [ $# -eq 8 ] || die "usage: df post <run-id> <role> <seconds> <tokens> <spawn|resume> <output-file> <log line> [digest from pre]"
+  run_ctx "$1"; out=$(in_rd "$rd" "$6")
+  spawn_record "$1" "$2" "$3" "$4" "$5" "$out"
+  printf '%s\n' "$7" | head -1 >> "$rd/log.md"
+  case "$READONLY_ROLES" in *" $2 "*) ro_check "$1" "$out" "${8:-}" || return 10;; esac
+  [ -f "$out" ] || { echo "post: no output file $6" >&2; return 1; }
+  cmd_verdict "$out"
+}
+
+signoff_usage() { die "usage: df signoff <run-id> <merge|local|pr|branch|no merge> [ship-base]"; }
+cmd_signoff() { # df signoff <run-id> <merge|local|pr|branch|no merge> [ship-base]: record the approval, pin the profile, move the draft steps in
+  local rd c wt id=${1:-} w m f am=yes
+  [ $# -ge 2 ] || signoff_usage
+  # `strict`: stop, rather than finish with the open minor problems listed, when the last check round leaves some.
+  if [ "${!#}" = strict ] && [ $# -ge 3 ]; then am=no; set -- "${@:1:$(($# - 1))}"; fi
+  run_ctx "$id"; w=$2; shift 2
+  if [ "$w" = no ] && [ "${1:-}" = merge ]; then w="no merge"; shift; fi
+  case $w in merge|local|pr|branch) m=$w;; "no merge"|no-merge) m=pr;; *) signoff_usage;; esac
+  [ $# -le 1 ] || signoff_usage
+  if [ -n "${1:-}" ]; then
+    [ "$(git check-ref-format --branch "$1" 2>/dev/null)" = "$1" ] && case $1 in -*) false;; esac || die "signoff: invalid branch name '$1'"
+    conf_set "$c" ship_base "$1"
+  fi
+  conf_set "$c" ship_mode "$m"; conf_set "$c" accept_minor "$am"
+  printf -- '- signoff: approved; ending %s%s\n' "$m" "${1:+ into $1}" >> "$rd/log.md"
+  for f in "$rd"/chunks-draft/*.md; do [ ! -e "$f" ] || mv -f "$f" "$rd/chunks/"; done
+  cmd_profile_pin "$id"
+  cmd_validate "$id"
+  conf_set "$c" stage build
+  echo "signed off: ending $m${1:+ into $1}; $(ls "$rd"/chunks/*.md 2>/dev/null | wc -l | tr -d ' ') steps"
+}
+
+cmd_steps() { # df steps <run-id>: the sign-off step list, read from the step files in the order Build runs them, then the estimate
+  local rd c wt d t f r=0 ids i line n=0 lanes=1 k
+  run_ctx "${1:-}"; d="$rd/chunks-draft"; ls "$d"/*.md >/dev/null 2>&1 || d="$rd/chunks"
+  ls "$d"/*.md >/dev/null 2>&1 || die "steps: no step files in $d"
+  t=$(mktemp -d); mkdir "$t/chunks"; cp "$d"/*.md "$t/chunks/"
+  for f in "$t"/chunks/*.md; do
+    [ "$(fm_get "$f" id)" = "$(basename "$f" .md)" ] || { rm -rf "$t"; die "steps: $(basename "$f") says id '$(fm_get "$f" id)'; the id must be the file name"; }
+    fm_set "$f" status pending; n=$((n + 1))
+  done
+  while ids=$(wave_in "$t") && [ -n "$ids" ]; do
+    r=$((r + 1)); line=""; k=0
+    for i in $ids; do
+      f="$t/chunks/$i.md"; k=$((k + 1))
+      [ -f "$f" ] && [ "$(fm_get "$f" status)" = pending ] || { rm -rf "$t"; die "steps: wave named step $i, which is not pending"; }
+      line="$line${line:+ + }step $i: $(fm_get "$f" title) ($(fm_get "$f" size))"; fm_set "$f" status PASS
+    done
+    [ $k -le $lanes ] || lanes=$k
+    if [ $k -gt 1 ]; then echo "$r. $line, side by side"; else echo "$r. $line"; fi
+  done
+  for f in "$t"/chunks/*.md; do [ "$(fm_get "$f" status)" = PASS ] || echo "never runs (its dependencies cannot finish): step $(fm_get "$f" id)"; done
+  rm -rf "$t"
+  cmd_estimate "$1" "$n" "$lanes" | tee -a "$rd/log.md"
+}
+
+cmd_step_start() { # df step-start <run-id> <step-id> <session-id> [worktree]: exit 2 lock held elsewhere, 3 a cap, 8 attempts used up (step reset and BLOCKED)
+  local rd c wt st a ma base w
+  [ $# -eq 3 ] || [ $# -eq 4 ] || die "usage: df step-start <run-id> <step-id> <session-id> [worktree]"
+  run_ctx "$1"; st="$rd/chunks/$2.md"; [ -f "$st" ] || die "step-start: no step $2"
+  w=$(step_wt "$st" "${4:-}"); [ -d "$w" ] || die "step-start: no worktree $w"
+  case "$(fm_get "$st" status)" in pending|running) ;; *) die "step-start: step $2 is $(fm_get "$st" status)";; esac
+  a=$(fm_get "$st" attempts); case $a in ''|*[!0-9]*) a=0;; esac
+  ma=$(conf_get "$c" max_attempts); case $ma in ''|*[!0-9]*) ma=3;; esac
+  base=$(fm_get "$st" base_sha); git -C "$w" rev-parse -q --verify "$base^{commit}" >/dev/null 2>&1 || base=""
+  cmd_lock "$1" refresh "$3" # before any reset: a run live in another session is never touched
+  # A repeated call before the builder wrote anything is the same attempt, not a new one.
+  if [ "$(fm_get "$st" status)" = running ] && [ "$a" -ge 1 ] && [ -n "$base" ] && [ ! -f "$rd/panel/$2-a$a-builder.md" ]; then
+    cmd_budget "$1" || return $?; mark_epoch "$rd"
+    printf 'base: %s\nattempt: %s of %s\nworktree: %s\nbuilder output: %s\nchecks: panel/%s-a%s-checks.md\n' "$base" "$a" "$ma" "$w" "$rd/panel/$2-a$a-builder.md" "$2" "$a"
+    return 0
+  fi
+  if [ "$a" -ge "$ma" ]; then
+    [ -z "$base" ] || { git -C "$w" reset -q --hard "$base"; git -C "$w" clean -fdq; } # never -x
+    fm_set "$st" status BLOCKED; printf -- '- step %s BLOCKED after %s attempts\n' "$2" "$a" >> "$rd/log.md"
+    echo "step-start: step $2 BLOCKED after $a attempts (its files are back at its base)"; return 8
+  fi
+  cmd_budget "$1" || return $?
+  mark_epoch "$rd"
+  if [ "$a" -eq 0 ] || [ -z "$base" ]; then base=$(git -C "$w" rev-parse HEAD); fm_set "$st" base_sha "$base"
+  else git -C "$w" reset -q "$base"; fi # a failed attempt's commit is undone; its files stay for the next attempt
+  a=$((a + 1)); fm_set "$st" attempts "$a"; fm_set "$st" status running
+  case $2 in
+    FX-*) [ "$a" -gt 1 ] || echo "milestone: [df $1] fixing: $(fm_get "$st" title)";;
+    *) [ "$a" -gt 1 ] || [ -n "$(grep -l '^status: PASS' "$rd"/chunks/*.md 2>/dev/null)" ] ||
+         echo "milestone: [df $1] building step 1 of $(ls "$rd"/chunks/*.md | grep -vc '/FX-'): $(fm_get "$st" title)";;
+  esac
+  printf 'base: %s\nattempt: %s of %s\nworktree: %s\nbuilder output: %s\nchecks: panel/%s-a%s-checks.md\n' "$base" "$a" "$ma" "$w" "$rd/panel/$2-a$a-builder.md" "$2" "$a"
+}
+
+cmd_step_end() { # df step-end <run-id> <step-id> <lane> <agent-id> <tokens> <spawn|resume> <title> [worktree]
+  # exit 0 PASS, 2 blocking, 4 infra or no valid verdict, 5 a hidden scenario leaked, 6 a command that failed before the run failed again,
+  # 7 checks passed but the step is risk: high (security review next), 9 the builder answered TOO_BIG or BLOCKED
+  local rd c wt st a p w v rc line title f m passed=0 all=0 note=""
+  [ $# -eq 7 ] || [ $# -eq 8 ] || die "usage: df step-end <run-id> <step-id> <lane> <agent-id> <tokens> <spawn|resume> <title> [worktree]"
+  run_ctx "$1"; st="$rd/chunks/$2.md"; [ -f "$st" ] || die "step-end: no step $2"
+  case $3 in ''|*[!0-9]*) die "step-end: lane must be a number";; esac
+  case $4 in ''|*[[:space:][:cntrl:]]*) die "step-end: agent id must be one word";; esac
+  case $6 in spawn|resume) ;; *) die "step-end: kind must be spawn or resume";; esac
+  w=$(step_wt "$st" "${8:-}"); a=$(fm_get "$st" attempts)
+  case $a in ''|0|*[!0-9]*) die "step-end: step $2 has not started (df step-start)";; esac
+  p="$rd/panel/$2-a$a"; title=$7; [ -n "$title" ] || title=$(fm_get "$st" title)
+  spawn_record "$1" builder - "$5" "$6" "$p-builder.md"
+  # Idempotent, so a retried call changes nothing: the lane's step count is the steps this agent built.
+  fm_set "$st" builder_agent "$4"; conf_set "$c" "lane$3_agent" "$4"
+  m=0; for f in "$rd"/chunks/*.md; do [ "$(fm_get "$f" builder_agent)" != "$4" ] || m=$((m + 1)); done
+  conf_set "$c" "lane$3_steps" "$m"; [ "$m" -lt 6 ] || note="; lane $3's builder has done $m steps: spawn a fresh one for its next step"
+  if ! v=$(cmd_verdict "$p-builder.md" 2>/dev/null); then
+    printf -- '- step %s attempt %s: builder %s, no valid verdict\n' "$2" "$a" "$6" >> "$rd/log.md"
+    echo "step-end: INFRA no valid verdict in panel/$2-a$a-builder.md: df pre, retry the builder (not an attempt), then step-end again"; return 4
+  fi
+  case $v in TOO_BIG|BLOCKED)
+    printf -- '- step %s attempt %s: builder says %s\n' "$2" "$a" "$v" >> "$rd/log.md"
+    echo "step-end: builder says $(grep -v '^[[:space:]]*$' "$p-builder.md" | tail -1 | sed 's/^VERDICT: //')"; return 9;;
+  esac
+  rc=0; line=$( (cmd_step_check "$w" "$st" "$p-builder.md" "$p-checks.md" "df(step $2): $title") ) || rc=$?
+  printf -- '- step %s attempt %s: builder %s %s, %s\n' "$2" "$a" "$6" "$v" "${line#step-check: }" >> "$rd/log.md"
+  case $rc in
+    0) ;;
+    1) case $line in "step-check: FAIL"*) echo "step-end: ${line#step-check: } (attempt $a)$note"; return 2;; esac; return 1;;
+    4|5|6) echo "step-end: ${line#step-check: }"; return $rc;;
+    *) return 1;;
+  esac
+  if [ "$(fm_get "$st" risk)" = high ]; then echo "step-end: SECURITY checks passed; risk: high, so the security review is next (panel/$2-a$a-security.md)$note"; return 7; fi
+  fm_set "$st" status PASS
+  for f in "$rd"/chunks/*.md; do all=$((all + 1)); [ "$(fm_get "$f" status)" != PASS ] || passed=$((passed + 1)); done
+  echo "step-end: PASS step $2 on attempt $a ($passed of $all steps done)$note"
+  echo "milestone: [df $1] step $passed of $all done"
+}
+
+e2e_configured() { [ -f "$(state_root)/profile.md" ] && [ -n "$(fm_get "$(state_root)/profile.md" e2e_cmd)" ]; }
+
+cmd_check_start() { # df check-start <run-id> <session-id>: exit 2 lock held elsewhere, 3 a cap, 8 a step is BLOCKED or SKIPPED (pause)
+  local rd c wt f n r out
+  [ $# -eq 2 ] || die "usage: df check-start <run-id> <session-id>"
+  run_ctx "$1"
+  for f in "$rd"/chunks/*.md; do
+    [ -e "$f" ] || continue
+    case "$(fm_get "$f" status)" in BLOCKED|SKIPPED) echo "check-start: step $(fm_get "$f" id) is $(fm_get "$f" status); pause"; return 8;; esac
+  done
+  cmd_lock "$1" refresh "$2"
+  ! ro_blocked "$rd" || return 10
+  # A round that started and never ended (a crash, an infra retry) is redone, not counted again.
+  n=$(conf_get "$c" check_round_open); case $n in ''|*[!0-9]*) n="";; esac
+  r=${n:-$(( $(conf_get "$c" review_round) + 1 ))}
+  # Re-checking a fix that is already applied is exempt from the time cap (not the agent cap):
+  # stopping there leaves finished work unmerged.
+  if [ "$r" -gt 1 ]; then cmd_budget "$1" agents-only || return $?; else cmd_budget "$1" || return $?; fi
+  conf_set "$c" stage check
+  cmd_validate "$1"
+  [ -n "$n" ] || { n=$(cmd_bump "$1" review); conf_set "$c" check_round_open "$n"; }
+  out="$rd/panel/check-r$n.md"
+  conf_set "$c" check_pass_sha ""; conf_set "$c" accepted_round ""
+  mark_epoch "$rd"
+  ro_take "$1" "$wt" "$out" # after every write above: they are part of the hash
+  echo "milestone: [df $1] final check, round $n"
+  echo "round: $n of $(conf_get "$c" max_review_rounds)"; echo "output: $out"
+  [ "$n" -le 1 ] || echo "fix diff: git diff $(conf_get "$c" "check_head_r$((n - 1))")..HEAD"
+}
+
+cmd_check_end() { # df check-end <run-id> <agent-id> <tokens> <spawn|resume> <digest from check-start>
+  # exit 0 nothing blocking (the pass is recorded), 2 blocking (a fix round is left), 3 blocking and no fix round left (pause),
+  # 4 infra or no valid verdict, 6 a command that failed before the run failed again (judge, then check-gate),
+  # 7 nothing blocking so far: run the full app tests, then check-gate, 10 the checker changed something
+  local rd c wt n out su sl v rc g bad=0 judge="" mx l
+  [ $# -eq 5 ] || [ $# -eq 4 ] || die "usage: df check-end <run-id> <agent-id> <tokens> <spawn|resume> <digest>"
+  case $2 in ''|*[[:space:][:cntrl:]]*) die "check-end: agent id must be one word";; esac
+  run_ctx "$1"; n=$(conf_get "$c" check_round_open)
+  case $n in ''|*[!0-9]*)
+    # Run again after it finished: the same output and exit code, nothing redone.
+    l=$(conf_get "$c" check_last_round)
+    case $l in ''|*[!0-9]*) die "check-end: no check round is open (df check-start)";; esac
+    [ -f "$rd/panel/check-r$l.end" ] || die "check-end: no check round is open (df check-start)"
+    cat "$rd/panel/check-r$l.end"; return "$(conf_get "$c" check_end_rc)";;
+  esac
+  out="$rd/panel/check-r$n.md"; su="$rd/panel/check-r$n-suite.md"; sl="$rd/panel/check-r$n-suite.log"
+  spawn_record "$1" checker - "$3" "$4" "$out"
+  if ! l=$(ro_check "$1" "$out" "${5:-}"); then
+    echo "check-end: READ-ONLY $l: df check-start, then spawn a fresh checker"; return 10
+  fi
+  conf_set "$c" checker_agent "$2"
+  if ! v=$(cmd_verdict "$out" 2>/dev/null); then
+    printf -- '- check round %s: checker %s, no valid verdict\n' "$n" "$4" >> "$rd/log.md"
+    echo "check-end: INFRA no valid verdict in panel/check-r$n.md: df check-start (same round), retry the checker, then check-end again"; return 4
+  fi
+  [ "$(conf_get "$c" cmd_pin)" = "$(cmd_pin_of "$c")" ] || { echo "check-end: INFRA env.commands or test_cmd changed since sign-off"; return 4; }
+  : > "$su"; : > "$sl"
+  run_cmds "$rd" "$wt" "$su" "$sl"; beat "$rd"
+  e2e_configured || echo "e2e: not configured" > "$rd/panel/e2e-r$n.md"
+  rc=0; g=$( (cmd_gate "$out" "$su") ) || rc=$?
+  [ -n "$g" ] || return 1 # gate refused (an unknown severity word): its message is on stderr
+  conf_set "$c" "check_head_r$n" "$(git -C "$wt" rev-parse HEAD)"
+  printf -- '- check round %s: checker %s %s, %s blocking of %s findings, %s failing commands\n' "$n" "$4" "$v" "${g%% *}" "${g##* }" "$bad" >> "$rd/log.md"
+  l=0; check_round_result "$1" "$n" "$g" "$judge" "$out" "$su" > "$rd/panel/check-r$n.end" || l=$?
+  conf_set "$c" check_last_round "$n"; conf_set "$c" check_end_rc "$l"; conf_set "$c" check_round_open ""; conf_set "$c" check_judge "${judge# }"
+  cat "$rd/panel/check-r$n.end"; return "$l"
+}
+check_round_result() { # check_round_result <run-id> <round> <gate line> <judge> <files...>: one summary, the failing items, the exit code; records the pass
+  local id=$1 n=$2 g=$3 judge=$4 rd c wt mx; shift 4; run_ctx "$id"
+  mx=$(conf_get "$c" max_review_rounds); case $mx in ''|*[!0-9]*) mx=3;; esac
+  if [ "${g%% *}" -gt 0 ] && [ "$n" -ge "$mx" ] && [ -z "$judge" ] && [ "$(conf_get "$c" accept_minor)" = yes ] &&
+     [ "$(conf_get "$c" ship_pin)" = "$(ship_pin_of "$c")" ] && ! check_items "$@" | grep -Evq '^  medium '; then
+    # Agreed at sign-off: after the last round, known minor problems are listed, not a reason to stop.
+    if e2e_configured && [ ! -f "$rd/panel/e2e-r$n.md" ]; then
+      echo "check-end: only minor problems left: run the full app tests now (e2e.md), then df check-gate"; check_items "$@"; return 7
+    fi
+    if accept_record "$id" "$n" "$@" >/dev/null; then
+      echo "check-end: PASS round $n WITH KNOWN PROBLEMS (agreed at sign-off): list them first in the final note"
+      echo "milestone: [df $id] final check passed with known minor problems"
+      check_items "$@"; return 0
+    fi
+  fi
+  if [ "${g%% *}" -gt 0 ]; then
+    if [ "$n" -ge "$mx" ]; then echo "check-end: FAIL round $n of $mx: ${g%% *} blocking and no fix round left; pause"
+    else echo "check-end: FAIL round $n of $mx: ${g%% *} blocking"; echo "milestone: [df $id] the check found ${g%% *} problem(s) to fix"; fi
+    check_items "$@"; [ "$n" -ge "$mx" ] && return 3 || return 2
+  fi
+  [ -z "$judge" ] || { echo "check-end: JUDGE command(s)$judge failed, and also failed before the run: read panel/check-r$n-suite.log, then df check-gate"; check_items "$@"; return 6; }
+  if e2e_configured; then echo "check-end: nothing blocking so far in round $n: run the full app tests now (e2e.md), then df check-gate"; check_items "$@"; return 7; fi
+  conf_set "$c" check_pass_sha "$(git -C "$wt" rev-parse HEAD)"
+  echo "check-end: PASS round $n: nothing blocking, suite green; full app tests: not configured"
+  echo "milestone: [df $id] final check passed"
+  check_items "$@"
+}
+cmd_check_gate() { # df check-gate <run-id>: gate the last round again after judging a command or running the full app tests; records the pass
+  # exit 0 pass recorded, 2 blocking (a fix round is left), 3 blocking and no fix round left, 7 run the full app tests first
+  local rd c wt n g rc=0 su e
+  run_ctx "${1:-}"; n=$(conf_get "$c" check_last_round); beat "$rd" # the full app tests or the judging just ran
+  case $n in ''|*[!0-9]*) die "check-gate: no check round has ended (df check-end)";; esac
+  [ -z "$(conf_get "$c" check_round_open)" ] || die "check-gate: round $(conf_get "$c" check_round_open) is still open (df check-end)"
+  su="$rd/panel/check-r$n-suite.md"; e="$rd/panel/e2e-r$n-findings.md"
+  if e2e_configured && [ ! -f "$rd/panel/e2e-r$n.md" ]; then echo "check-gate: run the full app tests first (e2e.md), saved to panel/e2e-r$n.md"; return 7; fi
+  set -- "$rd/panel/check-r$n.md" "$su"; [ ! -f "$e" ] || set -- "$@" "$e"
+  g=$( (cmd_gate "$@") ) || rc=$?
+  [ -n "$g" ] || return 1
+  conf_set "$c" check_judge "" # the orchestrator judged the commands before calling this
+  # Recorded like check-end's, so df accept and a replayed check-end see this result.
+  rc=0; gate_result "$rd" "$n" "$g" "$@" > "$rd/panel/check-r$n.end" || rc=$?
+  conf_set "$c" check_end_rc "$rc"; cat "$rd/panel/check-r$n.end"; return $rc
+}
+gate_result() { # gate_result <run-dir> <round> <gate line> <files...>
+  local rd=$1 n=$2 g=$3; shift 3
+  if [ "${g%% *}" -gt 0 ]; then check_round_result "$(basename "$rd")" "$n" "$g" "" "$@"; return $?; fi
+  conf_set "$rd/run.conf" check_pass_sha "$(git -C "$(conf_get "$rd/run.conf" worktree)" rev-parse HEAD)"
+  echo "check-gate: PASS round $n: nothing blocking"; echo "milestone: [df $(basename "$rd")] final check passed"
+}
+accept_record() { # accept_record <run-id> <round> <files...>: record a pass with open findings when only medium ones are open; else say why (exit 2)
+  local id=$1 n=$2 rd c wt h bad f; shift 2; run_ctx "$id"
+  h=$(git -C "$wt" rev-parse HEAD)
+  [ "$h" = "$(conf_get "$c" "check_head_r$n")" ] || { echo "accept: no: the branch changed since that round was checked"; return 2; }
+  # Only medium findings can be accepted: nothing critical or high, no failing hidden check, no failing command.
+  bad=$(check_items "$@" | grep -Ev '^  medium ' || true)
+  [ -z "$bad" ] || { echo "accept: no: more than known minor problems is open:"; printf '%s\n' "$bad"; return 2; }
+  for f in "$rd"/chunks/*.md; do [ -e "$f" ] || continue; [ "$(fm_get "$f" status)" = PASS ] || { echo "accept: no: step $(fm_get "$f" id) is $(fm_get "$f" status)"; return 2; }; done
+  conf_set "$c" check_pass_sha "$h"; conf_set "$c" accepted_round "$n"
+  { printf -- '- accepted with open findings from check round %s:\n' "$n"; check_items "$@"; } >> "$rd/log.md"
+}
+cmd_accept() { # df accept <run-id>: the user said yes to merging with the open findings of the last check round; exit 2 when that is not allowed
+  local rd c wt n
+  run_ctx "${1:-}"; n=$(conf_get "$c" check_last_round)
+  case $n in ''|*[!0-9]*) echo "accept: no: the final check has not finished a round"; return 2;; esac
+  [ -z "$(conf_get "$c" check_round_open)" ] || { echo "accept: no: check round $(conf_get "$c" check_round_open) has not ended"; return 2; }
+  [ "$(conf_get "$c" check_end_rc)" = 3 ] || [ "$(conf_get "$c" check_end_rc)" = 2 ] || { echo "accept: no: the last round did not end with open findings"; return 2; }
+  if e2e_configured && [ ! -f "$rd/panel/e2e-r$n.md" ]; then echo "accept: no: the full app tests have not run (e2e.md, then df check-gate)"; return 2; fi
+  [ -z "$(conf_get "$c" check_judge)" ] || { echo "accept: no: command(s) $(conf_get "$c" check_judge) failed as before the run and are not judged yet (judge them, then df check-gate)"; return 2; }
+  [ "$(conf_get "$c" ship_pin)" = "$(ship_pin_of "$c")" ] || { echo "accept: no: ship_mode, ship_base, base_ref or max_review_rounds changed since sign-off"; return 2; }
+  set -- "$rd/panel/check-r$n.md" "$rd/panel/check-r$n-suite.md"; [ ! -f "$rd/panel/e2e-r$n-findings.md" ] || set -- "$@" "$rd/panel/e2e-r$n-findings.md"
+  accept_record "$(basename "$rd")" "$n" "$@" || return $?
+  echo "accept: recorded. Known problems merged as they are:"; check_items "$@"
+}
+check_items() { awk -v mode=list "$FINDINGS_AWK" "$@"; } # the blocking findings and the failed or invalid scenarios, one line each
+cmd_metrics() { # df metrics <run-id>: one row per run in <state-root>/metrics.tsv, replaced on re-run
+  local rd c m f chunks=0 att=0 a row sp=0 rs=0 tok=- rr qr
+  rd=$(run_dir "$1"); c="$rd/run.conf"; m="$(state_root)/metrics.tsv"
+  [ -f "$c" ] || die "no such run: $1"
+  case "$(clock_start "$c")" in ''|*[!0-9]*) die "metrics: started in $c is not a number";; esac
+  for f in "$rd"/chunks/*.md; do
+    [ -e "$f" ] || continue
+    chunks=$((chunks + 1)); a=$(fm_get "$f" attempts); case "$a" in ''|*[!0-9]*) a=0;; esac; att=$((att + a))
+  done
+  if [ -f "$rd/spawns.tsv" ]; then # a row without a kind (v0.2) is a spawn
+    read -r sp rs tok <<EOF
+$(awk -F'\t' '{ if ($4 == "resume") r++; else s++ } $3 ~ /^[0-9]+$/ { t += $3; k = 1 } END { print s+0, r+0, (k ? t : "-") }' "$rd/spawns.tsv")
+EOF
+  fi
+  rr=$(conf_get "$c" review_rounds_total); [ -n "$rr" ] || rr=$(conf_get "$c" review_round)
+  qr=$(conf_get "$c" qa_rounds_total); [ -n "$qr" ] || qr=$(conf_get "$c" qa_round)
+  row=$(printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' "$1" "$(conf_get "$c" track)" "$chunks" "$att" \
+    "$rr" "$qr" "$(( $(date +%s) - $(clock_start "$c") ))" "$(conf_get "$c" status)" "$sp" "$tok" "$rs")
+  # Rows written before v0.3 have 8 or 10 columns; they are kept as they are under the new header.
+  { printf 'run\ttrack\tchunks\tattempts\treview_rounds\tqa_rounds\tseconds\toutcome\tspawns\ttokens\tresumes\n'
+    [ -f "$m" ] && tail -n +2 "$m" | grep -v "^$1	" || true
+    printf '%s\n' "$row"; } | atomic "$m"
+  # Resumed and background agents often report no usage: a partial sum is a floor, never stated as the total.
+  local miss=0
+  [ ! -f "$rd/spawns.tsv" ] || miss=$(awk -F'\t' '$3 !~ /^[0-9]+$/ { m++ } END { print m+0 }' "$rd/spawns.tsv")
+  if [ "$tok" = - ]; then tok="unknown"; elif [ "$miss" -gt 0 ]; then tok="at least $tok (not reported for $miss of $((sp + rs)) agent runs)"; fi # the orchestrator's own tokens are not in spawns.tsv
+  echo "time: $(( ($(date +%s) - $(clock_start "$c") + 30) / 60 )) min from sign-off; agents: $sp started, $rs resumed; agent tokens, excluding this conversation: $tok"
+}
+
+# Parallel builders (off by default). A wave is the pending chunks whose dependencies all
+# passed and whose write globs (scope + touches_tests) are pairwise disjoint, at most 3.
+# ponytail: overlap is "one glob's literal prefix is a prefix of the other's"; conservative,
+# so it can serialise chunks that would not really collide.
+globs_of() { # literal prefix of each write glob; a glob that starts with a wildcard is __ALL__
+  # Only the YAML list's outer brackets are stripped: [ab] inside a glob is a character class.
+  # A chunk with no write globs at all may write anywhere, so it overlaps everything.
+  { fm_get "$1" scope; fm_get "$1" touches_tests; } | sed 's/^ *\[//; s/\] *$//' | tr ',' '\n' | sed 's/^ *//; s/ *$//' |
+    grep -v '^$' | sed 's/[][*?].*//; s/^$/__ALL__/' | grep . || echo __ALL__; }
+overlaps() { # overlaps "<prefixes a>" "<prefixes b>"
+  local p q
+  for p in $1; do for q in $2; do
+    [ "$p" != __ALL__ ] && [ "$q" != __ALL__ ] || return 0
+    case "$q" in "$p"*) return 0;; esac
+    case "$p" in "$q"*) return 0;; esac
+  done; done
+  [ -z "$1" ] || [ -z "$2" ]
+}
+cmd_wave() { wave_in "$(run_dir "${1:-}")"; } # df wave <run-id>: the step ids to run next, one per line (several: in parallel)
+wave_in() { # wave_in <run-dir>
+  local rd=$1 f d ok n=0 taken="" mine st max=3
+  # A plan of at most 3 steps runs one step at a time: the setup of parallel copies costs more than it saves.
+  [ "$(ls "$rd"/chunks/*.md 2>/dev/null | wc -l)" -gt 3 ] || max=1
+  for f in "$rd"/chunks/*.md; do
+    [ -e "$f" ] || continue
+    [ "$(fm_get "$f" status)" = pending ] || continue
+    [ "$(fm_get "$f" serial)" != yes ] || continue
+    ok=1
+    for d in $(fm_get "$f" depends_on | tr -d '[]' | tr ',' ' '); do
+      st=$(fm_get "$rd/chunks/$d.md" status 2>/dev/null || true)
+      [ "$st" = PASS ] || ok=0
+    done
+    [ $ok = 1 ] || continue
+    mine=$(globs_of "$f" | tr '\n' ' ')
+    if [ $n -gt 0 ] && overlaps "$taken" "$mine"; then continue; fi
+    fm_get "$f" id; taken="$taken $mine"; n=$((n + 1))
+    [ $n -lt $max ] || break
+  done
+  [ $n -eq 0 ] || return 0
+  # Nothing parallel is ready: the lowest pending step whose dependencies passed, serial ones included.
+  for f in "$rd"/chunks/*.md; do
+    [ -e "$f" ] && [ "$(fm_get "$f" status)" = pending ] || continue
+    ok=1
+    for d in $(fm_get "$f" depends_on | tr -d '[]' | tr ',' ' '); do
+      [ "$(fm_get "$rd/chunks/$d.md" status 2>/dev/null || true)" = PASS ] || ok=0
+    done
+    [ $ok = 0 ] || { fm_get "$f" id; return 0; }
+  done
+}
+sub_paths() { # sets wt, sb, sw, ch for <run-id> <chunk-id>
+  local c; c="$(run_dir "$1")/run.conf"; ch="$(run_dir "$1")/chunks/$2.md"
+  [ -f "$ch" ] || die "no chunk $2 in run $1"
+  wt=$(conf_get "$c" worktree); sb="$(conf_get "$c" branch)-c$2"; sw="$wt-c$2"
+}
+cmd_sub_add() { # df sub-add <run-id> <chunk-id>: a worktree for one chunk of a wave, from the run branch head
+  local wt sb sw ch
+  sub_paths "$1" "$2"
+  git worktree add -q -b "$sb" "$sw" "$(git -C "$wt" rev-parse HEAD)" || die "sub-add: could not create $sw"
+  fm_set "$ch" sub_worktree "$sw"
+  echo "$sw"
+}
+cmd_sub_drop() { # df sub-drop <run-id> <chunk-id>: remove a chunk's sub-worktree and sub-branch
+  local wt sb sw ch
+  sub_paths "$1" "$2"
+  [ ! -d "$sw" ] || git worktree remove --force "$sw"
+  ! git show-ref --verify -q "refs/heads/$sb" || git branch -q -D "$sb"
+  git worktree prune
+  fm_set "$ch" sub_worktree null
+}
+cmd_sub_join() { # df sub-join <run-id> <chunk-id>: cherry-pick the chunk's commits onto the run branch, then drop it
+  local wt sb sw ch mb id=""
+  sub_paths "$1" "$2"
+  [ -z "$(git -C "$wt" status --porcelain)" ] || die "sub-join: run worktree has uncommitted changes"
+  [ ! -d "$sw" ] || [ -z "$(git -C "$sw" status --porcelain)" ] || die "sub-join: chunk $2's sub-worktree has uncommitted changes; commit or drop them first"
+  mb=$(git -C "$wt" merge-base HEAD "$sb") || die "sub-join: no sub-branch for chunk $2"
+  [ -n "$(git -C "$wt" config user.email)" ] || id="-c user.name=dark-factory -c user.email=df@localhost"
+  if [ "$mb" != "$(git -C "$wt" rev-parse "$sb")" ]; then
+    if ! git -C "$wt" $id cherry-pick --allow-empty --keep-redundant-commits "$mb..$sb" >/dev/null 2>&1; then
+      git -C "$wt" cherry-pick --abort >/dev/null 2>&1 || true
+      die "sub-join: chunk $2 conflicts with the run branch; drop it and rerun it serially"
+    fi
+  fi
+  printf 'commit %s df: join step %s\n' "$(git -C "$wt" rev-parse HEAD)" "$2" >> "$(run_dir "$1")/log.md"
+  cmd_sub_drop "$1" "$2"
+}
+
+checked_ok() { # checked_ok <run.conf>: 0 when every step passed and the branch head is the one the final check passed; else says why
+  local c=$1 rd f st p h
+  rd=$(dirname "$c")
+  for f in "$rd"/chunks/*.md; do [ -e "$f" ] || continue; st=$(fm_get "$f" status); [ "$st" = PASS ] || { echo "step $(basename "$f" .md) is $st"; return 1; }; done
+  p=$(conf_get "$c" check_pass_sha); h=$(git -C "$(conf_get "$c" worktree)" rev-parse -q --verify HEAD 2>/dev/null || true)
+  [ -n "$p" ] && [ "$p" = "$h" ] || { echo "the branch has changed since the final check passed (or the check never passed)"; return 1; }
+}
+ship_target() { # ship_target <run.conf> [local]: the PR's base branch on origin (ship_base, else base_ref); local: no origin check
+  local target
+  target=$(conf_get "$1" ship_base)
+  if [ -z "$target" ]; then
+    target=$(conf_get "$1" base_ref)
+    case $target in ""|detached) die "ship: no base branch; set ship_base";; esac
+    case $target in
+      origin/*) target=${target#origin/} ;;
+      */*) ! git remote | grep -qxF -- "${target%%/*}" || die "ship: base_ref '$target' is on another remote; set ship_base" ;;
+    esac
+  fi
+  case $target in -*) die "ship: base branch must not start with '-'";; esac
+  [ "$(git check-ref-format --branch "$target" 2>/dev/null)" = "$target" ] || die "ship: invalid base branch '$target'"
+  [ "${2:-}" = local ] || GIT_TERMINAL_PROMPT=0 git ls-remote --exit-code --heads origin "refs/heads/$target" >/dev/null 2>&1 || die "ship: base branch '$target' not found on origin"
+  echo "$target"
+}
+
+cmd_ship() { # df ship <run-id> <title> <body-file>: push the run branch and open a PR; prints the PR URL
+  local rd c wt branch target sha url body pout why
+  [ $# -eq 3 ] || die "usage: df ship <run-id> <title> <body-file>"
+  rd=$(run_dir "$1"); c="$rd/run.conf"
+  [ -f "$c" ] || die "no such run: $1"
+  ship_pin_check "$c" ship
+  [ "$(conf_get "$c" ship_mode)" != branch ] || die "ship: ship_mode is branch; nothing is pushed"
+  url=$(conf_get "$c" pr_url)
+  if [ -n "$url" ]; then
+    [ -n "$(conf_get "$c" pushed_sha)" ] || die "ship: a pr_url is recorded that df ship did not open; nothing pushed"
+    case $url in https://*) echo "$url"; return 0;; esac
+    die "ship: recorded pr_url is not an https:// URL"
+  fi
+  [ "$(conf_get "$c" ship_confirmed)" = yes ] || die "ship: ship_confirmed is not yes"
+  [ "$(conf_get "$c" stage)" = ship ] && [ "$(conf_get "$c" status)" = active ] || die "ship: run is not at stage ship with status active"
+  ! no_source_change "$c" || die "ship: the branch changes no source file (tests and docs only); nothing to ship"
+  wt=$(conf_get "$c" worktree); branch=$(conf_get "$c" branch)
+  [ -d "$wt" ] || die "ship: worktree is missing"
+  [ -z "$(git -C "$wt" status --porcelain)" ] || die "ship: worktree has uncommitted changes"
+  git remote | grep -qxF -- origin || die "ship: no remote named origin"
+  command -v gh >/dev/null 2>&1 || die "ship: gh is not on PATH"
+  gh auth status >/dev/null 2>&1 || die "ship: gh is not authenticated"
+  [ "$(git check-ref-format --branch "$branch" 2>/dev/null)" = "$branch" ] || die "ship: invalid branch name '$branch'"
+  case $2 in ""|-*|*[[:cntrl:]]*) die "ship: title must be one non-empty line not starting with '-'";; esac
+  case $3 in -*) die "ship: body file path must not start with '-'";; esac
+  [ -f "$3" ] || die "ship: body file not found: $3"
+  ! { printf '%s\n' "$2"; cat "$3"; } | strict_secret || die "ship: title or body looks like it contains a secret"
+  target=$(ship_target "$c") || exit 1
+  body=$(cd "$(dirname "$3")" && pwd)/$(basename "$3")
+  sha=$(git -C "$wt" rev-parse --verify "refs/heads/$branch") || die "ship: branch '$branch' not found"
+  # Push only the branch this run built: the one checked out in its worktree, at its head, never the target.
+  [ "$(git -C "$wt" symbolic-ref -q --short HEAD)" = "$branch" ] && [ "$(git -C "$wt" rev-parse HEAD)" = "$sha" ] ||
+    die "ship: '$branch' is not the branch checked out in the run's worktree"
+  [ "$branch" != "$target" ] || die "ship: the run branch is the PR target"
+  # Nothing has left the machine until now: refuse to push a secret in the run's commits.
+  # Scan every commit the push would send: all of them not already on an origin ref.
+  if git -C "$wt" log -p --format=%B "$sha" --not --remotes=origin | grep -v '^-' | strict_secret; then
+    die "ship: the run's commits look like they contain a secret; nothing pushed"
+  fi
+  why=$(checked_ok "$c") || die "ship: $why; nothing pushed"
+  pout=$(GIT_TERMINAL_PROMPT=0 git -C "$wt" push -u origin "refs/heads/$branch:refs/heads/$branch" 2>&1) || die "ship: push failed: $(printf '%s' "$pout" | tail -1 | sed "s,://[^/@ ]*@,://,g")"
+  conf_set "$c" pushed_sha "$sha"; conf_set "$c" pushed_at "$(date +%s)"
+  # ponytail: no "PR already exists" recovery; that needs a crash between create and recording pr_url.
+  url=$(cd "$wt" && GH_PROMPT_DISABLED=1 gh pr create --base "$target" --head "$branch" --title "$2" --body-file "$body") ||
+    die "ship: could not open PR (one may already exist: gh pr view $branch); the branch is pushed"
+  url=$(printf '%s\n' "$url" | tail -1)
+  case $url in https://?*) ;; *) die "ship: gh pr create did not print an https:// URL";; esac
+  conf_set "$c" pr_url "$url"
+  echo "$url"
+}
+
+merge_sha() { # merge_sha <run.conf>: the recorded merge commit, refused unless it is a plain hex sha
+  local s; s=$(conf_get "$1" merge_sha)
+  case $s in ''|*[!0-9a-f]*) die "no merge commit recorded";; esac
+  echo "$s"
+}
+
+cmd_merge() { # df merge <run-id>: wait up to DF_CHECKS_WAIT s for the PR's checks, then merge it (never --admin); exit 3 when it must not merge, 4 while checks are pending
+  local c url pid out m mout sha psha w g since end target
+  c="$(run_dir "${1:-}")/run.conf"; [ -f "$c" ] || die "no such run: ${1:-}"
+  url=$(conf_get "$c" pr_url); case $url in https://?*) ;; *) die "merge: no PR recorded; ship first";; esac
+  [ "$(conf_get "$c" merged)" != yes ] || { conf_get "$c" merge_sha; return 0; }
+  ship_pin_check "$c" merge
+  case $(conf_get "$c" ship_mode) in pr|branch) die "merge: ship_mode is $(conf_get "$c" ship_mode); nothing is merged";; esac
+  psha=$(conf_get "$c" pushed_sha); case $psha in ''|*[!0-9a-f]*) die "merge: no pushed sha recorded; ship first";; esac
+  command -v gh >/dev/null 2>&1 || die "merge: gh is not on PATH"
+  w=${DF_CHECKS_WAIT:-90}; g=${DF_NO_CHECKS_GRACE:-}
+  if [ -z "$g" ]; then # CI config in the pushed head: wait longer for checks to register; none: only external apps could post any
+    if git -C "$(conf_get "$c" worktree)" ls-tree -r --name-only "$psha" 2>/dev/null | grep -Eq "$CI_RE"; then g=60; else g=10; fi
+  fi
+  case "$w:$g" in *[!0-9:]*|:*|*:) die "merge: DF_CHECKS_WAIT and DF_NO_CHECKS_GRACE must be integers";; esac
+  # "No checks" right after the push can mean CI has not registered yet: it passes only once it has lasted g seconds.
+  since=$(conf_get "$c" pushed_at)
+  case $since in ''|*[!0-9]*) since=$(conf_get "$c" checks_first_seen)
+    case $since in ''|*[!0-9]*) since=$(date +%s); conf_set "$c" checks_first_seen "$since";; esac;; esac
+  end=$(( $(date +%s) + w )); out=$(mktemp)
+  # One call stays under a tool timeout; ship.md calls again while it exits 4.
+  while :; do
+    GH_PROMPT_DISABLED=1 gh pr checks "$url" --watch --interval 10 >"$out" 2>&1 & pid=$!
+    # ponytail: polled once a second, since macOS has no coreutils timeout.
+    while kill -0 "$pid" 2>/dev/null && [ "$(date +%s)" -lt "$end" ]; do sleep 1; done
+    if kill -0 "$pid" 2>/dev/null; then
+      kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true; rm -f "$out"
+      echo "merge: checks still running"; return 4
+    fi
+    if wait "$pid"; then break; fi
+    grep -qi "no checks reported" "$out" || { rm -f "$out"; echo "merge: checks failed"; return 3; }
+    [ $(( $(date +%s) - since )) -lt "$g" ] || break
+    [ "$(date +%s)" -lt "$end" ] || { rm -f "$out"; echo "merge: checks still running"; return 4; }
+    sleep 2
+  done
+  rm -f "$out"
+  for m in --squash --merge --rebase; do # the first method the repo allows, only at the head df ship pushed
+    # Run outside the clone: gh then deletes only the remote branch; df clean removes the local one with its worktree.
+    if mout=$(cd / && GH_PROMPT_DISABLED=1 gh pr merge "$url" "$m" --match-head-commit "$psha" --delete-branch 2>&1); then
+      sha=$(GH_PROMPT_DISABLED=1 gh pr view "$url" --json mergeCommit --jq .mergeCommit.oid 2>/dev/null) || true
+      case $sha in ''|*[!0-9a-f]*) # ponytail: the target's head right after the merge; a merge landing in between would be taken for ours
+        target=$(ship_target "$c") && sha=$(GIT_TERMINAL_PROMPT=0 git ls-remote origin "refs/heads/$target" 2>/dev/null | cut -f1) || sha="";; esac
+      case $sha in ''|*[!0-9a-f]*) conf_set "$c" merged yes; echo "merge: merged, but the merge commit could not be found"; return 5;; esac
+      conf_set "$c" merge_sha "$sha"; conf_set "$c" merged yes; echo "$sha"; return 0
+    fi
+    printf '%s' "$mout" | grep -qi "not allowed" || break
+  done
+  echo "merge: could not merge: $(printf '%s\n' "$mout" | tail -1)"; return 3
+}
+
+cmd_local_merge() { # df local-merge <run-id>: fast-forward the base branch in the main folder; exit 2 (one plain line) when it must not
+  local c m br base cur why
+  c="$(run_dir "${1:-}")/run.conf"; [ -f "$c" ] || die "no such run: ${1:-}"
+  [ "$(conf_get "$c" merged)" != local ] || { conf_get "$c" merge_sha; return 0; }
+  ship_pin_check "$c" local-merge
+  case $(conf_get "$c" ship_mode) in pr|branch) echo "ship mode is $(conf_get "$c" ship_mode), so it stays on its branch"; return 2;; esac
+  why=$(checked_ok "$c") || { echo "$why"; return 2; }
+  m=$(main_root); br=$(conf_get "$c" branch)
+  base=$(ship_target "$c" local 2>/dev/null) || { echo "no branch to merge into (set ship_base)"; return 2; }
+  # The user's own folder: touched only when it is clean and on the branch the run started from.
+  [ -z "$(git -C "$m" status --porcelain)" ] || { echo "your folder has unsaved changes"; return 2; }
+  cur=$(git -C "$m" symbolic-ref -q --short HEAD || echo "no branch")
+  [ "$cur" = "$base" ] || { echo "your folder is on $cur, not $base"; return 2; }
+  git -C "$m" merge -q --ff-only "refs/heads/$br" >/dev/null 2>&1 || { echo "cannot fast-forward"; return 2; }
+  conf_set "$c" merged local; conf_set "$c" merge_sha "$(git -C "$m" rev-parse HEAD)"
+  conf_get "$c" merge_sha
+}
+
+cmd_postmerge() { # df postmerge <run-id>: put the merged result in place and print the folder to re-test it in
+  local c wt sha
+  c="$(run_dir "${1:-}")/run.conf"; [ -f "$c" ] || die "no such run: ${1:-}"
+  case "$(conf_get "$c" merged)" in
+    yes) case $(conf_get "$c" merge_sha) in ''|*[!0-9a-f]*)
+        sha=$(GH_PROMPT_DISABLED=1 gh pr view "$(conf_get "$c" pr_url)" --json mergeCommit --jq .mergeCommit.oid 2>/dev/null) || true
+        case $sha in ''|*[!0-9a-f]*) die "postmerge: the PR merged, but its merge commit could not be found";; esac
+        conf_set "$c" merge_sha "$sha";; esac
+      sha=$(merge_sha "$c") || exit 1; wt=$(conf_get "$c" worktree)
+      GIT_TERMINAL_PROMPT=0 git -C "$wt" fetch -q origin || die "postmerge: could not fetch origin"
+      git -C "$wt" checkout -q --detach "$sha" || die "postmerge: could not check out $sha"
+      echo "$wt" ;;
+    local) main_root ;;
+    *) die "postmerge: the run is not merged" ;;
+  esac
+}
+
+cmd_revert_pr() { # df revert-pr <run-id>: open a PR that reverts the merge (never pushes the target); prints its URL
+  local c wt sha target b url id=""
+  c="$(run_dir "${1:-}")/run.conf"; [ -f "$c" ] || die "no such run: ${1:-}"
+  url=$(conf_get "$c" revert_url); case $url in https://?*) echo "$url"; return 0;; esac
+  [ "$(conf_get "$c" merged)" = yes ] || die "revert-pr: the run was not merged through a PR"
+  sha=$(merge_sha "$c") || exit 1; wt=$(conf_get "$c" worktree); b="df-revert/$1"
+  [ -z "$(git -C "$wt" status --porcelain)" ] || die "revert-pr: worktree has uncommitted changes"
+  target=$(ship_target "$c") || exit 1
+  [ "$(git check-ref-format --branch "$b" 2>/dev/null)" = "$b" ] && [ "$b" != "$target" ] || die "revert-pr: bad branch name '$b'"
+  GIT_TERMINAL_PROMPT=0 git -C "$wt" fetch -q origin "+refs/heads/$target:refs/remotes/origin/$target" || die "revert-pr: could not fetch origin"
+  git -C "$wt" checkout -q -B "$b" "refs/remotes/origin/$target" || die "revert-pr: could not create $b"
+  [ -n "$(git -C "$wt" config user.email)" ] || id="-c user.name=dark-factory -c user.email=df@localhost"
+  # A merge commit has two parents: revert it against the first (the target before the merge).
+  set -- "$1" "$sha"; [ "$(git -C "$wt" rev-list --parents -n 1 "$sha" | wc -w)" -le 2 ] || set -- "$1" -m 1 "$sha"
+  if ! git -C "$wt" $id revert --no-edit "${@:2}" >/dev/null 2>&1; then
+    git -C "$wt" revert --abort >/dev/null 2>&1 || true; die "revert-pr: the merge does not revert cleanly onto $target"
+  fi
+  # The refspec names only the revert branch: the target is never pushed.
+  GIT_TERMINAL_PROMPT=0 git -C "$wt" push -q origin "refs/heads/$b:refs/heads/$b" >/dev/null 2>&1 || die "revert-pr: push failed"
+  url=$(cd "$wt" && GH_PROMPT_DISABLED=1 gh pr create --base "$target" --head "$b" --title "Revert run $1" \
+    --body "Reverts $(conf_get "$c" pr_url): the tests failed after the merge.") || die "revert-pr: could not open the PR; $b is pushed"
+  url=$(printf '%s\n' "$url" | tail -1)
+  case $url in https://?*) ;; *) die "revert-pr: gh pr create did not print an https:// URL";; esac
+  conf_set "$c" revert_url "$url"; echo "$url"
+}
+
+# df land: the whole ending after the report is written, re-entrant by stage, one plain line at every stop.
+# exit 0 done (merged and verified, PR open, or left on its branch), 2 the push or PR was refused,
+# 3 the PR was not merged (red checks, refused, or no result in DF_MERGE_TIMEOUT s), 4 call again (checks still running),
+# 5 the local merge was refused, 6 the tests failed after the merge, 7 run the full app tests after the merge,
+# 8 NOT FIXED (a bugfix branch that changes no source), 9 refused: the branch is not what the final check passed,
+# 11 merged, but the merged result could not be tested (the first time: call again).
+# Every stop except 4, 7, 9 and a first 11 has finished the run. Run again after it finished, it completes the tidy-up.
+cmd_land() { # df land <run-id> <session-id> <pr-title>
+  local rd c wt id=${1:-} sess=${2:-} title=${3:-} t0 mode br target remote=1 out rc folder bad=0 judge="" ws now r why st
+  [ $# -eq 3 ] || die "usage: df land <run-id> <session-id> <pr-title>"
+  run_ctx "$id"; t0=$(date +%s); br=$(conf_get "$c" branch); st=$(conf_get "$c" stage)
+  if [ "$st" = done ]; then # finished before: replay its line and finish the tidy-up it may not have completed
+    case $(conf_get "$c" land_rc) in ''|*[!0-9]*) die "land: run $id finished without df land";; esac
+    land_end "$id" "$sess" "$(conf_get "$c" land_rc)" "$(conf_get "$c" land_line)" "$(conf_get "$c" land_tidy)"; return $?
+  fi
+  [ "$(conf_get "$c" status)" = active ] || die "land: run is $(conf_get "$c" status)"
+  [ -f "$rd/report.md" ] || die "land: write report.md first"
+  why=$(known_missing "$rd") || { echo "land: refused: $why"; return 12; }
+  cmd_lock "$id" refresh "$sess"
+  [ "$(conf_get "$c" cmd_pin)" = "$(cmd_pin_of "$c")" ] || die "land: env.commands or test_cmd changed since sign-off"
+  git -C "$wt" remote get-url origin >/dev/null 2>&1 && command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1 || remote=""
+  mode=$(conf_get "$c" ship_mode); [ -n "$mode" ] || mode=merge
+  case $st in
+    merge|postmerge) ;;
+    check|e2e|retro|ship)
+      # Only what the final check passed leaves the worktree: every step PASS, the head the check saw.
+      why=$(checked_ok "$c") || { echo "land: refused: $why; run the final check again"; return 9; }
+      conf_set "$c" stage ship
+      if no_source_change "$c"; then land_end "$id" "$sess" 8 "NOT FIXED: the branch changes no source file (tests and docs only); nothing shipped"; return $?; fi
+      case $mode:$remote in
+        branch:*|pr:) land_end "$id" "$sess" 0 "done: on branch $br; nothing pushed or merged"; return $?;;
+        merge:1|pr:1)
+          conf_set "$c" ship_confirmed yes
+          awk '/^## Technical changes/ { exit } 1' "$rd/report.md" > "$rd/pr-body.md"
+          rc=0; out=$( (cmd_ship "$id" "$title" "$rd/pr-body.md") 2>&1 ) || rc=$?
+          [ $rc -eq 0 ] || { land_end "$id" "$sess" 2 "the PR could not be opened: $(printf '%s\n' "$out" | tail -1 | sed 's/^df: //'); kept on branch $br"; return $?; }
+          printf -- '- shipped: %s\n' "$out" >> "$rd/log.md"
+          [ "$mode" = merge ] || { land_end "$id" "$sess" 0 "done: PR open: $out"; return $?; } ;;
+        *) target=$(ship_target "$c" local 2>/dev/null) || target=""
+          [ -z "$target" ] || conf_set "$c" premerge_sha "$(git -C "$(main_root)" rev-parse -q --verify "refs/heads/$target" || true)" ;;
+      esac
+      conf_set "$c" stage merge ;;
+    *) echo "land: refused: the run is at stage $st, not past the final check"; return 9 ;;
+  esac
+  if [ "$(conf_get "$c" stage)" = merge ]; then
+    if [ -n "$(conf_get "$c" pr_url)" ]; then
+      ws=$(conf_get "$c" merge_wait_since); case $ws in ''|*[!0-9]*) ws=$t0; conf_set "$c" merge_wait_since "$ws";; esac
+      while :; do
+        rc=0; out=$( (cmd_merge "$id") 2>&1 ) || rc=$?; now=$(date +%s)
+        [ $rc -eq 0 ] || [ $rc -eq 5 ] && break # 5: merged, the commit is looked up again after the merge
+        if [ $rc -eq 4 ] && [ $((now - ws)) -lt "${DF_MERGE_TIMEOUT:-1200}" ]; then
+          [ $((now - t0)) -lt "${DF_LAND_WAIT:-300}" ] || { echo "land: the PR's checks are still running; run df land again"; return 4; }
+          continue
+        fi
+        [ $rc -ne 4 ] || out="the checks did not finish within $(( ${DF_MERGE_TIMEOUT:-1200} / 60 )) min"
+        conf_set "$c" stage ship
+        land_end "$id" "$sess" 3 "the PR was not merged ($(printf '%s\n' "$out" | tail -1 | sed 's/^df: //; s/^merge: //')); it stays open: $(conf_get "$c" pr_url)"; return $?
+      done
+    else
+      rc=0; out=$( (cmd_local_merge "$id") 2>&1 ) || rc=$?
+      if [ $rc -ne 0 ]; then
+        conf_set "$c" stage ship; target=$(ship_target "$c" local 2>/dev/null || echo "the base branch")
+        land_end "$id" "$sess" 5 "not merged: $(printf '%s\n' "$out" | tail -1 | sed 's/^df: //'); kept on branch $br (when your folder is clean and on $target, run git merge $br)"; return $?
+      fi
+    fi
+    printf -- '- merged: %s\n' "$(conf_get "$c" merge_sha)" >> "$rd/log.md"
+    conf_set "$c" stage postmerge
+    # One call is either the wait or the post-merge suite, never both, so it stays under a 10-minute tool timeout.
+    [ $(( $(date +%s) - t0 )) -lt "${DF_LAND_SUITE_AFTER:-120}" ] || { echo "land: merged; run df land again for the test after the merge"; return 4; }
+  fi
+  # postmerge
+  rc=0; folder=$( (cmd_postmerge "$id") 2>&1 ) || rc=$?
+  if [ $rc -ne 0 ]; then
+    out=$(printf '%s\n' "$folder" | tail -1 | sed 's/^df: //; s/^postmerge: //')
+    r=$(conf_get "$c" postmerge_tries); case $r in ''|*[!0-9]*) r=0;; esac; conf_set "$c" postmerge_tries $((r + 1))
+    [ "$r" -ge 1 ] || { echo "land: merged, but the merged result could not be put in place to test it ($out); run df land again"; return 11; }
+    printf '\n## After the merge\n\nMerged, but NOT re-tested after the merge: %s.\n' "$out" >> "$rd/report.md"
+    land_end "$id" "$sess" 11 "merged, but not re-tested after the merge ($out); check it yourself"; return $?
+  fi
+  if [ "$(conf_get "$c" postmerge_suite)" != green ]; then
+    : > "$rd/panel/postmerge.md"; : > "$rd/panel/postmerge.log"
+    run_cmds "$rd" "$folder" "$rd/panel/postmerge.md" "$rd/panel/postmerge.log"; beat "$rd"
+    if [ "$bad" -gt 0 ]; then
+      conf_set "$c" postmerge_suite red
+      printf '\n## After the merge\n\nThe tests FAILED after the merge (%s of the commands; output in panel/postmerge.log).\n' "$bad" >> "$rd/report.md"
+      land_end "$id" "$sess" 6 "the tests failed after the merge (panel/postmerge.log); the working copy is kept"; return $?
+    fi
+    conf_set "$c" postmerge_suite green
+    printf '\n## After the merge\n\nThe tests passed again after the merge%s.\n' "${judge:+ (commands$judge failed as they did before the run)}" >> "$rd/report.md"
+  fi
+  if e2e_configured; then
+    case "$(conf_get "$c" postmerge_e2e)" in
+      green) ;;
+      red) printf 'The full app tests FAILED after the merge.\n' >> "$rd/report.md"
+        land_end "$id" "$sess" 6 "the full app tests failed after the merge; the working copy is kept"; return $?;;
+      *) echo "land: run the full app tests in $folder (e2e.md), record postmerge_e2e green or red, then run df land again"; return 7;;
+    esac
+  fi
+  r=merged; [ "$(conf_get "$c" merged)" = yes ] || r=local
+  land_end "$id" "$sess" 0 "" "$r"
+}
+land_end() { # land_end <run-id> <session-id> <exit> <line> [merged|local]: finish, metrics into the report once, after a verified merge clean up; returns <exit>
+  local rd c wt id=$1 m line=$4 rp ec=0 eo ar kp=""
+  run_ctx "$id"; ar=$(conf_get "$c" accepted_round) # read before the tidy-up removes the run dir
+  [ -z "$ar" ] || kp="known problems, accepted at check round $ar:
+$(known_problems "$rd" "$ar")"
+  conf_set "$c" land_rc "$3"; conf_set "$c" land_line "$line"; conf_set "$c" land_tidy "${5:-}"
+  eo=$( (cmd_finish "$id" "$2") 2>&1 ) || { echo "land: could not finish the run: $(printf '%s\n' "$eo" | tail -1 | sed 's/^df: //')"; return 1; }
+  m=$(cmd_metrics "$id")
+  grep -q '^## Time and agents' "$rd/report.md" ||
+    { printf '\n## Time and agents\n\n%s\n' "$m"; grep '^estimate:' "$rd/log.md" | tail -1 || true; } >> "$rd/report.md"
+  rp="$rd/report.md"
+  if [ -n "${5:-}" ]; then
+    if [ "$5" = merged ]; then line="done: merged and verified: $(conf_get "$c" pr_url)"
+      eo=$( (cmd_clean "$id" --branch --archive) 2>&1 ) || ec=$?
+    else line="done: merged into your folder and verified"
+      eo=$( { [ ! -d "$wt" ] || git -C "$(main_root)" worktree remove "$wt"; } &&
+            { ! git -C "$(main_root)" show-ref --verify -q "refs/heads/$(conf_get "$c" branch)" || git -C "$(main_root)" branch -q -d "$(conf_get "$c" branch)"; } &&
+            (cmd_clean "$id" --archive) 2>&1 ) || ec=$?
+    fi
+    if [ $ec -eq 0 ]; then rp="$(state_root)/reports/$id/report.md"; else line="$line (tidy-up refused: $(printf '%s\n' "$eo" | tail -1 | sed 's/^df: //'); run df land again once that is fixed)"; fi
+  fi
+  if [ -n "$kp" ]; then
+    case $line in *" and verified"*) line=$(printf '%s\n' "$line" | sed 's/ and verified/ and verified WITH KNOWN PROBLEMS/');;
+      *) line="$line (WITH KNOWN PROBLEMS)";; esac
+    echo "land: $line"; printf '%s\n' "$kp"
+  else echo "land: $line"; fi
+  echo "$m"; echo "report: $rp"
+  return "$3"
+}
+known_problems() { # known_problems <run-dir> <round>: the open findings accepted at that round, one line each
+  local p="$1/panel/check-r$2" e="$1/panel/e2e-r$2-findings.md"
+  if [ -f "$e" ]; then check_items "$p.md" "$p-suite.md" "$e"; else check_items "$p.md" "$p-suite.md"; fi 2>/dev/null || true
+}
+known_missing() { # known_missing <run-dir>: exit 1 (and why) when findings were accepted but report.md does not list them under ## Anything left
+  local rd=$1 ar sec l w
+  ar=$(conf_get "$rd/run.conf" accepted_round); [ -n "$ar" ] || return 0
+  sec=$(awk '/^## / { f = ($0 ~ /^## Anything left/) } f' "$rd/report.md")
+  # Each accepted item must appear verbatim (its text after the severity word); the refusal prints the line to paste.
+  while IFS= read -r l; do
+    w=${l#  }; w=${w#* }; [ -n "$w" ] || continue
+    case $sec in *"$w"*) ;; *) echo "report.md does not list an accepted problem under ## Anything left (add the section if missing): add this line under it, then land again:"; echo "- $w"; return 1;; esac
+  done <<EOF2
+$(known_problems "$rd" "$ar")
+EOF2
+}
+
+cmd_status() { # df status [run-id]: regenerate and print progress.md (no id: the only run)
+  local rd c out f id=${1:-} n hb age
+  if [ -z "$id" ]; then
+    n=$(ls -d "$(state_root)"/*/run.conf 2>/dev/null | wc -l | tr -d ' ')
+    [ "$n" = 1 ] || die "status: give a run id (runs: $(cmd_list | cut -d' ' -f1 | tr '\n' ' '))"
+    id=$(basename "$(dirname "$(ls -d "$(state_root)"/*/run.conf)")")
+  fi
+  set -- "$id"
+  rd=$(run_dir "$1"); c="$rd/run.conf"
+  DF_NO_PROFILE_CHECK=1 cmd_validate "$1"   # status is read-only: a profile problem is reported, not fatal
+  out="Run $1   track: $(conf_get "$c" track)   stage: $(conf_get "$c" stage)   status: $(conf_get "$c" status)"
+  case "$(conf_get "$c" status)" in
+    waiting_permission) out="$out
+  needs permission: $(conf_get "$c" waiting_on)" ;;
+    paused) out="$out
+  waiting on: $(conf_get "$c" waiting_on)" ;;
+    active)
+      # A session that died (usage limit, crash, closed laptop) leaves the run active: say so.
+      if [ "$(cmd_lock "$1" check)" != live ]; then out="$out
+  not running (no live session): resume to continue"
+      else
+        hb=$(sed -n 's/^heartbeat=//p' "$rd/lock"); case "$hb" in ''|*[!0-9]*) hb=$(date +%s);; esac
+        age=$(( ($(date +%s) - hb) / 60 ))
+        [ "$age" -lt 15 ] || out="$out
+  no activity for $age min: if no session is running it, resume once the lock goes stale (1 h) or with --force"
+      fi ;;
+  esac
   for f in "$rd"/chunks/*.md; do
     [ -e "$f" ] || continue
     out="$out
@@ -263,27 +1546,109 @@ cmd_list() {
   done
 }
 
-cmd_clean() { # df clean <run-id> [--force]: removes worktree and state, keeps the branch
-  local rd c wt
-  [ -n "${1:-}" ] || die "clean: run id required"
-  rd=$(run_dir "$1"); c="$rd/run.conf"
-  [ -f "$c" ] || die "no such run: $1"
-  if [ "${2:-}" != --force ] && [ "$(cmd_lock "$1" check)" = live ]; then die "run is live; use --force"; fi
+cmd_sweep() { # df sweep: list runs whose PR is merged; always exit 0, never writes
+  local c u b id
+  git rev-parse --git-dir >/dev/null 2>&1 || return 0
+  command -v gh >/dev/null 2>&1 || return 0
+  for c in "$(state_root)"/*/run.conf; do
+    [ -e "$c" ] || continue
+    u=$(conf_get "$c" pr_url); b=$(conf_get "$c" branch)
+    case $u in https://*) ;; *) continue;; esac
+    git check-ref-format --branch "$b" >/dev/null 2>&1 || continue
+    id=$(basename "$(dirname "$c")")
+    [ "$(GH_PROMPT_DISABLED=1 gh pr view "$u" --json state --jq .state 2>/dev/null)" = MERGED ] && printf '%s %s %s\n' "$id" "$u" "$b"
+  done
+  return 0
+}
+
+physpath() { # physical path of a dir, or of a missing dir via its parent
+  if [ -d "$1" ]; then (cd -P "$1" && pwd -P); else printf '%s/%s\n' "$(cd -P "$(dirname "$1")" 2>/dev/null && pwd -P)" "$(basename "$1")"; fi
+}
+
+cmd_clean() { # df clean <run-id> [--force] [--branch] [--archive]: removes worktree and state; --branch also deletes the local branch; --archive keeps the audit trail in <state-root>/reports/<id>/
+  local rd c wt id=${1:-} force="" hb="" ar="" usage br own p line cur subs w lh u a f
+  usage="usage: df clean <run-id> [--force] [--branch] [--archive]"
+  case $id in ""|-*) die "clean: run id required; $usage" ;; esac
+  shift
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --force) [ -z "$force" ] || die "$usage"; force=1 ;;
+      --branch) [ -z "$hb" ] || die "$usage"; hb=1 ;;
+      --archive) [ -z "$ar" ] || die "$usage"; ar=1 ;;
+      *) die "$usage" ;;
+    esac
+    shift
+  done
+  rd=$(run_dir "$id"); c="$rd/run.conf"
+  [ -f "$c" ] || die "no such run: $id"
+  if [ -z "$force" ] && [ "$(cmd_lock "$id" check)" = live ]; then die "run is live; use --force"; fi
   wt=$(conf_get "$c" worktree)
-  if [ -d "$wt" ]; then
-    if [ "${2:-}" != --force ] && [ -n "$(git -C "$wt" status --porcelain)" ]; then
-      die "worktree has uncommitted changes; use --force"
+  if [ -n "$hb" ]; then
+    br=$(conf_get "$c" branch)
+    git check-ref-format --branch "$br" >/dev/null 2>&1 || die "clean: bad branch name"
+    # The remote is the proof that nothing unpushed is lost:
+    # origin has this exact head, or (the host deleted the branch after merging) the PR merged at it.
+    if git show-ref --verify --quiet "refs/heads/$br"; then
+      lh=$(git rev-parse "refs/heads/$br")
+      if [ "$(GIT_TERMINAL_PROMPT=0 git ls-remote origin "refs/heads/$br" 2>/dev/null | cut -f1)" != "$lh" ]; then
+        u=$(conf_get "$c" pr_url)
+        case $u in https://?*) ;; *) die "clean: the branch head is not on origin and no PR is recorded";; esac
+        command -v gh >/dev/null 2>&1 || die "clean: the branch head is not on origin and gh is not available to check the PR"
+        [ "$(GH_PROMPT_DISABLED=1 gh pr view "$u" --json state,headRefOid --jq '.state + " " + .headRefOid' 2>/dev/null)" = "MERGED $lh" ] ||
+          die "clean: the branch head is not on origin and the PR did not merge at this head"
+      fi
     fi
+    own=$(physpath "$wt"); cur=""
+    while IFS= read -r line; do
+      case $line in
+        "worktree "*) cur=${line#worktree } ;;
+        "branch refs/heads/$br") p=$(physpath "$cur"); [ "$p" = "$own" ] || die "clean: branch is checked out in $cur" ;;
+      esac
+    done < <(git worktree list --porcelain)
+  fi
+  # Every refusal comes before anything is deleted. --force never lets --branch drop uncommitted work.
+  if [ -d "$wt" ] && [ -n "$(git -C "$wt" status --porcelain)" ] && { [ -n "$hb" ] || [ -z "$force" ]; }; then
+    if [ -n "$hb" ]; then die "worktree has uncommitted changes"; else die "worktree has uncommitted changes; use --force"; fi
+  fi
+  if [ -n "$ar" ]; then # no run.conf in the archive, so list, status and sweep never see it
+    a="$(state_root)/reports/$id"; mkdir -p "$a"
+    for f in report.md spec.md plan.md questions.md log.md spawns.tsv panel scenarios; do
+      [ ! -e "$rd/$f" ] || cp -R "$rd/$f" "$a/" || die "clean: could not archive $f; nothing removed"
+    done
+  fi
+  # Sub-worktrees of a parallel wave (<worktree>-c<NN>): never discard uncommitted work unless forced.
+  git worktree prune
+  subs=$(git worktree list --porcelain | sed -n 's/^worktree //p' |
+    P="$wt-c" awk 'index($0, ENVIRON["P"]) == 1 { r = substr($0, length(ENVIRON["P"]) + 1); if (r ~ /^([0-9][0-9]?[0-9]?|FX-[0-9]+)$/) print }')
+  if { [ -z "$force" ] || [ -n "$hb" ]; } && [ -n "$subs" ]; then
+    while IFS= read -r w; do
+      [ -z "$(git -C "$w" status --porcelain)" ] || die "sub-worktree $w has uncommitted changes; use --force"
+    done <<EOF
+$subs
+EOF
+  fi
+  if [ -n "$subs" ]; then
+    while IFS= read -r w; do [ ! -d "$w" ] || git worktree remove --force "$w"; done <<EOF
+$subs
+EOF
+  fi
+  # Only chunk sub-branches (<branch>-c<NN> or <branch>-cFX-<n>), never a user branch that shares the prefix.
+  git for-each-ref --format='%(refname:short)' "refs/heads/$(conf_get "$c" branch)-c*" |
+    P="$(conf_get "$c" branch)-c" awk 'index($0, ENVIRON["P"]) == 1 { r = substr($0, length(ENVIRON["P"]) + 1); if (r ~ /^([0-9][0-9]?[0-9]?|FX-[0-9]+)$/) print }' |
+    while IFS= read -r w; do git branch -q -D "$w" 2>/dev/null || echo "df: kept sub-branch $w (checked out elsewhere)" >&2; done
+  if [ -d "$wt" ]; then
     git worktree remove --force "$wt"
   fi
   rm -rf "$rd"
   git worktree prune
+  if [ -n "$hb" ] && git show-ref --verify --quiet "refs/heads/$br"; then git branch -D -- "$br" >/dev/null; fi
 }
 
 cmd=${1:-}; [ $# -gt 0 ] && shift
 case "$cmd" in
   start) cmd_start "$@";;
   validate) cmd_validate "$@";;
+  profile-pin) cmd_profile_pin "$@";;
   verdict) cmd_verdict "$@";;
   gate) cmd_gate "$@";;
   lock) cmd_lock "$@";;
@@ -291,17 +1656,53 @@ case "$cmd" in
   check-diff) cmd_check_diff "$@";;
   canary-scan) cmd_canary_scan "$@";;
   srchash) cmd_srchash "$@";;
+  redcheck) cmd_redcheck "$@";;
   commit) cmd_commit "$@";;
+  step-check) cmd_step_check "$@";;
   scrub) cmd_scrub "$@";;
   status) cmd_status "$@";;
   list) cmd_list;;
   clean) cmd_clean "$@";;
+  ship) cmd_ship "$@";;
+  merge) cmd_merge "$@";;
+  local-merge) cmd_local_merge "$@";;
+  postmerge) cmd_postmerge "$@";;
+  revert-pr) cmd_revert_pr "$@";;
+  sweep) cmd_sweep;;
+  fixed) cmd_fixed "$@";;
   finish) cmd_finish "$@";;
+  lessons-set) cmd_lessons_set "$@";;
+  wave) cmd_wave "$@";;
+  sub-add) cmd_sub_add "$@";;
+  sub-join) cmd_sub_join "$@";;
+  sub-drop) cmd_sub_drop "$@";;
+  metrics) cmd_metrics "$@";;
+  pause) cmd_pause "$@";;
+  mode) cmd_mode;;
+  unpause) cmd_unpause "$@";;
+  extend) cmd_extend "$@";;
+  state-hash) cmd_state_hash;;
+  rundir-hash) cmd_rundir_hash "$@";;
+  spawn-log) cmd_spawn_log "$@";;
+  pre) cmd_pre "$@";;
+  signoff) cmd_signoff "$@";;
+  steps) cmd_steps "$@";;
+  step-start) cmd_step_start "$@";;
+  step-end) cmd_step_end "$@";;
+  land) cmd_land "$@";;
+  check-start) cmd_check_start "$@";;
+  check-end) cmd_check_end "$@";;
+  check-gate) cmd_check_gate "$@";;
+  accept) cmd_accept "$@";;
+  post) cmd_post "$@";;
+  bump) cmd_bump "$@";;
+  estimate) cmd_estimate "$@";;
+  budget) cmd_budget "$@";;
   run-dir) run_dir "$@";;
   conf-get) conf_get "$@";;
   conf-set) conf_set "$@";;
   fm-get) fm_get "$@";;
   fm-set) fm_set "$@";;
   write) atomic "$@";;
-  *) die "usage: df {start|validate|verdict|gate|lock|snapshot|check-diff|canary-scan|srchash|commit|scrub|status|list|clean|finish|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
+  *) die "usage: df {start|validate|profile-pin|verdict|gate|lock|snapshot|check-diff|canary-scan|srchash|redcheck|commit|scrub|status|list|clean|fixed|finish|ship|merge|local-merge|postmerge|revert-pr|sweep|lessons-set|metrics|state-hash|rundir-hash|spawn-log|pre|post|signoff|steps|step-start|step-end|check-start|check-end|check-gate|land|bump|estimate|budget|pause|unpause|mode|wave|sub-add|sub-join|sub-drop|run-dir|conf-get|conf-set|fm-get|fm-set|write}";;
 esac
