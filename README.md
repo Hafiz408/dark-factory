@@ -1,188 +1,278 @@
 # Dark Factory
 
-**It asks the questions Claude would otherwise silently assume, you approve once, and it builds,
-checks, merges and re-tests the work without you watching.**
+**Tell it what you want, answer a few questions, approve once, and walk away: it builds,
+checks, merges and re-tests the work, then tells you in plain words what changed.**
 
-Give it a bug report, a feature request, a PRD or a plain idea. You answer a few questions
-(each has a default), approve one screen, and walk away. You come back to merged, tested code
-and a short note in plain words saying what changed and how it was checked.
+A Claude Code plugin. v0.3, open source, MIT. macOS, Linux, WSL.
 
-Claude Code plugin. v0.3, open source, MIT. macOS, Linux, WSL.
+**Use it when** you have a bug report, a feature request, a PRD or a plain idea, you can say up
+front what "done" means, and you would rather not watch every step.
 
-> **When not to use it**
-> - A one-line fix or a quick question: just ask Claude. It is faster and cheaper.
-> - You want to steer every step as it happens. Dark Factory asks everything up front, then works alone.
-> - You need a sandbox. It runs with your permissions; the guard hook is a seat belt, not a cage.
-> - Native Windows (use WSL).
+**Don't use it when**
+- the task is a one-line fix or a quick question: plain Claude is faster and cheaper;
+- you want to steer each step as it happens: Dark Factory asks everything first, then works alone;
+- you need a sandbox: it runs with your permissions (see Safety);
+- you are on native Windows (use WSL).
+
+## Before you start
+
+You need:
+- **Claude Code**, signed in (`claude` works in a terminal).
+- **git**. An empty folder is fine: it can start a new git repository there.
+- **gh** (the GitHub command-line tool), signed in with `gh auth login`, only if you want it to
+  open and merge pull requests (PRs). Without it, it merges on your computer or leaves a branch.
+
+Open a terminal and go to your project folder:
+- **macOS:** press Cmd+Space, type `Terminal`, press Enter.
+- **Linux:** open your Terminal app (often Ctrl+Alt+T).
+- **Windows:** install WSL, then open "Ubuntu" from the Start menu.
+
+Then type `cd ` followed by the folder path (on macOS you can drag the folder into the window),
+press Enter, and start Claude Code with `claude`.
+
+**Turn on auto mode.** In Claude Code press Shift+Tab until the bottom line says **auto**. In
+the default mode Claude asks before running commands, and an unattended run would stop at the
+first such question while you are away. The sign-off screen reminds you if auto mode is off.
 
 ## Quickstart
+
+Install it once per project:
 
 ```bash
 claude plugin marketplace add Hafiz408/dark-factory
 claude plugin install dark-factory@dark-factory --scope project
 ```
 
-Then, inside your project (or an empty folder, to build something new):
-
-```
-> /dark-factory:dark-factory Add a --json flag to the export command
-```
-
-1. Answer the questions (`ok` takes every default).
-2. Read the sign-off screen and say `approve`. It shows an estimate such as
-   `estimate: 7-14 min, ~6-8 agents`: a rough range, not a promise, and a cap the run will not
-   exceed. Stay a moment: commands it will run may ask for permission now, so nothing stalls later.
-   To walk away, use auto mode (Shift+Tab until it says auto): in manual mode it stops at the
-   first permission prompt. The sign-off screen says so when you are not in auto mode.
-3. Leave it, usually for minutes, not hours. It prints only milestone lines (when step 1
-   starts, each step done, each check round, each fix with its reason), like
-   `[df r261127-101500-123] step 2 of 4 done`, and nothing else.
-4. It works in a sibling folder (`../<repo>-df-<run-id>`), so your own checkout is untouched
-   until the merge. At the end you get a plain note: what changed, how it was checked, and
-   where it is now (merged, or a PR link, or a branch).
-
 Try it without installing: clone this repo, then `claude --plugin-dir ./dark-factory`.
+
+Start a run with your request (text, a file path, or a link or ticket id it can fetch):
+
+```
+/dark-factory:dark-factory Add a --json flag to the export command
+```
+
+A first run, shortened:
+
+```
+you> /dark-factory:dark-factory Add a --json flag to the export command
+df>  Run r261127-101500-123 started.
+     1. Should --json print one JSON array, or one object per line? (default: one array)
+     2. Should the existing CSV output stay the default? (default: yes)
+you> 1: one object per line, rest ok
+df>  What I understood: a new feature, `export --json` printing one object per line...
+     When everything passes I will open a PR into `main`, merge it once its checks pass,
+     test again after the merge and tidy up.
+     estimate: 7-14 min, ~6-8 agents. This is a rough range, not a promise.
+     cap: up to 16 agents and 42 min. ...
+     approve, amend <what>, or abort?
+you> approve
+df>  [df r261127-101500-123] building step 1 of 3: export can write JSON
+     [df r261127-101500-123] step 1 of 3 done
+     [df r261127-101500-123] step 3 of 3 done
+     [df r261127-101500-123] final check, round 1
+     [df r261127-101500-123] final check passed
+     - `export --json` prints one JSON object per line; CSV is still the default.
+     Merged into `main` (PR link). Say `revert` to undo it.
+     9 checks passed, tests 41→47, re-tested after merge.
+     Full report: ../.df-myapp/reports/r261127-101500-123/report.md
+```
+
+1. **Questions** (at most 8, each with a default). Every answer you accept becomes a
+   requirement the final check holds the work to.
+2. **Sign-off screen**: what it understood, what it will and will not do, how the run will
+   end, an **estimate** (a rough range, not a promise) and a **cap** (a safety limit well
+   above it). Stay a minute after approving: commands it needs may ask for permission now.
+3. **Leave it**, usually for minutes, not hours. You see only `[df <run-id>]` progress lines.
+4. **Final note**: what changed, where it is now, how it was checked, and the full report.
+
+It works in a sibling folder (`../<repo>-df-<run-id>`), so your own folder is untouched until
+a merge you approved.
+
+## How to answer
+
+You reply at exactly two points: the questions and the sign-off screen.
+
+| When | Say | What happens |
+|---|---|---|
+| Questions | `ok` | Takes every default |
+| Questions | `2: use SQLite` | Answers question 2; the rest keep their defaults |
+| Sign-off | `approve` | Starts the work; nothing more is asked |
+| Sign-off | `amend <what>` | Redoes only the affected part (up to 3 times) |
+| Sign-off | `abort` | Stops; nothing is built |
+| Sign-off | `bugfix`, `feature`, `build` | Corrects what kind of job it thinks this is |
+| Sign-off, with approve | `merge` | Opens a PR, merges it once its checks pass, re-tests (the usual default) |
+| Sign-off, with approve | `no merge` | Opens the PR and stops; you merge |
+| Sign-off, with approve | `local` | Merges on this computer only, never pushes |
+| Sign-off, with approve | `branch` | Leaves the work on its branch; nothing is pushed or merged |
+| Sign-off, with approve | `strict` | Stops instead of finishing when minor problems are left |
+
+For example: `approve, no merge`. Without `origin` and a signed-in `gh`, `merge` becomes a
+local merge and `no merge` leaves a branch. If the repo's rules (`AGENTS.md`, `CLAUDE.md`,
+`CONTRIBUTING*`) say assistants must not merge, the default becomes `no merge` (or `branch`
+when pushing is forbidden), the screen quotes the rule, and merging needs the word `merge`.
+
+## After the run
+
+- **The note** is at most 10 lines; problems come first. The full `report.md` lists what
+  changed, how it was checked, anything left for you, and the time and agents used.
+- **Undo:** after a PR merge say `revert` (it opens a PR that undoes it); after a local merge
+  say `undo` (it moves your branch back).
+- **Status:** `/dark-factory:dark-factory status` shows where a run is, without changing it.
+- **Resume:** `/dark-factory:dark-factory resume` continues a paused or interrupted run, also
+  from a new session: everything is on disk. If it says the run is live elsewhere and no
+  other window is working on it, answer `take over`. At a cap it asks whether to allow about
+  half as much again (`yes` / `no`); with only minor problems after the last check it asks
+  whether to merge anyway (`yes` / `try once more` / `no`).
+- **Stop:** press Esc to interrupt Claude; the run can be resumed later.
+- **Cleanup:** after a merge that re-tests green it removes its working copy and local branch
+  itself. `/dark-factory:dark-factory sweep` (also run by `list` and at the start of a run)
+  offers the same for runs whose PR merged later. `/dark-factory:dark-factory clean <run-id>`
+  removes a run's working copy and state but keeps its branch.
+- **Usage limit:** in an interactive session Claude Code continues by itself once the limit
+  resets, and the run carries on; the wait does not count against the time cap. A command-line
+  run (`claude -p`) stops instead: run `resume` when the limit resets.
+
+Where files live (beside your project, never committed):
+
+| Path | What |
+|---|---|
+| `../<repo>-df-<run-id>/` | The working copy where the code is written |
+| `../.df-<repo>/<run-id>/` | Run state: spec, questions, plan, steps, checks, log, report |
+| `../.df-<repo>/reports/<run-id>/` | Archive of a finished, merged run |
+| `../.df-<repo>/profile.md` | How to start and test your app, confirmed on your first run |
+| `../.df-<repo>/lessons.md` | Facts about the repo learned by earlier runs |
 
 ## How it works
 
+**The whole journey.** The yellow boxes are the only two points where you reply; everything
+after sign-off runs on its own.
+
 ```mermaid
 flowchart LR
-    A([Your request]) --> Q[Questions<br/>only what the repo can't answer]
-    Q --> P[Plan + hidden checks<br/>written separately]
-    P --> S{{Sign-off<br/>you approve once}}
-    S --> B[[Build<br/>steps in parallel lanes]]
-    B --> C[One independent checker<br/>review + hidden checks]
-    C -->|problems| B
-    C --> PR[PR, merge,<br/>re-test after merge]
-    PR --> N([Plain final note])
-
+    A(["Your request"]) --> Q["Questions, each with a default"]
+    Q --> P["Plan and hidden checks, written separately"]
+    P --> S{"Sign-off: approve once"}
+    S --> B["Build the steps"]
+    B --> C["Final check"]
+    C -->|"problems"| B
+    C --> E["Ship: PR, merge, re-test"]
+    E --> N(["Plain final note"])
     classDef you fill:#fde68a,stroke:#b45309,color:#000
     class Q,S you
 ```
 
-Yellow is where you are asked something. Nothing is asked after sign-off, except when a
-command needs your permission or a budget cap is hit.
-
-- **Questions.** One refiner reads your request and the repo, asks at most 8 questions and
-  drafts the spec from their defaults; it is asked again only when an answer differs. Every
-  answer you accept becomes its own requirement in the spec, word for word, and the final
-  check holds the work to it.
-- **Plan and hidden checks.** A planner splits the work into steps; separately, a QA author
-  writes test scenarios the builder never sees, so the tests can't be shaped by the code. The
-  sign-off step list is printed straight from the plan's step files.
-- **Build.** Steps that touch different files and don't depend on each other run side by side
-  (up to 3 lanes). Each lane has one builder that keeps its context across steps and fixes.
-  Each step must pass mechanical checks before it counts:
+**Build, check, fix.** Each step gets up to 3 attempts; the final check runs at most 3 rounds,
+so at most 2 fix rounds. A stuck step gets one re-plan; after that, or at a cap, the run pauses.
+Plans of more than 3 steps build independent steps side by side, up to 3 at once.
 
 ```mermaid
 flowchart TD
-    B[Builder writes the test first,<br/>then the code] --> D[Scope check:<br/>only planned files, existing tests untouched]
-    D --> R[New tests must fail<br/>without the change]
-    R --> T[Suite, lint, typecheck]
-    T --> H{Risky step?<br/>auth, payments, secrets,<br/>deletes, migrations}
-    H -->|yes| SR[Security review]
-    H -->|no| G{Pass?}
-    SR --> G
-    G -->|yes| OK([Step done])
-    G -->|no, attempts 1-2| B
-    G -->|attempt 3| X([Stuck: re-plan once, else pause])
+    W["Builder writes the test first, then the code"] --> M["Script checks: planned files only, old tests untouched, new tests fail without the change, suite, lint, types"]
+    M -->|"fails, attempt 1 or 2"| W
+    M -->|"fails 3 times"| RP["Re-plan the step once"]
+    RP -->|"still stuck"| PZ(["Pause: say resume"])
+    M -->|"passes"| NX{"More steps?"}
+    NX -->|"yes"| W
+    NX -->|"no"| CK["Checker reviews the change and runs the hidden checks"]
+    CK -->|"serious problems, round 1 or 2"| FX["Fix step for the builder that wrote the code"]
+    FX --> CK
+    CK -->|"still serious after round 3"| PZ
+    CK -->|"clean, or only minor problems"| SH(["Ship"])
+    CAP["Agent or time cap reached"] --> PZ
+    PERM["A command needs your permission"] --> WT(["Waits for you"])
 ```
 
-- **Checker.** One fresh agent reviews the whole change (goal met, correctness, impact on
-  existing code, security, over-engineering) and runs every hidden check. A serious finding
-  must come with evidence (a failing command, a failing check, or a line plus an input that
-  breaks it); one without evidence does not block. Findings go back to the builder that
-  wrote the code; at most 2 fix rounds, then it pauses.
-- **Ending.** It writes `report.md`, opens a PR, merges it once the PR's checks pass (deleting
-  the PR branch), then tests again on the merged code. The final note is at most 10 lines;
-  its time, agent and token numbers come from `df metrics`, and the full report is linked.
+**Who does what.** The orchestrator is the Claude session you talk to. It runs the `df` script
+for every mechanical step and starts each helper with only the files that helper needs. The
+hidden checks go from the QA author to the checker; the builder never sees them.
 
-## Ship modes
-
-Chosen on the sign-off screen, so the rest runs unattended.
-
-| You say | With GitHub (`origin` + `gh auth`) | Without GitHub |
-|---|---|---|
-| `approve` (default: merge) | Opens a PR, waits for its checks (up to about 20 min), merges (squash if allowed), re-tests the merged code | Merges into your branch on this computer, then re-tests |
-| `approve, no merge` | Opens the PR and stops | Leaves the work on its branch |
-| `approve, local` | Merges on this computer only, never pushes | Same |
-| `approve, branch` | Leaves the work on its branch, nothing pushed | Same |
-
-If the repo's own rules (`AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING*`) say assistants must not
-merge, the default becomes `no merge` (or `branch` when pushing is forbidden), the sign-off
-screen quotes the rule, and merging needs `approve, merge`.
-
-It never force-pushes, never uses `--admin`, and never merges red: failing or slow checks
-leave the PR open and say why. A local merge happens only when your folder is clean and on
-the target branch (fast-forward only); otherwise the work stays on its branch with one line
-saying how to bring it in. If the re-test after merging fails, the note says so first and
-offers `revert` (opens a revert PR) or `undo` (moves a local merge back).
-
-If only minor problems are left after the last check round, it finishes and lists them first
-(you can answer `strict` at sign-off to stop instead). Serious problems always stop it.
-
-## Budget cap
-
-The sign-off screen shows a rough estimate (`estimate: 7-14 min, ~6-8 agents`) and a cap
-(`cap: up to 16 agents and 54 min`). The cap is a safety limit well above the estimate (at
-least 14 agents and 40 minutes, or two and three times the high end), so a healthy run does not
-hit it; re-checking a fix that is already in place never stops for time. Time counts from
-sign-off, not while you answer questions. Past either, the run pauses instead of spending more. Run
-`/dark-factory:dark-factory resume`: it shows what was used and asks whether to allow about half
-as much again. Time spent stopped (a closed laptop, a usage limit) is not counted. Estimates start from default figures and use this repo's
-past runs once there are a few.
-
-## Status, resume, cleanup
-
-```
-/dark-factory:dark-factory status [run-id]    where a run is ("not running" if its session died)
-/dark-factory:dark-factory resume [run-id]    continue after a crash, closed laptop or expired login
-/dark-factory:dark-factory list | sweep | clean <run-id>
+```mermaid
+flowchart TD
+    O["Orchestrator: your Claude session"] --> DF["df script: state, budget, checks, commits, merge"]
+    O --> RF["Refiner: questions and spec"]
+    O --> PL["Planner: steps"]
+    O --> QA["QA author: hidden checks"]
+    O --> BU["Builder: tests and code"]
+    O --> RV["Reviewer: security, risky steps only"]
+    O --> CH["Checker: final review"]
+    O --> RT["Retro: lessons, after a pause or a retried step"]
+    PL -->|"step files"| BU
+    QA -->|"hidden checks"| CH
+    QA -.-x|"never shown"| BU
+    DF -->|"checks each step's work"| BU
 ```
 
-- Work happens in a separate copy beside your repo, `../<repo>-df-<run-id>`. Your own folder
-  is not touched, except by a local merge you approved.
-- Run state lives in `../.df-<repo>/<run-id>/`, never committed. One run executes per repo at
-  a time. `resume` works from a new session: everything is on disk. If it says the run is live
-  elsewhere, answer `take over` when no other window is working on it.
-- Usage limit in an interactive session: Claude Code continues by itself once the limit resets,
-  and the run carries on; the wait is not counted against the time cap. A `claude -p` or
-  background session stops instead: run `resume` when the limit resets.
-- After a merge that re-tests green, it removes the working copy and local branch by itself
-  and archives the run (report, spec, plan, questions, log, checks) in
-  `../.df-<repo>/reports/<run-id>/`. `sweep` offers the same cleanup
-  for runs whose PR merged later; `clean` removes a run's working copy and state but keeps
-  its branch.
-- After a run that paused or had a step needing a second attempt, a short retro writes repo facts to
-  `../.df-<repo>/lessons.md` (used by later runs) and suggestions for the plugin (shown to
-  you, never applied).
-- A guard hook blocks `git push`, recursive deletes outside the run's copy, pipe-to-shell and
-  migrations against real databases while a run is live.
+**How a run ends.** The ending is chosen at sign-off. `df` is the only thing that pushes or
+merges, and it never merges with failing checks.
+
+```mermaid
+flowchart TD
+    D["Final check finished"] --> K{"Only minor problems left after the last round?"}
+    K -->|"yes, strict"| PZ(["Paused"])
+    K -->|"yes, not strict: listed first in the note"| M{"Ending chosen"}
+    K -->|"no problems"| M
+    M -->|"merge"| PR["Open PR, wait for its checks, merge"]
+    M -->|"no merge"| OPEN(["PR left open for you"])
+    M -->|"local"| LM["Merge on this computer if your folder is clean and on the target"]
+    M -->|"branch"| BR(["Left on its branch"])
+    PR -->|"checks fail or time out"| OPEN
+    LM -->|"folder not ready"| BR
+    PR --> T["Test the merged code again"]
+    LM --> T
+    T -->|"green"| DONE(["Done: copy removed, run archived"])
+    T -->|"red"| RED(["Note says so first: say revert or undo"])
+```
+
+## Safety
+
+What the `df` script enforces:
+- Only `df` pushes or merges. Never a force-push, never `--admin`, never a merge with failing
+  checks, and it refuses if the ending, the target or the starting point changed since sign-off.
+- A step counts only if it changed planned files, left existing tests alone, and its new
+  tests fail without the change. The checker and reviewer may not change the code; if they
+  do, the change is undone and their result is thrown away.
+- Caps on agents and time, a lock so one run executes per repo at a time, and secrets in your
+  request are redacted (you are asked to confirm).
+
+The guard hook blocks, while a run is live, `git push`, recursive deletes outside the run's
+working copy, piping a download into a shell, and migrations or destructive SQL against a
+database that is not the run's own. **It is a seat belt, not a sandbox:** it matches commands
+as typed, and Claude still runs with your permissions. There is no guarantee of correct output,
+and prompt injection is reduced, not solved.
 
 ## Results, honestly
 
-Same tasks, same evaluators, compared with asking plain Claude Code directly. Score is the
-evaluators' overall rating out of 10.
+One run per task, compared with asking plain Claude Code directly, against a stand-in for
+GitHub, in auto mode. Plain Claude ran with permissions skipped, so the times are not strictly
+like for like. Scores are evaluators' ratings out of 10.
 
-| Task | Dark Factory | Plain Claude | Score |
+| Task | Dark Factory | Plain Claude | Scores |
 |---|---|---|---|
-| Bugfix (real library issue) | v0.2: 22 min, 32 agents, ~1M tokens | 3 min | 3/10 |
-| Feature (small app) | v0.2: 62 min, 76 agents, ~2.7M tokens | 4 min | 4/10 |
-| Newcomer (non-technical user, new tool) | v0.2: 47 min, 78 agents, ~2.4M tokens | 77 s | 4/10 |
-| All three | **v0.3: re-evaluation pending** | | |
+| Larger spec | 31 min | 5.7 min | developer 8, non-technical 6, unattended 8 (plain Claude: 7 and 8); both passed 66/66 blind checks |
+| Newcomer build | 27 min | 77 s | developer 7, non-technical 7, onboarding 7, unattended 8 |
+| Bugfix | 13 min | about 3 min | developer 8, non-technical 8, unattended 8 |
+| Feature | 22 min | about 4 min | developer 7, non-technical 8, unattended 8 |
 
-v0.2 got the right answer but cost far more than plain Claude for near-identical results.
-v0.3 is the response: one checker instead of review panels, mechanical checks instead of an
-agent per step, resumed builders, parallel lanes, and the full PR, merge and re-test cycle.
-Its numbers replace that row once measured. Earlier field runs: `docs/evaluation.md`,
-`docs/field-test.md`.
+All four finished without help after approval; on earlier builds the same tasks paused
+unfinished in 3 of 8 runs. It is slower: plain Claude is usually the better choice for quick
+small tasks. Older field runs: `docs/evaluation.md`, `docs/field-test.md`.
 
-No guarantee of correct output, no sandbox, prompt injection mitigated and not solved.
+## Troubleshooting
+
+- **It stopped and asks for permission:** allow the command it names, then say `resume`. Use
+  auto mode to avoid this.
+- **"One run executes per repo at a time":** finish or `clean` the other run, or `resume` it.
+- **Paused:** the last line says what is open; say `/dark-factory:dark-factory resume`.
+- **The PR was not merged:** its checks failed or were too slow; the note says why and the PR
+  stays open.
+- **"run is live" on resume:** answer `take over` if no other window is working on it.
 
 ## Development
 
 ```bash
-bash tests/run.sh
+bash tests/run.sh    # the full suite; can take several minutes
 ```
 
-Design: `docs/design.md`.
+Layout: `skills/dark-factory/` (the orchestrator's instructions), `agents/` (the helpers),
+`scripts/df` (state and every mechanical check), `hooks/guard.sh` (the guard). Design:
+`docs/design.md`.
