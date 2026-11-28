@@ -9,6 +9,7 @@ assert_fail "lessons-set refuses when the retro wrote nothing" ls_
 printf 'old lesson\n' > "$SR/lessons.md"
 seq 1 31 | sed 's/^/lesson /' > "$rd/lessons-new.md"
 assert_ok "more than 30 lines is cut, not refused" ls_
+assert_contains "1 line(s) over 30 dropped" "$(ls_ 2>&1)" "lessons-set says on stderr that lines were dropped"
 assert_eq "30:lesson 30" "$(grep -c '' "$SR/lessons.md"):$(tail -1 "$SR/lessons.md")" "lessons cut to 30 lines"
 printf 'tests run with PYTHONDONTWRITEBYTECODE=1 (run %s, chunk 01)\napi key: sk-abcdefghijklmnopqrstuvwx\n' "$id" > "$rd/lessons-new.md"
 assert_fail "a lessons file holding a secret is refused" ls_
@@ -52,6 +53,9 @@ l=$(grep -- '- ppp' "$SR/proposals.md"); assert_eq "200:..." "${#l}:${l#"${l%???
 python3 -c "print('x'*300)" > "$rd/lessons-new.md"
 assert_ok "a lesson line over 200 characters is cut" ls_
 assert_eq "200" "$(awk '{ print length($0) }' "$SR/lessons.md")" "long lesson cut to 200"
+python3 -c "print('x'*196 + 'é'*60)" > "$rd/lessons-new.md"; ls_ 2>/dev/null
+assert_ok "a cut never splits a UTF-8 character" python3 -c "open('$SR/lessons.md', encoding='utf-8', errors='strict').read()"
+assert_contains "1 line(s) cut" "$(ls_ 2>&1)" "lessons-set says on stderr that a line was cut"
 : > "$rd/lessons-new.md"; assert_ok "an empty lessons file clears the lessons" ls_
 assert_eq "" "$(cat "$SR/lessons.md")" "lessons cleared"
 printf 'x\n' > "$SR/profile.md"; h1=$(cd "$R" && "$DF" state-hash); echo y >> "$SR/lessons.md"

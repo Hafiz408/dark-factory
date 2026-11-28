@@ -10,7 +10,9 @@ input=$(cat)
 
 # Record the session's permission mode for `df mode` (the sign-off screen). Fail-open: never blocks.
 # The unescaped key only occurs at the top level: inside tool_input its quotes are escaped.
-if [ -d "$sr" ]; then
+# Only from a call that runs this plugin's df: another session in the same repo must not overwrite it.
+pd=$(cd "$(dirname "$0")/.." 2>/dev/null && pwd); pp=$(cd "$(dirname "$0")/.." 2>/dev/null && pwd -P)
+if [ -d "$sr" ] && [ -n "$pd" ] && { case $input in *"$pd/scripts/df"*|*"$pp/scripts/df"*) true;; *) false;; esac; }; then
   pm=$(printf '%s' "$input" | sed -n 's/.*"permission_mode"[ ]*:[ ]*"\([^"]*\)".*/\1/p' | head -1)
   [ -z "$pm" ] || printf '%s\n' "$pm" > "$sr/permission-mode" 2>/dev/null || true
 fi

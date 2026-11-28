@@ -149,7 +149,15 @@ gate, the failing items):
 - Clean and green: ship. Otherwise each finding becomes a fix step `FX-<k>` owned by the step
   whose scope holds the file, run by that step's resumed builder. The checker is resumed to
   re-check only the fix diff and failed scenarios. `max_review_rounds` is 3 (2 fix rounds),
-  then pause.
+  then pause. It is pinned at sign-off in `ship_pin` (lowering it would merge open findings
+  sooner); only `df extend <id> rounds`, on the user's yes, raises it and re-pins.
+- Accepting open findings (agreed at sign-off, or `df accept` on the user's yes) reads the
+  findings exactly as the gate does: it needs no blocking critical or high finding (with or
+  without a `what:` line), no line pairing a scenario id with FAIL or INVALID in any format,
+  no unjudged command that failed before the run, and the full app tests run. `df check-gate`
+  records its result like `check-end`. `df land` then refuses a report that does not list the
+  accepted problems under `## Anything left`, and its final lines say WITH KNOWN PROBLEMS and
+  list them.
 - A finding that survives a fix round, or that a fix caused: the next fix step first reverts
   that fix (`git revert --no-commit`), then solves it the simplest way.
 
@@ -161,7 +169,8 @@ gate, the failing items):
    was checked, Anything left; then technical changes and per-step outcomes. A bugfix branch
    that changes no source starts with `NOT FIXED` and is never shipped.
 2. **Retro** (haiku), only after a pause or a step that needed attempt 2+ (not for a check fix
-   round alone): `lessons.md` for this repo
+   round alone): `lessons.md` for this repo (`df lessons-set` keeps 30 lines, cuts a line to
+   200 bytes without splitting a UTF-8 character, and says on stderr what it dropped)
    (applied to later runs) and `proposals.md` for the plugin (listed, never applied).
 Steps 3 to 5 are one re-entrant `df land <id> <session> "<title>"` call: it stops with one
 plain line and a distinct exit code (2 PR not opened, 3 PR not merged, 4 call again, 5 local
@@ -245,9 +254,11 @@ when a cap is reached; time counts from sign-off (`signoff_at`, as do the metric
 count toward `max_agents` (a resume keeps its agent). The run then pauses; on `resume` the user
 says yes and `df extend` allows half as much again. A new session taking over a dead one credits
 the idle gap since its last lock heartbeat, so downtime never counts; so does the same session
-refreshing its lock after 20 min or more without a heartbeat (`DF_IDLE_CREDIT`; an interactive
+refreshing its lock after 20 min or more without a heartbeat (an interactive
 session continuing after a usage limit). A paused run is credited only by `df unpause`. `df post`
-and `step-end` beat the heartbeat, so a long role is not mistaken for idle. Other limits: 3 attempts per step, 3 interrupts per step,
+and `step-end` beat the heartbeat, and so does the end of every command run inside df
+(`step-check`, `check-end`, `check-gate` after the full app tests, `land`'s post-merge tests),
+so a long role or suite is not mistaken for idle. Other limits: 3 attempts per step, 3 interrupts per step,
 3 review rounds, 6 steps per builder, 3 amends, 3 lanes.
 
 ## 9. State, status, resume, clean
@@ -286,10 +297,13 @@ when safe; `--archive` first copies the audit trail to `reports/<id>/` (no `run.
   followed as instructions. The sign-off shows the goal in the factory's words and every
   command it will run.
 - Guard hook (`hooks/guard.sh`), active only while a run lock is fresh: blocks `git push`,
-  recursive deletes outside the run's worktrees, pipe-to-shell, and migrations or destructive
-  SQL that don't target a per-run `df_*` database. A seat belt, not a sandbox.
+  recursive or forced deletes outside the run's worktrees (quoted targets and `--recursive`/`--force`
+  included; an absolute target with a glob, brace or variable is refused; a single temp file
+  goes only when its whole path is literal under `/tmp` or `/var/folders`), pipe-to-shell, and
+  migrations or destructive SQL that don't target a per-run `df_*` database. A seat belt, not a sandbox.
 - Runs under the user's permission mode. The guard hook also records the session's
-  `permission_mode` beside the run state (fail-open, blocks nothing); `df mode` prints it, and
+  `permission_mode` beside the run state, only from a call that runs the plugin's own `df`
+  (another session in the same repo cannot overwrite it; fail-open, blocks nothing); `df mode` prints it, and
   the sign-off adds one line asking to switch to auto mode unless it is auto or bypass. A denial
   (any of the known wordings, or an auto-mode block) is never worked around: it sets
   `waiting_permission`, stops and names what to allow.

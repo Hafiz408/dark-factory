@@ -13,11 +13,13 @@ assert_ok "inert without a lock: git push allowed" call "git push origin main"
 mode() { printf '{"session_id":"x","permission_mode":"%s","tool_name":"Bash","tool_input":{"command":"%s"}}' "$1" "$2" | "$GUARD" 2>/dev/null; }
 assert_eq "unknown" "$("$DF" mode)" "df mode: unknown before any hook call"
 mkdir -p "$(dirname "$R")/.df-$(basename "$R")"
-assert_ok "mode recorded, call allowed" mode acceptEdits "echo hi"
+assert_ok "mode recorded, call allowed" mode acceptEdits "$DF status"
 assert_eq "acceptEdits" "$("$DF" mode)" "df mode prints the recorded mode"
-mode auto 'echo \"permission_mode\":\"plan\"'
+mode auto "$DF list"' \"permission_mode\":\"plan\"'
 assert_eq "auto" "$("$DF" mode)" "a mode quoted inside the command is ignored"
-mode 'bad mode' "echo"
+assert_ok "another session's call allowed" mode plan "echo hi"
+assert_eq "auto" "$("$DF" mode)" "a call that does not run the plugin's df records nothing"
+mode 'bad mode' "$DF status"
 assert_eq "unknown" "$("$DF" mode)" "an unrecognised mode reads as unknown"
 assert_ok "no permission_mode in the input: allowed" call "echo hi"
 

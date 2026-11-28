@@ -47,9 +47,9 @@ s=$("$DF" conf-get "$c" signoff_at); [ "$s" -ge 3990 ] && [ "$s" -le 4010 ] && o
 printf 'session=sessI\nheartbeat=%s\n' "$(( $(date +%s) - 600 ))" > "$("$DF" run-dir "$id")/lock"
 "$DF" lock "$id" refresh sessI
 assert_eq "$s" "$("$DF" conf-get "$c" signoff_at)" "a 10 minute gap is work, not credited"
-printf 'session=sessI\nheartbeat=%s\n' "$(( $(date +%s) - 100 ))" > "$("$DF" run-dir "$id")/lock"
-DF_IDLE_CREDIT=50 "$DF" lock "$id" refresh sessI
-s2=$("$DF" conf-get "$c" signoff_at); [ "$s2" -gt "$s" ] && ok "DF_IDLE_CREDIT sets the threshold" || bad "DF_IDLE_CREDIT sets the threshold"
+printf 'session=sessI\nheartbeat=%s\n' "$(( $(date +%s) - 1300 ))" > "$("$DF" run-dir "$id")/lock"
+DF_IDLE_CREDIT=99999 "$DF" lock "$id" refresh sessI
+s2=$("$DF" conf-get "$c" signoff_at); [ "$s2" -gt "$s" ] && ok "a gap over 20 minutes is credited; no env override" || bad "a gap over 20 minutes is credited; no env override"
 "$DF" conf-set "$c" status paused
 printf 'session=sessI\nheartbeat=%s\n' "$old" > "$("$DF" run-dir "$id")/lock"
 "$DF" lock "$id" refresh sessI

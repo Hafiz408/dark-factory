@@ -24,7 +24,7 @@ newrun() { # newrun <repo> <ship word>: a run at stage check, signed off, with o
   local id wt rd
   id=$(df "$1" start "$T/in.txt"); rd=$(df "$1" run-dir "$id"); wt=$(df "$1" conf-get "$rd/run.conf" worktree)
   echo change > "$wt/c.txt"; git -C "$wt" add c.txt; git -C "$wt" commit -qm c
-  echo 'test -z "$DF_RED" && { [ -z "$DF_STRAY" ] || touch stray.txt; }' > "$rd/env.commands"; df "$1" conf-set "$rd/run.conf" base_ref main
+  echo 'test -z "$DF_RED" && { [ -z "$DF_STRAY" ] || touch stray.txt; } && { [ -z "$DF_AGE" ] || sed -i.bak "s/^heartbeat=.*/heartbeat=1/" "$DF_AGE"; }' > "$rd/env.commands"; df "$1" conf-set "$rd/run.conf" base_ref main
   df "$1" signoff "$id" $2 >/dev/null; df "$1" conf-set "$rd/run.conf" stage check
   df "$1" conf-set "$rd/run.conf" check_pass_sha "$(git -C "$wt" rev-parse HEAD)"
   printf '# Report\n## What changed\n- c\n## Technical changes\n- c.txt\n' > "$rd/report.md"
@@ -79,7 +79,8 @@ assert_fail "land_branch: nothing pushed" git -C "$ORIGIN" rev-parse -q --verify
 # e2e configured: stop after the merge for the full app tests, then finish on a second call
 printf -- '---\ne2e_cmd: true\ne2e_needs_app: no\n---\n' > "$SC/profile.md"
 F=$(newrun "$C" merge)
-assert_eq "7" "$(land "$C" "$DF" land "$F" s1 "Add c")" "land_e2e: exit 7 after the merge"
+assert_eq "7" "$(land "$C" DF_AGE="$SC/$F/lock" "$DF" land "$F" s1 "Add c")" "land_e2e: exit 7 after the merge"
+h=$(sed -n 's/^heartbeat=//p' "$SC/$F/lock"); [ $(( $(date +%s) - h )) -lt 60 ] && ok "land beats after the post-merge tests" || bad "land beats after the post-merge tests"
 df "$C" conf-set "$SC/$F/run.conf" postmerge_e2e green
 assert_eq "0" "$(land "$C" "$DF" land "$F" s1 "Add c")" "land_e2e: green, the second call finishes"
 rm "$SC/profile.md"
@@ -178,7 +179,7 @@ assert_fail "accept_refuses_changed_branch" df "$C" accept "$E"
 newround() { # newround <ship words...> <severity>: a signed-off run whose last check round is about to be judged
   local sev=${!#} id rd wt; set -- "${@:1:$(($# - 1))}"
   id=$(newrun "$C" "$*"); rd=$(df "$C" run-dir "$id"); wt=$(df "$C" conf-get "$rd/run.conf" worktree)
-  df "$C" conf-set "$rd/run.conf" check_pass_sha ""; df "$C" conf-set "$rd/run.conf" max_review_rounds 1
+  df "$C" conf-set "$rd/run.conf" check_pass_sha ""; df "$C" conf-set "$rd/run.conf" max_review_rounds 1; df "$C" profile-pin "$id" >/dev/null
   printf -- '- severity: %s\n  source: correctness\n  where: c.txt:1\n  what: rare layout\n  evidence: x\nVERDICT: FAIL - 1\n' "$sev" > "$rd/panel/check-r1.md"
   : > "$rd/panel/check-r1-suite.md"; df "$C" conf-set "$rd/run.conf" check_head_r1 "$(git -C "$wt" rev-parse HEAD)"
   df "$C" conf-set "$rd/run.conf" check_last_round 1; echo "$id"
@@ -193,4 +194,39 @@ I=$(newround merge medium); printf -- '- severity: high\n  source: e2e\n  where:
 assert_eq "3" "$(gate_ "$I")" "high_without_what_still_stops"
 J=$(newround merge medium); echo 'S3: FAIL' >> "$SC/$J/panel/check-r1.md"
 assert_eq "3" "$(gate_ "$J")" "failing_scenario_in_another_format_still_stops"
+# max_review_rounds is pinned at sign-off: lowering it never merges open findings; df extend rounds raises it and re-pins
+K=$(newround merge medium); KC="$SC/$K/run.conf"; df "$C" conf-set "$KC" max_review_rounds 3; df "$C" profile-pin "$K" >/dev/null
+df "$C" conf-set "$KC" max_review_rounds 1
+assert_eq "3" "$(gate_ "$K")" "lowered_rounds_do_not_merge"
+df "$C" conf-set "$KC" check_end_rc 3
+assert_fail "accept refuses after max_review_rounds was changed" df "$C" accept "$K"
+assert_fail "extend rounds refuses to re-pin a changed setting" df "$C" extend "$K" rounds
+df "$C" conf-set "$KC" max_review_rounds 3
+assert_ok "extend rounds" df "$C" extend "$K" rounds
+assert_eq "4" "$(df "$C" conf-get "$KC" max_review_rounds)" "extend rounds adds one round"
+assert_eq "2" "$(gate_ "$K")" "after extend rounds a fix round is left"
+assert_eq "2" "$(df "$C" conf-get "$KC" check_end_rc)" "check-gate records its exit code"
+assert_contains "FAIL round 1 of 4" "$(cat "$SC/$K/panel/check-r1.end")" "check-gate records its result for replay"
+# a command that failed before the run and is not judged yet: no acceptance
+df "$C" conf-set "$KC" check_end_rc 3; df "$C" conf-set "$KC" check_judge 2
+assert_fail "accept refuses while a baseline-failing command is unjudged" df "$C" accept "$K"
+df "$C" conf-set "$KC" check_judge ""
+# strict and the full app tests: accept after e2e.md and check-gate
+printf -- '---\ne2e_cmd: true\ne2e_needs_app: no\n---\n' > "$SC/profile.md"
+N=$(newround "merge strict" medium); NC="$SC/$N/run.conf"; df "$C" conf-set "$NC" check_end_rc 3
+assert_fail "strict: accept before the full app tests" df "$C" accept "$N"
+assert_eq "7" "$(gate_ "$N")" "strict: check-gate asks for the full app tests"
+echo "all passed" > "$SC/$N/panel/e2e-r1.md"; : > "$SC/$N/panel/e2e-r1-findings.md"; df "$C" conf-set "$NC" check_end_rc 0
+assert_eq "3" "$(gate_ "$N")" "strict: check-gate after the full app tests stops"
+assert_eq "3" "$(df "$C" conf-get "$NC" check_end_rc)" "strict: check-gate records exit 3"
+assert_ok "strict: then accept works" df "$C" accept "$N"
+rm "$SC/profile.md"
+# land with accepted findings: the report must list them; the final lines say so
+df "$C" conf-set "$NC" stage check
+assert_eq "9" "$(land "$C" "$DF" land "$N" s1 "Add c")" "land refuses when report.md lacks the accepted problems"
+assert_contains "Anything left" "$(cat "$T/out")" "land says why"
+printf '# Report\n## What changed\n- c\n## Anything left\n- WITH KNOWN PROBLEMS: rare layout at c.txt:1\n## Technical changes\n- c.txt\n' > "$SC/$N/report.md"
+assert_eq "0" "$(land "$C" "$DF" land "$N" s1 "Add c")" "land with accepted problems listed"
+assert_contains "merged and verified WITH KNOWN PROBLEMS" "$(cat "$T/out")" "land says WITH KNOWN PROBLEMS"
+assert_contains "medium c.txt:1: rare layout" "$(cat "$T/out")" "land lists the known problems"
 finish

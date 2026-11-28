@@ -90,8 +90,15 @@ cmd_unpause() { # df unpause <run-id>: resume the clock, crediting the time spen
   conf_set "$c" status active
   rm -f "$(dirname "$c")/ro-violation" # the user resumed after hearing about it
 }
-cmd_extend() { # df extend <run-id>: the user said continue after a cap pause; allow half as much again
-  local c ma bs st now na nb; c="$(run_dir "${1:-}")/run.conf"; [ -f "$c" ] || die "no such run: ${1:-}"
+cmd_extend() { # df extend <run-id> [rounds]: the user said continue after a cap pause; allow half as much again (rounds: one more check round)
+  local c ma bs st now na nb mx; c="$(run_dir "${1:-}")/run.conf"; [ -f "$c" ] || die "no such run: ${1:-}"
+  if [ "${2:-}" = rounds ]; then
+    ship_pin_check "$c" extend # never bless a change made since sign-off
+    mx=$(conf_get "$c" max_review_rounds); case $mx in ''|*[!0-9]*) mx=3;; esac
+    conf_set "$c" max_review_rounds $((mx + 1)); conf_set "$c" ship_pin "$(ship_pin_of "$c")"
+    echo "rounds: up to $((mx + 1)) check rounds"; return 0
+  fi
+  [ -z "${2:-}" ] || die "usage: df extend <run-id> [rounds]"
   ma=$(conf_get "$c" max_agents); bs=$(conf_get "$c" budget_seconds); st=$(clock_start "$c"); now=$(date +%s)
   case "$ma:$bs:$st" in *[!0-9:]*) die "extend: a cap or the start time in $c is not a number";; esac
   # ponytail: half the cap again, from whatever is already used; a knob if people want other amounts.
@@ -248,11 +255,12 @@ cmd_profile_pin() { # df profile-pin <run-id>: at sign-off, record the profile's
 }
 # The ship settings chosen at sign-off; run.conf is writable by roles, so ship, merge and local-merge re-check them.
 # ponytail: a plain hash, so it catches a stray write, not a role that recomputes it; an HMAC with a key outside the run dir if that matters.
-ship_pin_of() { local a; a=$(conf_get "$1" accept_minor); printf '%s\n%s\n%s\n%s' "$(conf_get "$1" ship_mode)" "$(conf_get "$1" ship_base)" "$(conf_get "$1" base_ref)" "${a:+$a
-}" | sha; }
+# max_review_rounds is in it: lowering it would turn open findings into an accepted merge sooner (raise it with df extend <id> rounds).
+ship_pin_of() { local a; a=$(conf_get "$1" accept_minor); printf '%s\n%s\n%s\n%s%s' "$(conf_get "$1" ship_mode)" "$(conf_get "$1" ship_base)" "$(conf_get "$1" base_ref)" "${a:+$a
+}" "$(conf_get "$1" max_review_rounds)" | sha; }
 # The commands df step-check runs were shown at sign-off; a role editing them afterwards is refused.
 cmd_pin_of() { { cat "$(dirname "$1")/env.commands" 2>/dev/null || true; conf_get "$1" test_cmd; } | sha; }
-ship_pin_check() { [ "$(conf_get "$1" ship_pin)" = "$(ship_pin_of "$1")" ] || die "$2: ship_mode, ship_base or base_ref changed since sign-off (or there was no sign-off)"; }
+ship_pin_check() { [ "$(conf_get "$1" ship_pin)" = "$(ship_pin_of "$1")" ] || die "$2: ship_mode, ship_base, base_ref or max_review_rounds changed since sign-off (or there was no sign-off)"; }
 # The run's start of unattended time: sign-off, else (a run from before v0.3 pinned it) the start.
 clock_start() { local s; s=$(conf_get "$1" signoff_at); case $s in ''|*[!0-9]*) s=$(conf_get "$1" started);; esac; echo "$s"; }
 
@@ -319,9 +327,10 @@ cmd_lock() { # df lock <run-id> acquire|refresh|release|check [session]
           credit_clock "$rd/run.conf" $((now - hb))
         fi
         # The same session back after a long silence (a usage limit, a closed laptop): idle, not work.
-        # Not while paused: unpause credits that. post and step-end beat the heartbeat, so a long role is not idle.
+        # Not while paused: unpause credits that. A role's return and the end of each command run inside df beat the
+# heartbeat, so a long role or suite is not idle.
         # ponytail: a wait inside a role (the limit hit mid-builder) still counts; it ends with that role's post.
-        if [ "$act" = refresh ] && [ "$cur" = "$sess" ] && [ "$hb" -gt 0 ] && [ $((now - hb)) -ge "${DF_IDLE_CREDIT:-1200}" ] &&
+        if [ "$act" = refresh ] && [ "$cur" = "$sess" ] && [ "$hb" -gt 0 ] && [ $((now - hb)) -ge 1200 ] &&
            [ -f "$rd/run.conf" ] && [ "$(conf_get "$rd/run.conf" status)" != paused ]; then
           credit_clock "$rd/run.conf" $((now - hb))
         fi
@@ -461,7 +470,7 @@ cmd_step_check() { # df step-check <worktree> <step.md> <builder-output> <findin
       *) echo "step-check: INFRA redcheck could not run ($log)"; return 4;;
     esac
   fi
-  run_cmds "$rd" "$wt" "$out" "$log"
+  run_cmds "$rd" "$wt" "$out" "$log"; beat "$rd"
   rc=0; line=$(cmd_gate "$out") || rc=$?
   [ $rc -eq 0 ] || { echo "step-check: FAIL ${line%% *} blocking ($out; command output: $log)"; return 1; }
   [ -z "$judge" ] || { echo "step-check: JUDGE command(s)$judge failed, and also failed before the run: read $log"; return 6; }
@@ -554,12 +563,22 @@ cmd_lessons_set() { # df lessons-set <run-id>: install the retro's lessons (cut 
     elif [ -n "$(cmd_canary_scan "$rd/scenarios" "$rd/proposals-new.md")" ]; then echo "df: lessons-set: proposals dropped (a holdout scenario canary appears in them)" >&2
     else prop=1; fi
   fi
-  # At most 30 lines of 200 characters: longer input is cut, never refused (one long line once lost every lesson).
-  awk 'NR <= 30 { if (length($0) > 200) $0 = substr($0, 1, 197) "..."; print }' "$rd/lessons-new.md" | atomic "$sr/lessons.md"
+  # At most 30 lines of 200 bytes: longer input is cut, never refused (one long line once lost every lesson).
+  cut_lines 30 lessons < "$rd/lessons-new.md" | atomic "$sr/lessons.md"
   if [ -n "$prop" ]; then # this run's latest retro replaces its earlier section
     { [ ! -f "$sr/proposals.md" ] || H="## $1" awk '$0 == ENVIRON["H"] { skip=1; next } /^## / { skip=0 } !skip' "$sr/proposals.md"
-      printf '## %s\n' "$1"; awk 'length($0) > 200 { $0 = substr($0, 1, 197) "..." } 1' "$rd/proposals-new.md"; } | atomic "$sr/proposals.md"
+      printf '## %s\n' "$1"; cut_lines 0 proposals < "$rd/proposals-new.md"; } | atomic "$sr/proposals.md"
   fi
+}
+cut_lines() { # cut_lines <max lines, 0 = all> <name>: stdin to stdout, lines over 200 bytes cut to 197 + "...", says on stderr what was dropped
+  # Bytes, not characters (LC_ALL=C, so every awk counts the same); a cut drops the last, possibly partial,
+  # UTF-8 character instead of splitting it.
+  LC_ALL=C awk -v max="$1" -v name="$2" '
+    max && NR > max { d++; next }
+    length($0) > 200 { s = substr($0, 1, 197); sub(/[\200-\277]*$/, "", s); sub(/[\300-\377]$/, "", s); $0 = s "..."; k++ }
+    { print }
+    END { if (d) printf "df: lessons-set: %d line(s) over %d dropped from the %s\n", d, max, name > "/dev/stderr"
+          if (k) printf "df: lessons-set: %d line(s) cut to 200 bytes in the %s\n", k, name > "/dev/stderr" }'
 }
 
 cmd_state_hash() { # df state-hash: one hash over the shared per-repo files, to check a role did not write them
@@ -678,7 +697,7 @@ run_wt_ok() { # run_wt_ok <run.conf> <path>: the path is the run worktree or one
   [ "$2" = "$w" ] && return 0
   case $2 in "$w-c"*) printf '%s\n' "${2#"$w-c"}" | grep -Eqx '[0-9]{1,3}|FX-[0-9]+';; *) return 1;; esac
 }
-beat() { # beat <run-dir>: a role just returned, so the session is working: move the heartbeat, keep its session
+beat() { # beat <run-dir>: a role or a command run just finished, so the session is working: move the heartbeat, keep its session
   [ -f "$1/lock" ] || return 0
   printf 'session=%s\nheartbeat=%s\n' "$(sed -n 's/^session=//p' "$1/lock")" "$(date +%s)" | atomic "$1/lock"
 }
@@ -899,7 +918,7 @@ cmd_check_start() { # df check-start <run-id> <session-id>: exit 2 lock held els
   cmd_validate "$1"
   [ -n "$n" ] || { n=$(cmd_bump "$1" review); conf_set "$c" check_round_open "$n"; }
   out="$rd/panel/check-r$n.md"
-  conf_set "$c" check_pass_sha ""
+  conf_set "$c" check_pass_sha ""; conf_set "$c" accepted_round ""
   mark_epoch "$rd"
   ro_take "$1" "$wt" "$out" # after every write above: they are part of the hash
   echo "milestone: [df $1] final check, round $n"
@@ -934,14 +953,14 @@ cmd_check_end() { # df check-end <run-id> <agent-id> <tokens> <spawn|resume> <di
   fi
   [ "$(conf_get "$c" cmd_pin)" = "$(cmd_pin_of "$c")" ] || { echo "check-end: INFRA env.commands or test_cmd changed since sign-off"; return 4; }
   : > "$su"; : > "$sl"
-  run_cmds "$rd" "$wt" "$su" "$sl"
+  run_cmds "$rd" "$wt" "$su" "$sl"; beat "$rd"
   e2e_configured || echo "e2e: not configured" > "$rd/panel/e2e-r$n.md"
   rc=0; g=$( (cmd_gate "$out" "$su") ) || rc=$?
   [ -n "$g" ] || return 1 # gate refused (an unknown severity word): its message is on stderr
   conf_set "$c" "check_head_r$n" "$(git -C "$wt" rev-parse HEAD)"
   printf -- '- check round %s: checker %s %s, %s blocking of %s findings, %s failing commands\n' "$n" "$4" "$v" "${g%% *}" "${g##* }" "$bad" >> "$rd/log.md"
   l=0; check_round_result "$1" "$n" "$g" "$judge" "$out" "$su" > "$rd/panel/check-r$n.end" || l=$?
-  conf_set "$c" check_last_round "$n"; conf_set "$c" check_end_rc "$l"; conf_set "$c" check_round_open ""
+  conf_set "$c" check_last_round "$n"; conf_set "$c" check_end_rc "$l"; conf_set "$c" check_round_open ""; conf_set "$c" check_judge "${judge# }"
   cat "$rd/panel/check-r$n.end"; return "$l"
 }
 check_round_result() { # check_round_result <run-id> <round> <gate line> <judge> <files...>: one summary, the failing items, the exit code; records the pass
@@ -974,7 +993,7 @@ check_round_result() { # check_round_result <run-id> <round> <gate line> <judge>
 cmd_check_gate() { # df check-gate <run-id>: gate the last round again after judging a command or running the full app tests; records the pass
   # exit 0 pass recorded, 2 blocking (a fix round is left), 3 blocking and no fix round left, 7 run the full app tests first
   local rd c wt n g rc=0 su e
-  run_ctx "${1:-}"; n=$(conf_get "$c" check_last_round)
+  run_ctx "${1:-}"; n=$(conf_get "$c" check_last_round); beat "$rd" # the full app tests or the judging just ran
   case $n in ''|*[!0-9]*) die "check-gate: no check round has ended (df check-end)";; esac
   [ -z "$(conf_get "$c" check_round_open)" ] || die "check-gate: round $(conf_get "$c" check_round_open) is still open (df check-end)"
   su="$rd/panel/check-r$n-suite.md"; e="$rd/panel/e2e-r$n-findings.md"
@@ -982,8 +1001,15 @@ cmd_check_gate() { # df check-gate <run-id>: gate the last round again after jud
   set -- "$rd/panel/check-r$n.md" "$su"; [ ! -f "$e" ] || set -- "$@" "$e"
   g=$( (cmd_gate "$@") ) || rc=$?
   [ -n "$g" ] || return 1
-  if [ "${g%% *}" -gt 0 ]; then rc=0; check_round_result "$(basename "$rd")" "$n" "$g" "" "$@" || rc=$?; return $rc; fi
-  conf_set "$c" check_pass_sha "$(git -C "$wt" rev-parse HEAD)"
+  conf_set "$c" check_judge "" # the orchestrator judged the commands before calling this
+  # Recorded like check-end's, so df accept and a replayed check-end see this result.
+  rc=0; gate_result "$rd" "$n" "$g" "$@" > "$rd/panel/check-r$n.end" || rc=$?
+  conf_set "$c" check_end_rc "$rc"; cat "$rd/panel/check-r$n.end"; return $rc
+}
+gate_result() { # gate_result <run-dir> <round> <gate line> <files...>
+  local rd=$1 n=$2 g=$3; shift 3
+  if [ "${g%% *}" -gt 0 ]; then check_round_result "$(basename "$rd")" "$n" "$g" "" "$@"; return $?; fi
+  conf_set "$rd/run.conf" check_pass_sha "$(git -C "$(conf_get "$rd/run.conf" worktree)" rev-parse HEAD)"
   echo "check-gate: PASS round $n: nothing blocking"; echo "milestone: [df $(basename "$rd")] final check passed"
 }
 accept_record() { # accept_record <run-id> <round> <files...>: record a pass with open findings when only medium ones are open; else say why (exit 2)
@@ -1003,7 +1029,9 @@ cmd_accept() { # df accept <run-id>: the user said yes to merging with the open 
   case $n in ''|*[!0-9]*) echo "accept: no: the final check has not finished a round"; return 2;; esac
   [ -z "$(conf_get "$c" check_round_open)" ] || { echo "accept: no: check round $(conf_get "$c" check_round_open) has not ended"; return 2; }
   [ "$(conf_get "$c" check_end_rc)" = 3 ] || [ "$(conf_get "$c" check_end_rc)" = 2 ] || { echo "accept: no: the last round did not end with open findings"; return 2; }
-  if e2e_configured && [ ! -f "$rd/panel/e2e-r$n.md" ]; then echo "accept: no: the full app tests have not run (e2e.md)"; return 2; fi
+  if e2e_configured && [ ! -f "$rd/panel/e2e-r$n.md" ]; then echo "accept: no: the full app tests have not run (e2e.md, then df check-gate)"; return 2; fi
+  [ -z "$(conf_get "$c" check_judge)" ] || { echo "accept: no: command(s) $(conf_get "$c" check_judge) failed as before the run and are not judged yet (judge them, then df check-gate)"; return 2; }
+  [ "$(conf_get "$c" ship_pin)" = "$(ship_pin_of "$c")" ] || { echo "accept: no: ship_mode, ship_base, base_ref or max_review_rounds changed since sign-off"; return 2; }
   set -- "$rd/panel/check-r$n.md" "$rd/panel/check-r$n-suite.md"; [ ! -f "$rd/panel/e2e-r$n-findings.md" ] || set -- "$@" "$rd/panel/e2e-r$n-findings.md"
   accept_record "$(basename "$rd")" "$n" "$@" || return $?
   echo "accept: recorded. Known problems merged as they are:"; check_items "$@"
@@ -1332,6 +1360,7 @@ cmd_land() { # df land <run-id> <session-id> <pr-title>
   fi
   [ "$(conf_get "$c" status)" = active ] || die "land: run is $(conf_get "$c" status)"
   [ -f "$rd/report.md" ] || die "land: write report.md first"
+  why=$(known_missing "$rd") || { echo "land: refused: $why"; return 9; }
   cmd_lock "$id" refresh "$sess"
   [ "$(conf_get "$c" cmd_pin)" = "$(cmd_pin_of "$c")" ] || die "land: env.commands or test_cmd changed since sign-off"
   git -C "$wt" remote get-url origin >/dev/null 2>&1 && command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1 || remote=""
@@ -1395,7 +1424,7 @@ cmd_land() { # df land <run-id> <session-id> <pr-title>
   fi
   if [ "$(conf_get "$c" postmerge_suite)" != green ]; then
     : > "$rd/panel/postmerge.md"; : > "$rd/panel/postmerge.log"
-    run_cmds "$rd" "$folder" "$rd/panel/postmerge.md" "$rd/panel/postmerge.log"
+    run_cmds "$rd" "$folder" "$rd/panel/postmerge.md" "$rd/panel/postmerge.log"; beat "$rd"
     if [ "$bad" -gt 0 ]; then
       conf_set "$c" postmerge_suite red
       printf '\n## After the merge\n\nThe tests FAILED after the merge (%s of the commands; output in panel/postmerge.log).\n' "$bad" >> "$rd/report.md"
@@ -1416,8 +1445,10 @@ cmd_land() { # df land <run-id> <session-id> <pr-title>
   land_end "$id" "$sess" 0 "" "$r"
 }
 land_end() { # land_end <run-id> <session-id> <exit> <line> [merged|local]: finish, metrics into the report once, after a verified merge clean up; returns <exit>
-  local rd c wt id=$1 m line=$4 rp ec=0 eo
-  run_ctx "$id"
+  local rd c wt id=$1 m line=$4 rp ec=0 eo ar kp=""
+  run_ctx "$id"; ar=$(conf_get "$c" accepted_round) # read before the tidy-up removes the run dir
+  [ -z "$ar" ] || kp="known problems, accepted at check round $ar:
+$(known_problems "$rd" "$ar")"
   conf_set "$c" land_rc "$3"; conf_set "$c" land_line "$line"; conf_set "$c" land_tidy "${5:-}"
   eo=$( (cmd_finish "$id" "$2") 2>&1 ) || { echo "land: could not finish the run: $(printf '%s\n' "$eo" | tail -1 | sed 's/^df: //')"; return 1; }
   m=$(cmd_metrics "$id")
@@ -1434,8 +1465,29 @@ land_end() { # land_end <run-id> <session-id> <exit> <line> [merged|local]: fini
     fi
     if [ $ec -eq 0 ]; then rp="$(state_root)/reports/$id/report.md"; else line="$line (tidy-up refused: $(printf '%s\n' "$eo" | tail -1 | sed 's/^df: //'); run df land again once that is fixed)"; fi
   fi
-  echo "land: $line"; echo "$m"; echo "report: $rp"
+  if [ -n "$kp" ]; then
+    case $line in *" and verified"*) line=$(printf '%s\n' "$line" | sed 's/ and verified/ and verified WITH KNOWN PROBLEMS/');;
+      *) line="$line (WITH KNOWN PROBLEMS)";; esac
+    echo "land: $line"; printf '%s\n' "$kp"
+  else echo "land: $line"; fi
+  echo "$m"; echo "report: $rp"
   return "$3"
+}
+known_problems() { # known_problems <run-dir> <round>: the open findings accepted at that round, one line each
+  local p="$1/panel/check-r$2" e="$1/panel/e2e-r$2-findings.md"
+  if [ -f "$e" ]; then check_items "$p.md" "$p-suite.md" "$e"; else check_items "$p.md" "$p-suite.md"; fi 2>/dev/null || true
+}
+known_missing() { # known_missing <run-dir>: exit 1 (and why) when findings were accepted but report.md does not list them under ## Anything left
+  local rd=$1 ar sec l w
+  ar=$(conf_get "$rd/run.conf" accepted_round); [ -n "$ar" ] || return 0
+  sec=$(awk '/^## / { f = ($0 ~ /^## Anything left/) } f' "$rd/report.md")
+  [ -n "$sec" ] || { echo "findings were accepted at check round $ar but report.md has no ## Anything left section listing them"; return 1; }
+  while IFS= read -r l; do
+    w=$(printf '%s\n' "$l" | sed 's/^  [a-z]* //; s/: .*//'); [ -n "$w" ] && [ "$w" != "?" ] || continue
+    case $sec in *"$w"*) ;; *) echo "report.md does not list the accepted problem at $w under ## Anything left"; return 1;; esac
+  done <<EOF2
+$(known_problems "$rd" "$ar")
+EOF2
 }
 
 cmd_status() { # df status [run-id]: regenerate and print progress.md (no id: the only run)

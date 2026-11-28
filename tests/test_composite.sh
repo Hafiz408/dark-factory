@@ -4,7 +4,7 @@
 R=$(mkrepo); cd "$R" || exit 1
 mkdir -p src tests; echo 'add() { echo $(($1 - $2)); }' > src/calc.sh; git add . && git commit -qm "buggy add"
 printf 'add 2 3 wrong\n' > in.txt; id=$("$DF" start "$R/in.txt"); rd=$("$DF" run-dir "$id"); C="$rd/run.conf"; WT=$("$DF" conf-get "$C" worktree)
-echo 'bash tests/test_calc.sh' > "$rd/env.commands"; "$DF" conf-set "$C" test_cmd 'bash tests/test_calc.sh'
+printf '%s\n' 'bash tests/test_calc.sh' '[ -z "$DF_AGE" ] || sed -i.bak "s/^heartbeat=.*/heartbeat=1/" "$DF_AGE"' > "$rd/env.commands"; "$DF" conf-set "$C" test_cmd 'bash tests/test_calc.sh'
 run() { local rc=0; "$DF" "$@" >"$rd/../out" 2>&1 || rc=$?; echo "$rc"; }
 out() { cat "$rd/../out"; }
 dg() { sed -n 's/^ro: //p' "$rd/../out"; }
@@ -160,4 +160,17 @@ git -C "$WT" checkout -q -- tests/test_calc.sh
 "$DF" fm-set "$S" status BLOCKED
 assert_eq "8" "$(run check-start "$id" s1)" "check_start_blocked_step: exit 8"
 assert_eq "3" "$("$DF" conf-get "$C" review_round)" "no round bumped for a BLOCKED step"
+# idle credit: a long suite run inside a df call is work, so the heartbeat moves after the commands finish
+fresh() { local h; h=$(sed -n 's/^heartbeat=//p' "$rd/lock"); [ $(( $(date +%s) - h )) -lt 60 ]; }
+"$DF" fm-set "$S" status running; "$DF" fm-set "$S" attempts 1; printf 'done\nVERDICT: PASS - ok\n' > "$rd/panel/01-a1-builder.md"
+echo 'add() { echo $(($1 + $2)); }' > "$WT/src/calc.sh"
+DF_AGE="$rd/lock" run step-end "$id" 01 1 agentB 10 spawn "" >/dev/null
+assert_ok "step-end beats after the commands ran" fresh
+"$DF" conf-set "$C" max_review_rounds 9; "$DF" profile-pin "$id" >/dev/null
+run check-start "$id" s1 >/dev/null; D=$(dg); n=$("$DF" conf-get "$C" check_round_open)
+printf 'VERDICT: PASS - 1 scenarios passed\n' > "$rd/panel/check-r$n.md"
+DF_AGE="$rd/lock" run check-end "$id" chk1 300 resume "$D" >/dev/null
+assert_ok "check-end beats after the commands ran" fresh
+sed -i.bak "s/^heartbeat=.*/heartbeat=1/" "$rd/lock"; run check-gate "$id" >/dev/null
+assert_ok "check-gate beats (the full app tests ran before it)" fresh
 finish

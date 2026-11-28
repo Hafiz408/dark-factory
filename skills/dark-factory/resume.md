@@ -25,12 +25,15 @@ diff since the step's `base_sha`) and store the new id.
    `attempts 0` with `{DF} fm-set`, log it, and build those first. Paused at a cap: continue
    from the step that paused. Paused after the last check round with only medium findings: say
    the problem in plain words and ask "Merge it as it is, with this known problem? (yes / try
-   once more / no)". yes: `{DF} accept <id>` (exit 2: it is not allowed; say why), list the
-   problem under `## Anything left`, then `ship.md` section 3. try once more: raise
-   `max_review_rounds` by 1 with `{DF} conf-set`. no: pause again.
+   once more / no)". yes: `{DF} accept <id>`. When it says the full app tests have not run, run
+   them (`e2e.md`), then `{DF} check-gate <id>`, then `{DF} accept <id>` again; when it says a
+   command is not judged, judge it, then `{DF} check-gate <id>`, then accept again. Any other
+   exit 2: it is not allowed; say why. Accepted: list each problem with its `where` under
+   `## Anything left` (`{DF} land` refuses otherwise), then `ship.md` section 3. try once more:
+   `{DF} extend <id> rounds` (one more check round; never `conf-set` it). no: pause again.
    Paused at a cap: say in plain words what was used and ask
    "Allow about half as much again? (yes / no)"; on yes run `{DF} extend <id>` (agents or time) or
-   raise `max_review_rounds` with `{DF} conf-set` yourself; on no, pause again.
+   `{DF} extend <id> rounds` (check rounds); on no, pause again.
    Status `waiting_permission`: set `status active` once the user says it is allowed.
 7. An interrupted wave (a step file whose `sub_worktree` is not `null`): `{DF} sub-drop <id> NN`,
    set it `pending`, `interrupts` +1; reset `{WT}` to the last `commit` line in `log.md` (none: `root_base_sha`).
