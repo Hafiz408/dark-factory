@@ -34,6 +34,10 @@ assert_fail "escaped separator still blocked" call 'rm -rf x\\; /etc'
 assert_fail "placeholder cannot hide a later target" call 'rm -rf {} \; /etc'
 assert_fail "find cleanup with text after it blocked" call 'find . -exec rm -rf {} \; /etc'
 assert_fail "find from an absolute path blocked" call 'find / -name x -exec rm -rf {} +'
+assert_fail "substitution before -exec is not exempt" call 'find $(echo /etc) -exec rm -rf {} +'
+assert_fail "substitution in a later word is not exempt" call 'find . $(rm -rf /etc) -exec rm -rf {} +'
+assert_fail "backtick before -exec is not exempt" call 'find . `echo /etc` -exec rm -rf {} +'
+assert_ok "find cleanup with a quoted name allowed" call "find . -name '*.pyc' -exec rm -f {} +"
 assert_fail "a second find action is not exempt" call 'find . -exec rm -rf {} \; -exec rm -rf /etc \;'
 assert_fail "rm -rf ~ blocked" call "rm -rf ~/projects"
 assert_ok "rm -f of a temp file allowed" call "rm -f /tmp/df_s1.db"

@@ -45,13 +45,16 @@ echo "$input" | grep -Eq 'git[ ]+([^|;&"]*[ ])?push([ "]|\\|$)' && deny "git pus
 q=$(printf '\001'); bs='\'; nl='
 '
 s=${input//"$bs\""/$q}; s=${s//"$bs$bs${bs}n"/" $bs "}; s=${s//"${bs}n"/$nl}; s=${s//"${bs}t"/" $bs "}
-# The one exception, matched against the whole command: `find <relative dir> ... -exec rm -rf {} \;` (or `{} +`) with
-# nothing after it and no other ; & | or backslash. Anything looser lets text after the cut hide a target.
-find_rm='"command" *: *"find [^-/~$ ;&|"\\][^;&|"\\]* -exec rm -(r|f|rf|fr) [{][}] (\\\\;|[+])"'
-cleanup=0; [[ $s =~ $find_rm ]] && case "$s" in *' /'*|*..*) ;; *) cleanup=1;; esac
+# The one exception: a command that is only `find <relative dir> ... -exec rm -rf {} \;` (or `{} +`). The part before
+# -exec may hold nothing but plain characters and quotes (no ; & | \ $ ` ~ braces), and only the matched ending is
+# set aside: every check below still runs on the rest.
+find_rm='"command" *: *"find [A-Za-z0-9_.][A-Za-z0-9_./*?=@ '"$q'"'-]* (-exec rm -(r|f|rf|fr) [{][}] (\\\\;|[+]))"'
+if [[ $s =~ $find_rm ]]; then
+  tail_part=${BASH_REMATCH[1]}
+  case "$s" in *' /'*|*..*) ;; *) s=${s/"$tail_part"/};; esac
+fi
 set -f
 while IFS= read -r seg; do
-  [ "$cleanup" = 0 ] || break
   seg=${seg#*rm}; rf=0
   for t in $seg; do case "$t" in --recursive|--force|-[!-]*[rRfF]*|-[rRfF]*) rf=1;; esac; done
   [ "$rf" = 1 ] || continue
