@@ -37,6 +37,25 @@ deny() { echo "Dark Factory guard: blocked ($1). Use a different approach or ask
 # git push, including `git -C <dir> push` and `git --no-pager push`
 echo "$input" | grep -Eq 'git[ ]+([^|;&"]*[ ])?push([ "]|\\|$)' && deny "git push"
 
+# A seat belt, not a sandbox: shell syntax is not parsed. A forced or recursive rm whose text holds
+# anything that can hide a separator or a path (a tab, a backslash, an unbalanced quote, which means a
+# quoted ;&|, a brace, $( ${ or a backtick) is denied outright instead of being understood.
+# JSON escapes: \" becomes a marker, a backslash-newline joins its lines (the backslash stays), \n splits,
+# a tab becomes a backslash word. Raw control characters cannot occur in JSON, so the marker is safe.
+q=$(printf '\001'); bs='\'; nl='
+'
+s=${input//"$bs\""/$q}; s=${s//"$bs$bs${bs}n"/" $bs "}; s=${s//"${bs}n"/$nl}; s=${s//"${bs}t"/" $bs "}
+set -f
+while IFS= read -r seg; do
+  seg=${seg#*rm}; rf=0
+  for t in $seg; do case "$t" in --recursive|--force|-[!-]*[rRfF]*|-[rRfF]*) rf=1;; esac; done
+  [ "$rf" = 1 ] || continue
+  case "$seg" in *"$bs"*|*[{}\`]*|*'$('*|*'${'*) deny "forced or recursive rm with an escape, brace or substitution";; esac
+  d=${seg//[!$q]/}; o=${seg//[!\']/}
+  [ $((${#d} % 2)) = 0 ] && [ $((${#o} % 2)) = 0 ] || deny "forced or recursive rm with a quoted separator"
+done < <(printf '%s\n' "$s" | grep -aoE '(^|[^A-Za-z0-9_.-])rm [^;&|"]*')
+set +f
+
 # recursive or forced rm: relative paths are fine; absolute paths must be inside an active worktree.
 # Quotes are dropped first (a quoted target is the same target), JSON newlines and tabs split commands.
 # ponytail: deny-list on the words as typed; a variable or glob in a relative target is not resolved.

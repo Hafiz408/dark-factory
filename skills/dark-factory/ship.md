@@ -66,6 +66,8 @@ prints one `land:` line, the metrics line and the report path. Exit codes:
   merge refused): the run is finished and kept on its branch; relay the line in plain words.
 - 9: refused: a step is not PASS or the branch changed after the final check passed. Nothing
   was pushed; go back to Check (SKILL.md) for a new round, then land again.
+- 12: refused: report.md does not list an accepted problem. Nothing was pushed; add the
+  printed line under `## Anything left`, then land again (never a new check round).
 - 11: merged, but the merged result could not be re-tested: run `{DF} land` again; a second
   11 has finished the run: say it merged but was not re-tested (never "not merged").
 - 6: the tests failed after the merge; the working copy is kept. Say so first in the final
