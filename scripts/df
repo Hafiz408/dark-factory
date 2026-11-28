@@ -273,7 +273,7 @@ cmd_verdict() { # df verdict <role-output-file>: prints the verdict word, exit 1
 
 # One reading of findings files for the gate and for acceptance, so they never disagree.
 # A medium+ finding without an evidence: line (a failing command, scenario id, or file:line + input) counts as low.
-# mode=count prints "<blocking> <total> <bad severity words>"; mode=list prints each blocking finding (with or without
+# mode=count prints "<blocking> <total> <bad severity words> <a VERDICT: FAIL seen>"; mode=list prints each blocking finding (with or without
 # a what: line) and every line pairing a scenario id with FAIL or INVALID, in any format (fail closed).
 FINDINGS_AWK='
   function flush() {
@@ -286,21 +286,29 @@ FINDINGS_AWK='
     }
     sev=""; tags=""; ev=0; w=""; x=""
   }
-  FNR == 1 { flush() }
-  /^- severity:/ { flush(); sev=$3 }
+  function verdict() { if (last ~ /^VERDICT: FAIL/) vf=1; last="" }
+  FNR == 1 { flush(); verdict() }
+  NF { last=$0 }
+  # Any line that opens with a severity key, in any case, bullet or bold, starts a finding (fail closed);
+  # its value must be exactly critical|high|medium|low once lowercased and stripped of markdown.
+  { l=tolower($0) }
+  l ~ /^[ \t]*([-*][ \t]*)?(\*\*)?severity(\*\*)?[ \t]*:/ { flush(); sub(/^[^:]*:/, "", l); gsub(/[*`_ \t\r]/, "", l); sev=(l == "" ? "?" : l) }
   /^[ \t]+tags:/ { tags=$0 }
   /^[ \t]+evidence:[ \t]*[^ \t]/ { ev=1 }
   /^[ \t]+where:/ { w=$0; sub(/^[ \t]+where:[ \t]*/, "", w) }
   /^[ \t]+what:/ { x=$0; sub(/^[ \t]+what:[ \t]*/, "", x) }
   mode == "list" { u=toupper($0)
-    if (u ~ /(^|[^A-Z0-9])S[0-9]+([^0-9]|$)/ && u ~ /(^|[^A-Z])(FAIL|FAILS|FAILED|FAILING|INVALID)([^A-Z]|$)/) { l=$0; sub(/^[ \t]+/, "", l); print "  scenario " l } }
-  END { flush(); if (mode == "count") printf "%d %d %d\n", b+0, t+0, bad+0 }'
+    if (u ~ /(^|[^A-Z0-9])S[0-9]+[ \t*|:-]*(FAIL|FAILS|FAILED|FAILING|INVALID)([^A-Z]|$)/) { l=$0; sub(/^[ \t]+/, "", l); print "  scenario " l } }
+  END { flush(); verdict(); if (mode == "count") printf "%d %d %d %d\n", b+0, t+0, bad+0, vf+0 }'
 cmd_gate() { # df gate <findings-file>...: prints "<blocking> <total>", exit 1 if blocking > 0
-  local out
+  local out b t bw vf
   [ $# -ge 1 ] || die "usage: df gate <findings-file>..."
-  out=$(awk -v mode=count "$FINDINGS_AWK" "$@")
-  if [ "${out##* }" -ne 0 ]; then die "gate: unknown severity word in $* (use critical|high|medium|low, lowercase)"; fi
-  out="${out% *}"
+  out=$(awk -v mode=count "$FINDINGS_AWK" "$@") || die "gate: could not read $*"; read -r b t bw vf <<EOF2
+$out
+EOF2
+  [ "$bw" -eq 0 ] || die "gate: unknown severity word (use critical|high|medium|low)"
+  [ "$vf" -eq 0 ] || [ "$b" -gt 0 ] || die "gate: a checker's VERDICT is FAIL but no blocking finding was read: write each one as - severity: <word> with an evidence: line, then gate again"
+  out="$b $t"
   echo "$out"
   [ "${out%% *}" -eq 0 ]
 }
@@ -1360,7 +1368,7 @@ cmd_land() { # df land <run-id> <session-id> <pr-title>
   fi
   [ "$(conf_get "$c" status)" = active ] || die "land: run is $(conf_get "$c" status)"
   [ -f "$rd/report.md" ] || die "land: write report.md first"
-  why=$(known_missing "$rd") || { echo "land: refused: $why"; return 9; }
+  why=$(known_missing "$rd") || { echo "land: refused: $why"; return 12; }
   cmd_lock "$id" refresh "$sess"
   [ "$(conf_get "$c" cmd_pin)" = "$(cmd_pin_of "$c")" ] || die "land: env.commands or test_cmd changed since sign-off"
   git -C "$wt" remote get-url origin >/dev/null 2>&1 && command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1 || remote=""
@@ -1481,10 +1489,10 @@ known_missing() { # known_missing <run-dir>: exit 1 (and why) when findings were
   local rd=$1 ar sec l w
   ar=$(conf_get "$rd/run.conf" accepted_round); [ -n "$ar" ] || return 0
   sec=$(awk '/^## / { f = ($0 ~ /^## Anything left/) } f' "$rd/report.md")
-  [ -n "$sec" ] || { echo "findings were accepted at check round $ar but report.md has no ## Anything left section listing them"; return 1; }
+  # Each accepted item must appear verbatim (its text after the severity word); the refusal prints the line to paste.
   while IFS= read -r l; do
-    w=$(printf '%s\n' "$l" | sed 's/^  [a-z]* //; s/: .*//'); [ -n "$w" ] && [ "$w" != "?" ] || continue
-    case $sec in *"$w"*) ;; *) echo "report.md does not list the accepted problem at $w under ## Anything left"; return 1;; esac
+    w=${l#  }; w=${w#* }; [ -n "$w" ] || continue
+    case $sec in *"$w"*) ;; *) echo "report.md does not list an accepted problem under ## Anything left (add the section if missing): add this line under it, then land again:"; echo "- $w"; return 1;; esac
   done <<EOF2
 $(known_problems "$rd" "$ar")
 EOF2

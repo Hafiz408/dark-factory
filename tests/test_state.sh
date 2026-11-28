@@ -112,9 +112,23 @@ assert_eq "waiting_permission" "$("$DF" conf-get "$T/enum.conf" status)" "valid 
 assert_eq "intake" "$("$DF" conf-get "$T/enum.conf" stage)" "refused write left stage unchanged"
 
 # Final review #2: an unknown severity word must not read as non-blocking
-printf -- '- severity: Medium\n  source: quality\n  where: a.py:1\n  what: x\n' > "$T/sev.md"
-assert_fail "gate rejects a capitalised severity" "$DF" gate "$T/sev.md"
+printf -- '- severity: Mediumish\n  source: quality\n  where: a.py:1\n  what: x\n' > "$T/sev.md"
+assert_fail "gate rejects an unknown severity word" "$DF" gate "$T/sev.md"
 assert_contains "unknown severity" "$("$DF" gate "$T/sev.md" 2>&1 || true)" "gate says why"
+# any case, bullet, bold or indent opens a finding; it blocks like the plain form
+for k in '- Severity: high' '- severity:high' '  - severity: high' '* **Severity:** HIGH' '**severity**: high'; do
+  printf -- '- severity: low\n  where: z\n  evidence: none\n%s\n  source: x\n  where: a.py:1\n  what: x\n  evidence: x\n' "$k" > "$T/sevf.md"
+  assert_eq "1 2" "$("$DF" gate "$T/sevf.md" 2>&1 || true)" "gate reads a finding written as: $k"
+done
+for k in '- severity: high (security)' '- severity:' '- Severity: urgent'; do
+  printf -- '%s\n  where: a.py:1\n  evidence: x\n' "$k" > "$T/sevf.md"
+  assert_fail "gate refuses the severity value in: $k" "$DF" gate "$T/sevf.md"
+done
+printf -- 'Each finding has a severity: high means broken.\nRate severity: critical|high per the rubric.\nVERDICT: PASS\n' > "$T/prose.md"
+assert_eq "0 0" "$("$DF" gate "$T/prose.md" 2>&1)" "prose mentioning severity: is not a finding"
+printf -- '- severity: low\n  where: a\n  evidence: x\nVERDICT: FAIL - 1 blocking\n' > "$T/vf.md"
+assert_fail "a FAIL verdict with nothing blocking is refused" "$DF" gate "$T/vf.md"
+assert_contains "VERDICT is FAIL" "$("$DF" gate "$T/vf.md" 2>&1 || true)" "gate says why it refuses a FAIL verdict"
 
 # Final review #5: fm-set on CRLF files and on an absent key
 printf -- '---\r\nid: 03\r\nstatus: pending\r\nattempts: 0\r\n---\r\nbody\r\n' > "$T/crlf2.md"

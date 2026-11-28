@@ -84,6 +84,16 @@ assert_fail "git --no-pager push blocked" call "git --no-pager push"
 assert_ok "git -C <dir> status allowed" call "git -C /some/wt status"
 assert_ok "rm -rf inside the worktree allowed even as an absolute path" call "rm -rf $wt/node_modules"
 assert_fail "rm -rf an absolute path outside the worktree blocked" call "rm -rf /tmp/somewhere-else"
+# rm bypasses: tabs, quoted or escaped separators, backslash-newline, braces, ${...}, $(...) are denied outright
+for c in 'rm\t-rf\t/etc' 'ls;\trm -rf /etc' 'rm -rf \"x;\" /etc' "rm -rf 'a|b' /etc" 'rm -rf x\; /etc' \
+         'rm -rf \\\n/etc' 'rm\\\n -rf /etc' 'rm -rf {/etc,x}' 'rm -rf ${HOME}' 'rm -rf $(echo /etc)' 'rm -rf `echo /etc`' '\\rm -rf /etc'; do
+  assert_fail "rm bypass blocked: $c" call "$c"
+done
+for c in 'rm -rf node_modules dist' 'rm -rf \"build out\" dist' "rm -rf 'build out'" 'rm -rf -- build' 'rm -f /tmp/x.db-journal' \
+         'rm -rf dist && npm run build' 'cd app; rm -rf dist; echo \"done; ok\"' 'echo \"a;b\"; rm x.txt'; do
+  assert_ok "ordinary rm allowed: $c" call "$c"
+done
+assert_ok "absolute worktree rm allowed" call "rm -rf $wt/dist $wt/build"
 assert_ok "stale lock leaves the guard inert" bash -c "printf '{\"tool_input\":{\"command\":\"git push\"}}' | DF_LOCK_TTL=0 '$GUARD'"
 
 finish

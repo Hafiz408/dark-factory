@@ -166,6 +166,10 @@ for sc in 'S3: FAIL' '- **S3** FAIL' '| S3 | failed |' 'S4 - INVALID'; do
   printf -- '- severity: medium\n  source: correctness\n  where: c.txt:1\n  what: rare layout\n  evidence: x\n%s\nVERDICT: FAIL - 1\n' "$sc" > "$erd/panel/check-r3.md"
   assert_fail "accept_refuses_failing_scenario in another format: $sc" df "$C" accept "$E"
 done
+for sc in 'S1 PASS - an invalid email is rejected' 'S2 PASS - login fails with a wrong password' 'the S3 upload no longer fails' '- **S4** SKIP - invalid on CI'; do
+  printf -- '- severity: medium\n  source: correctness\n  where: c.txt:1\n  what: rare layout\n  evidence: x\n%s\nVERDICT: FAIL - 1\n' "$sc" > "$erd/panel/check-r3.md"
+  assert_ok "not a failed scenario: $sc" df "$C" accept "$E"; df "$C" conf-set "$EC" check_pass_sha ""
+done
 printf -- '- severity: high\n  source: e2e\n  where: app\n  evidence: e2e t1 fails\n- severity: medium\n  source: correctness\n  where: c.txt:1\n  what: rare layout\n  evidence: x\nVERDICT: FAIL - 1\n' > "$erd/panel/check-r3.md"
 assert_fail "accept_refuses_high_without_what" df "$C" accept "$E"
 assert_contains "high app" "$(df "$C" accept "$E" 2>&1)" "accept lists a high finding that has no what: line"
@@ -223,9 +227,12 @@ assert_ok "strict: then accept works" df "$C" accept "$N"
 rm "$SC/profile.md"
 # land with accepted findings: the report must list them; the final lines say so
 df "$C" conf-set "$NC" stage check
-assert_eq "9" "$(land "$C" "$DF" land "$N" s1 "Add c")" "land refuses when report.md lacks the accepted problems"
+assert_eq "12" "$(land "$C" "$DF" land "$N" s1 "Add c")" "land refuses when report.md lacks the accepted problems"
 assert_contains "Anything left" "$(cat "$T/out")" "land says why"
-printf '# Report\n## What changed\n- c\n## Anything left\n- WITH KNOWN PROBLEMS: rare layout at c.txt:1\n## Technical changes\n- c.txt\n' > "$SC/$N/report.md"
+assert_contains "- c.txt:1: rare layout" "$(cat "$T/out")" "land prints the line to paste"
+printf '# Report\n## What changed\n- c\n## Anything left\n- c.txt\n## Technical changes\n- c.txt\n' > "$SC/$N/report.md"
+assert_eq "12" "$(land "$C" "$DF" land "$N" s1 "Add c")" "a partial match of the where text is not enough"
+printf '# Report\n## What changed\n- c\n## Anything left\n- WITH KNOWN PROBLEMS: c.txt:1: rare layout\n## Technical changes\n- c.txt\n' > "$SC/$N/report.md"
 assert_eq "0" "$(land "$C" "$DF" land "$N" s1 "Add c")" "land with accepted problems listed"
 assert_contains "merged and verified WITH KNOWN PROBLEMS" "$(cat "$T/out")" "land says WITH KNOWN PROBLEMS"
 assert_contains "medium c.txt:1: rare layout" "$(cat "$T/out")" "land lists the known problems"
