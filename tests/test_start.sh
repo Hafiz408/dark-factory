@@ -15,7 +15,7 @@ assert_fail "nothing is written under .git" test -e "$R/.git/df"
 ( cd "$R" && git clean -fdxq )
 assert_ok "git clean -fdx cannot reach the state" test -f "$SR/$id/run.conf"
 assert_ok "input copied" test -f "$rd/input.md"
-assert_eq "14400" "$(cd "$R" && "$DF" conf-get "$rd/run.conf" budget_seconds)" "wall-clock budget recorded"
+assert_eq "" "$(cd "$R" && "$DF" conf-get "$rd/run.conf" budget_seconds)" "no wall-clock budget until the sign-off estimate sets one"
 case "$(cd "$R" && "$DF" conf-get "$rd/run.conf" started)" in ''|*[!0-9]*) bad "start time recorded";; *) ok "start time recorded";; esac
 assert_contains "untracked.txt" "$(cat "$rd/dirty.txt")" "dirty files recorded"
 assert_eq "" "$(cd "$R" && git status --porcelain | grep -v untracked.txt | grep -v in.txt)" "main clone working tree untouched"
@@ -132,8 +132,10 @@ assert_fail "non-git dir refused" bash -c "cd '$N' && '$DF' start '$N/in.txt'"
 
 # build track in empty dir
 E=$(mktemp -d); echo "build a thing" > "$E/in.txt"
-id2=$(cd "$E" && DF_ALLOW_INIT=1 "$DF" start "$E/in.txt")
+id2=$(cd "$E" && DF_ALLOW_INIT=1 "$DF" start "$E/in.txt" 2>"$E/../init-err")
 assert_ok "git init plus initial commit works" git -C "$E" rev-parse HEAD
+assert_contains "started a new git repository" "$(cat "$E/../init-err")" "start_git_init_notice: said on stderr, stdout is the run id"
+assert_eq "yes" "$(cd "$E" && "$DF" conf-get "$("$DF" run-dir "$id2")/run.conf" git_init)" "start_git_init_notice: recorded in run.conf"
 assert_ok "worktree created for empty dir run" test -d "$(cd "$E" && "$DF" conf-get "$("$DF" run-dir "$id2")/run.conf" worktree)"
 
 # validation rejects corruption

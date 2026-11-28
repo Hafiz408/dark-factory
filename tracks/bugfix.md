@@ -5,6 +5,8 @@
 - Expected vs actual behaviour, in observable terms.
 - Blast radius: who is affected, since when, anything that changed recently.
 - Is there an error message, log or stack trace? Ask for it verbatim.
+- Scope default: fix the root cause for every input that reaches the same faulty code path,
+  not only the reported shape. Never offer "only the reported pattern" as the default.
 
 ## Plan shape
 1. Root-cause hypothesis with the file and function it points to, and the evidence.
@@ -13,10 +15,10 @@
    through and fix it there once; do not patch each call site.
 
 ## Chunks
-- Chunk 01 is ALWAYS a failing reproduction test. It must be red against the unfixed code. The
-  tester verifies this before any fix is accepted.
-- Chunk 02 is the fix. Further chunks only for a caller that cannot reach the choke point.
-- Typical size: 1 to 3 chunks.
+- Step 01 is the fix with its reproduction test: the builder writes the test first, and the
+  orchestrator proves it fails without the fix (`df redcheck`) before the step is accepted.
+- Further steps only for a caller that cannot reach the choke point.
+- Typical size: 1 to 2 steps.
 
 ## QA scenarios
 - The original symptom is gone, stated as observable behaviour.

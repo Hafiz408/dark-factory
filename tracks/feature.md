@@ -13,10 +13,10 @@
 3. Vertical slices through the existing layers, thinnest end-to-end slice first.
 
 ## Chunks
-- Chunk 01 is the thinnest end-to-end slice that exercises the new behaviour through the real
-  entry point, using existing patterns.
-- Later chunks widen it: validation, edge cases, permissions, polish.
-- Typical size: 3 to 8 chunks.
+- At most 5 user acceptance criteria and at most 8 files: one chunk, with its edge cases.
+- Otherwise chunk 01 is the thinnest end-to-end slice through the real entry point, using
+  existing patterns; later chunks add further behaviours, each with its own edge cases.
+- Typical size: 1 to 5 chunks.
 
 ## QA scenarios
 - Each acceptance criterion as a user journey.

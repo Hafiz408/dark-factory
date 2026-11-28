@@ -36,6 +36,36 @@ assert_ok "finished run still validates" "$DF" validate "$id"
 printf 'session=sessL\nheartbeat=%s\n' "$(( $(date +%s) - 1000 ))" > "$("$DF" run-dir "$id")/lock"
 assert_eq "live" "$("$DF" lock "$id" check)" "a 1000 second old heartbeat is still live by default"
 
+# hands-off #3: the same session coming back after a long idle gap (a usage limit) is not charged for it
+"$DF" lock "$id" release
+c="$("$DF" run-dir "$id")/run.conf"; "$DF" conf-set "$c" status active
+"$DF" conf-set "$c" signoff_at 1000; "$DF" conf-set "$c" started 900
+old=$(( $(date +%s) - 3000 ))
+printf 'session=sessI\nheartbeat=%s\n' "$old" > "$("$DF" run-dir "$id")/lock"
+"$DF" lock "$id" refresh sessI
+s=$("$DF" conf-get "$c" signoff_at); [ "$s" -ge 3990 ] && [ "$s" -le 4010 ] && ok "a 50 minute gap is credited on refresh" || bad "a 50 minute gap is credited on refresh (got $s)"
+printf 'session=sessI\nheartbeat=%s\n' "$(( $(date +%s) - 600 ))" > "$("$DF" run-dir "$id")/lock"
+"$DF" lock "$id" refresh sessI
+assert_eq "$s" "$("$DF" conf-get "$c" signoff_at)" "a 10 minute gap is work, not credited"
+printf 'session=sessI\nheartbeat=%s\n' "$(( $(date +%s) - 1300 ))" > "$("$DF" run-dir "$id")/lock"
+DF_IDLE_CREDIT=99999 "$DF" lock "$id" refresh sessI
+s2=$("$DF" conf-get "$c" signoff_at); [ "$s2" -gt "$s" ] && ok "a gap over 20 minutes is credited; no env override" || bad "a gap over 20 minutes is credited; no env override"
+"$DF" conf-set "$c" status paused
+printf 'session=sessI\nheartbeat=%s\n' "$old" > "$("$DF" run-dir "$id")/lock"
+"$DF" lock "$id" refresh sessI
+assert_eq "$s2" "$("$DF" conf-get "$c" signoff_at)" "a paused run is not credited (unpause credits it)"
+"$DF" conf-set "$c" status active
+printf 'session=sessI\nheartbeat=%s\n' "$old" > "$("$DF" run-dir "$id")/lock"
+"$DF" pre "$id" sessI >/dev/null 2>&1
+s3=$("$DF" conf-get "$c" signoff_at); [ "$s3" -gt "$s2" ] && ok "df pre credits through the lock refresh" || bad "df pre credits through the lock refresh"
+printf 'session=sessI\nheartbeat=%s\n' "$old" > "$("$DF" run-dir "$id")/lock"
+echo 'VERDICT: PASS - x' > "$("$DF" run-dir "$id")/out.md"
+"$DF" post "$id" planner - - spawn out.md "planned" >/dev/null 2>&1
+"$DF" lock "$id" refresh sessI
+assert_eq "$s3" "$("$DF" conf-get "$c" signoff_at)" "a long role ends with post, which beats the heartbeat: not credited"
+assert_contains "session=sessI" "$(cat "$("$DF" run-dir "$id")/lock")" "the beat keeps the session"
+"$DF" lock "$id" release
+
 # fourth review: one run executes per repo at a time
 R2=$(mkrepo); echo x > "$R2/in.txt"
 a=$(cd "$R2" && "$DF" start "$R2/in.txt"); (cd "$R2" && "$DF" lock "$a" acquire sA)

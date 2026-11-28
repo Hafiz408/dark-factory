@@ -12,7 +12,11 @@ cat > "$T/bin/gh" <<'GH'
 case "$1 $2" in
   "auth status") exit "${GH_AUTH_RC:-0}";;
   "pr create") [ "${GH_CREATE_RC:-0}" -eq 0 ] || exit 1; echo "noise"; echo "${GH_URL:-https://example.test/pr/1}";;
+  "pr checks") [ -z "${GH_CHECKS_SLEEP:-}" ] || exec sleep "$GH_CHECKS_SLEEP"; echo "${GH_CHECKS_OUT:-all checks passed}"; exit "${GH_CHECKS_RC:-0}";;
+  "pr merge") case " ${GH_REFUSE:-} " in *" $4 "*) echo "GraphQL: ${4#--} merges are not allowed on this repository" >&2; exit 1;; esac
+    [ "${GH_MERGE_RC:-0}" -eq 0 ] || { echo "Pull request is not mergeable: the base branch policy prohibits the merge" >&2; exit 1; }; exit 0;;
   "pr view") case "$*" in
+    *"--json mergeCommit"*) echo "${GH_MERGE_SHA:-}"; exit 0;;
     *"--json url,state,headRefOid"*) [ "${GH_VIEW_RC:-1}" -eq 0 ] || exit 1; echo "${GH_URL:-https://example.test/pr/1} ${GH_STATE:-OPEN} ${GH_OID:-$(git rev-parse HEAD 2>/dev/null)}"; exit 0;;
     *"--json state,headRefOid"*) echo "${GH_STATE:-MERGED} ${GH_OID:-none}"; exit 0;;
     esac
@@ -37,6 +41,10 @@ C="$T/clone"; git clone -q "$ORIGIN" "$C"; git -C "$C" config user.email t@t; gi
 SC="$T/.df-clone"
 echo in > "$T/in.txt"; echo body > "$T/body.md"
 df() { ( cd "$C" && "$DF" "$@" ); }
+# sign-off pins the ship settings; tests that set them by hand pin just before shipping or merging
+pin() { ( cd "$C" && "$DF" profile-pin "$1" >/dev/null 2>&1; [ -f "$SC/$1/run.conf" ] &&
+  "$DF" conf-set "$SC/$1/run.conf" check_pass_sha "$(git -C "$("$DF" conf-get "$SC/$1/run.conf" worktree)" rev-parse HEAD 2>/dev/null)" 2>/dev/null ) || true; }
+df() { case $1 in ship|merge|local-merge) pin "$2";; esac; ( cd "$C" && "$DF" "$@" ); }
 newrun() { # prints a run id at stage ship with one commit on its branch
   local id wt
   id=$(df start "$T/in.txt"); wt=$(df conf-get "$SC/$id/run.conf" worktree)
@@ -91,6 +99,15 @@ err=$(df ship "$R3" t "$T/body.md" 2>&1 >/dev/null); rc=$?
 assert_eq "1" "$rc" "non-https pr_url: exit 1"
 case $err in "df: ship:"*) ok "non-https pr_url: message";; *) bad "non-https pr_url: message '$err'";; esac
 
+# ship settings changed after sign-off, and a pr_url df ship did not open: refused, nothing pushed
+SP=$(newrun); SPC="$SC/$SP/run.conf"; df conf-set "$SPC" base_ref main; pin "$SP"; df conf-set "$SPC" ship_base other
+e=$(cd "$C" && "$DF" ship "$SP" t "$T/body.md" 2>&1 >/dev/null); rc=$?
+assert_eq "1" "$rc" "ship_pin_refuses_changed_settings: exit 1"; assert_contains "changed since sign-off" "$e" "ship_pin_refuses_changed_settings: message"
+assert_eq "" "$(git -C "$ORIGIN" for-each-ref "refs/heads/$(df conf-get "$SPC" branch)")" "ship_pin_refuses_changed_settings: nothing pushed"
+df conf-set "$SPC" ship_base ""; df conf-set "$SPC" pr_url https://example.test/pr/77
+e=$(df ship "$SP" t "$T/body.md" 2>&1 >/dev/null); rc=$?
+assert_eq "1" "$rc" "ship_refuses_foreign_pr_url: exit 1"; assert_contains "did not open" "$e" "ship_refuses_foreign_pr_url: message"
+
 # missing body file: nothing pushed or recorded
 R4=$(newrun); RC4="$SC/$R4/run.conf"; df conf-set "$RC4" base_ref origin/main
 : > "$GH_LOG"
@@ -115,7 +132,7 @@ assert_eq "$(git -C "$(df conf-get "$RC4" worktree)" rev-parse HEAD)" "$(df conf
 refuse() { # refuse <desc> <run> <title> <body> [VAR=val ...]
   local d=$1 r=$2 t=$3 b=$4 e rc br; shift 4
   : > "$GH_LOG"
-  e=$( cd "$C" && env "$@" "$DF" ship "$r" "$t" "$b" 2>&1 >/dev/null ); rc=$?
+  pin "$r"; e=$( cd "$C" && env "$@" "$DF" ship "$r" "$t" "$b" 2>&1 >/dev/null ); rc=$?
   br=$(df conf-get "$SC/$r/run.conf" branch)
   assert_eq "1" "$rc" "refuse $d: exit 1"
   case $e in "df: ship:"*) ok "refuse $d: message";; *) bad "refuse $d: message '$e'";; esac
@@ -126,6 +143,8 @@ refuse() { # refuse <desc> <run> <title> <body> [VAR=val ...]
 S=$(newrun); SCF="$SC/$S/run.conf"; swt=$(df conf-get "$SCF" worktree); df conf-set "$SCF" base_ref main
 df conf-set "$SCF" ship_confirmed no;   refuse "confirmed no" "$S" t "$T/body.md"
 df conf-set "$SCF" ship_confirmed yes
+df conf-set "$SCF" ship_mode branch;     refuse "ship_mode branch (repo forbids pushing)" "$S" t "$T/body.md"
+df conf-set "$SCF" ship_mode merge
 df conf-set "$SCF" stage qa;            refuse "stage qa" "$S" t "$T/body.md"
 df conf-set "$SCF" stage ship
 df conf-set "$SCF" status paused;       refuse "status paused" "$S" t "$T/body.md"
@@ -163,7 +182,7 @@ assert_contains "$(printf -- '--base\nmain\n')" "$(cat "$GH_LOG")" "base_ref=mai
 
 # create fails: refuse and say a PR may already exist; the push stays recorded
 F=$(newrun); FC="$SC/$F/run.conf"; df conf-set "$FC" base_ref main; : > "$GH_LOG"
-e=$(cd "$C" && env GH_CREATE_RC=1 "$DF" ship "$F" t "$T/body.md" 2>&1 >/dev/null); rc=$?
+pin "$F"; e=$(cd "$C" && env GH_CREATE_RC=1 "$DF" ship "$F" t "$T/body.md" 2>&1 >/dev/null); rc=$?
 assert_eq "1" "$rc" "create fails: exit 1"
 assert_contains "df: ship: could not open PR (one may already exist" "$e" "create fails: message"
 assert_eq "$(git -C "$(df conf-get "$FC" worktree)" rev-parse HEAD)" "$(df conf-get "$FC" pushed_sha)" "create fails: pushed_sha kept"
@@ -172,7 +191,7 @@ assert_eq "" "$(df conf-get "$FC" pr_url)" "create fails: pr_url unset"
 # failed push: origin rejects via pre-receive hook; nothing recorded
 F3=$(newrun); FC3="$SC/$F3/run.conf"; df conf-set "$FC3" base_ref main
 mkdir -p "$ORIGIN/hooks"; printf '#!/bin/sh\nexit 1\n' > "$ORIGIN/hooks/pre-receive"; chmod +x "$ORIGIN/hooks/pre-receive"
-e=$(cd "$C" && "$DF" ship "$F3" t "$T/body.md" 2>&1 >/dev/null); rc=$?
+pin "$F3"; e=$(cd "$C" && "$DF" ship "$F3" t "$T/body.md" 2>&1 >/dev/null); rc=$?
 rm "$ORIGIN/hooks/pre-receive"
 assert_eq "1" "$rc" "failed push: exit 1"
 case $e in "df: ship:"*) ok "failed push: message";; *) bad "failed push: message '$e'";; esac
@@ -259,9 +278,19 @@ git -C "$kw" checkout -q --detach; git -C "$C" checkout -q "$kb"
 e=$(df clean "$K" --branch 2>&1); rc=$?
 assert_eq "1" "$rc" "clean: checked out in main clone: exit 1"; assert_contains "checked out" "$e" "clean: main clone: message"; intact "main clone" "$K"
 git -C "$C" checkout -q main
+# --archive: the audit trail moves to reports/<id>/, out of list and status
+K=$(shipped); KC="$SC/$K/run.conf"; kb=$(df conf-get "$KC" branch); kw=$(df conf-get "$KC" worktree)
+echo r > "$SC/$K/report.md"; echo s > "$SC/$K/spec.md"; mkdir -p "$SC/$K/panel" "$SC/$K/scenarios"; echo p > "$SC/$K/panel/check-r1.md"; echo q > "$SC/$K/scenarios/S1.md"
+assert_ok "clean --branch --archive: exit 0" df clean "$K" --branch --archive
+assert_fail "clean --archive: worktree gone" test -e "$kw"
+assert_fail "clean --archive: run state gone" test -e "$SC/$K"
+assert_fail "clean --archive: local branch gone" git -C "$C" show-ref --verify --quiet "refs/heads/$kb"
+for f in report.md spec.md panel/check-r1.md scenarios/S1.md; do assert_ok "clean --archive keeps $f" test -f "$SC/reports/$K/$f"; done
+assert_fail "clean --archive: no run.conf in the archive" test -e "$SC/reports/$K/run.conf"
+case "$(df list)" in *reports*|*"$K"*) bad "list skips archived runs";; *) ok "list skips archived runs";; esac
 # bad options
 K=$(shipped)
-for fl in "--bogus" "--branch --branch" "--force --force" "--branch --bogus"; do
+for fl in "--bogus" "--branch --branch" "--force --force" "--archive --archive" "--branch --bogus"; do
   e=$(df clean "$K" $fl 2>&1); rc=$?
   assert_eq "1" "$rc" "clean $fl: exit 1"; assert_contains "usage" "$e" "clean $fl: usage"; intact "clean $fl" "$K"
 done
@@ -339,5 +368,96 @@ echo z > "$zw/z.txt"; git -C "$zw" add z.txt; git -C "$zw" commit -qm z
 df conf-set "$ZC" stage ship; df conf-set "$ZC" ship_confirmed yes; df conf-set "$ZC" ship_base main
 refuse "an unpushed secret below the run's base" "$Z" t "$T/body.md"
 git -C "$C" checkout -q main
+
+# v0.3: merge after green checks, never --admin; local merge; post-merge checkout; revert PR
+for kv in ship_mode=merge ship_mode=pr ship_mode=local ship_mode=branch stage=build stage=check stage=merge stage=postmerge merged=yes merged=local; do
+  assert_ok "conf-set accepts $kv" df conf-set "$T/m.conf" "${kv%%=*}" "${kv#*=}"
+done
+assert_fail "conf-set refuses ship_mode push" df conf-set "$T/m.conf" ship_mode push
+echo m > "$M/m.txt"; git -C "$M" add m.txt; git -C "$M" commit -qm "the merged PR"; git -C "$M" push -q origin main
+MS=$(git -C "$M" rev-parse HEAD)
+mrg() { local rc=0; pin "$G"; ( cd "$C" && env "$@" "$DF" merge "$G" ) >"$T/mo" 2>&1 || rc=$?; echo "$rc"; }
+G=$(shipped); GC="$SC/$G/run.conf"; : > "$GH_LOG"
+assert_ok "ship records pushed_at" test -n "$(df conf-get "$GC" pushed_at)"
+assert_eq "0" "$(mrg GH_MERGE_SHA=$MS)" "merge_squash_records_sha: exit 0"
+assert_eq "yes:$MS" "$(df conf-get "$GC" merged):$(df conf-get "$GC" merge_sha)" "merge_squash_records_sha: recorded"
+assert_contains "$(printf 'pr\nchecks\nhttps://example.test/pr/1\n--watch\n')" "$(cat "$GH_LOG")" "merge waits for the checks"
+assert_contains "$(printf 'pr\nmerge\nhttps://example.test/pr/1\n--squash\n--match-head-commit\n%s\n--delete-branch\n' "$(df conf-get "$GC" pushed_sha)")" "$(cat "$GH_LOG")" "merge prefers squash, only at the pushed head, and deletes the remote branch"
+case $(cat "$GH_LOG") in *--admin*) bad "merge never uses --admin";; *) ok "merge never uses --admin";; esac
+: > "$GH_LOG"; assert_eq "0" "$(mrg GH_MERGE_SHA=$MS)" "merge again: exit 0"
+case $(cat "$GH_LOG") in *merge*) bad "merge again does not merge twice";; *) ok "merge again does not merge twice";; esac
+G=$(shipped); GC="$SC/$G/run.conf"; : > "$GH_LOG"
+assert_eq "0" "$(mrg GH_MERGE_SHA=$MS GH_REFUSE=--squash)" "merge_falls_back_method: exit 0"
+assert_contains "$(printf -- '--merge\n')" "$(cat "$GH_LOG")" "merge_falls_back_method: --merge used"
+G=$(shipped); GC="$SC/$G/run.conf"; : > "$GH_LOG"
+assert_eq "3" "$(mrg GH_CHECKS_RC=1 GH_CHECKS_OUT='X  test  fail')" "merge_refuses_red_checks: exit 3"
+assert_eq "merge: checks failed" "$(cat "$T/mo")" "merge_refuses_red_checks: plain reason"
+case $(cat "$GH_LOG") in *"pr
+merge"*) bad "merge_refuses_red_checks: no merge call";; *) ok "merge_refuses_red_checks: no merge call";; esac
+assert_eq "" "$(df conf-get "$GC" merged)" "merge_refuses_red_checks: nothing recorded"
+t0=$(date +%s)
+assert_eq "4" "$(mrg GH_CHECKS_SLEEP=30 DF_CHECKS_WAIT=2)" "merge_pending_exit4: exit 4"
+assert_eq "merge: checks still running" "$(cat "$T/mo")" "merge_pending_exit4: plain reason"
+[ $(( $(date +%s) - t0 )) -lt 10 ] && ok "merge_pending_exit4: one call waits at most DF_CHECKS_WAIT" || bad "merge_pending_exit4: one call waits at most DF_CHECKS_WAIT"
+NC="no checks reported on the 'x' branch"; : > "$GH_LOG"
+assert_eq "4" "$(mrg GH_MERGE_SHA=$MS GH_CHECKS_RC=1 "GH_CHECKS_OUT=$NC" DF_CHECKS_WAIT=1 DF_NO_CHECKS_GRACE=100)" "merge_no_checks_grace: no checks right after the push is pending"
+case $(cat "$GH_LOG") in *"pr
+merge"*) bad "merge_no_checks_grace: no merge call";; *) ok "merge_no_checks_grace: no merge call";; esac
+sed -i.bak '/^pushed_at=/d' "$GC"; rm -f "$GC.bak"
+mrg GH_CHECKS_RC=1 "GH_CHECKS_OUT=$NC" DF_CHECKS_WAIT=0 DF_NO_CHECKS_GRACE=100 >/dev/null
+assert_ok "merge_no_checks_grace: without pushed_at the first call is recorded" test -n "$(df conf-get "$GC" checks_first_seen)"
+df conf-set "$GC" ship_mode pr
+assert_eq "1" "$(mrg GH_MERGE_SHA=$MS)" "merge refuses ship_mode pr"
+df conf-set "$GC" ship_mode branch
+assert_eq "1" "$(mrg GH_MERGE_SHA=$MS)" "merge refuses ship_mode branch"
+df conf-set "$GC" ship_mode merge
+assert_eq "3" "$(mrg GH_MERGE_RC=1)" "merge a PR the host will not merge: exit 3"
+assert_contains "merge: could not merge" "$(cat "$T/mo")" "and says why"
+assert_eq "0" "$(mrg GH_CHECKS_RC=1 "GH_CHECKS_OUT=$NC" DF_NO_CHECKS_GRACE=0)" "no checks reported counts as green once the grace has passed"
+assert_eq "yes:$MS" "$(df conf-get "$GC" merged):$(df conf-get "$GC" merge_sha)" "merge_sha_fallback: no mergeCommit from gh, origin's target head is recorded"
+
+# post-merge: detach the run worktree at the merge commit fetched from origin
+pm=$(df postmerge "$G"); gw=$(df conf-get "$GC" worktree)
+assert_eq "$gw" "$pm" "postmerge prints the worktree"
+assert_eq "$MS" "$(git -C "$gw" rev-parse HEAD)" "postmerge_detaches_at_merge_sha"
+assert_fail "postmerge: detached" git -C "$gw" symbolic-ref -q HEAD
+
+# revert PR: a branch from origin/main with the merge reverted; main on origin never moves
+: > "$GH_LOG"; u=$(GH_URL=https://example.test/pr/9 df revert-pr "$G" 2>/dev/null)
+assert_eq "https://example.test/pr/9" "$u" "revert-pr prints the URL"
+assert_eq "$MS" "$(git -C "$ORIGIN" rev-parse refs/heads/main)" "revert_pr_never_pushes_target"
+assert_eq "$MS" "$(git -C "$ORIGIN" rev-parse "refs/heads/df-revert/$G^")" "revert branch starts at the merge"
+assert_fail "the revert removes the merged change" git -C "$ORIGIN" cat-file -e "refs/heads/df-revert/$G:m.txt"
+assert_contains "$(printf 'pr\ncreate\n--base\nmain\n--head\ndf-revert/%s\n' "$G")" "$(cat "$GH_LOG")" "revert PR targets main from the revert branch"
+git -C "$M" checkout -q -b side; echo s > "$M/s.txt"; git -C "$M" add s.txt; git -C "$M" commit -qm side
+git -C "$M" checkout -q main; git -C "$M" merge -q --no-ff -m "merge side" side; git -C "$M" push -q origin main; MS2=$(git -C "$M" rev-parse HEAD)
+G2=$(shipped); df conf-set "$SC/$G2/run.conf" merged yes; df conf-set "$SC/$G2/run.conf" merge_sha "$MS2"
+assert_ok "revert-pr reverts a merge commit" df revert-pr "$G2"
+assert_fail "the merge commit's change is reverted" git -C "$ORIGIN" cat-file -e "refs/heads/df-revert/$G2:s.txt"
+assert_eq "$MS2" "$(git -C "$ORIGIN" rev-parse refs/heads/main)" "main on origin still unmoved"
+
+# local merge: fast-forward only, into a clean main clone on the base branch
+L=$(mkrepo); git -C "$L" branch -M main; SL="$(dirname "$L")/.df-$(basename "$L")"
+lrun() { local id wt; id=$(cd "$L" && "$DF" start "$T/in.txt"); wt=$(cd "$L" && "$DF" conf-get "$SL/$id/run.conf" worktree)
+  echo "$id$1" > "$wt/l.txt"; git -C "$wt" add l.txt; git -C "$wt" commit -qm l; echo "$id"; }
+lm() { local rc=0; ( cd "$L" && "$DF" profile-pin "$1" >/dev/null && "$DF" conf-set "$SL/$1/run.conf" check_pass_sha "$(git -C "$("$DF" conf-get "$SL/$1/run.conf" worktree)" rev-parse HEAD)" && "$DF" local-merge "$1" ) >"$T/lo" 2>&1 || rc=$?; echo "$rc"; }
+LA=$(lrun a); LB=$(lrun b); h=$(git -C "$L" rev-parse main)
+echo x > "$L/u.txt"
+assert_eq "2:your folder has unsaved changes" "$(lm "$LA"):$(cat "$T/lo")" "local_merge_refuses_dirty"
+assert_eq "$h" "$(git -C "$L" rev-parse main)" "local_merge_refuses_dirty: main untouched"
+rm "$L/u.txt"; git -C "$L" checkout -q -b other
+assert_eq "2:your folder is on other, not main" "$(lm "$LA"):$(cat "$T/lo")" "local_merge_refuses_other_branch"
+git -C "$L" checkout -q main
+for sm in pr branch; do "$DF" conf-set "$SL/$LA/run.conf" ship_mode $sm
+  assert_eq "2:ship mode is $sm, so it stays on its branch" "$(lm "$LA"):$(cat "$T/lo")" "local_merge_refuses_ship_mode_$sm"; done
+assert_eq "$h" "$(git -C "$L" rev-parse main)" "local_merge_refuses_ship_mode: main untouched"
+"$DF" conf-set "$SL/$LA/run.conf" ship_mode local
+assert_eq "0" "$(lm "$LA")" "local_merge_ff: exit 0"
+la=$(git -C "$L" rev-parse "refs/heads/$(cat "$SL/$LA/run.conf" | sed -n 's/^branch=//p')")
+assert_eq "$la:local:$la" "$(git -C "$L" rev-parse main):$(sed -n 's/^merged=//p' "$SL/$LA/run.conf"):$(sed -n 's/^merge_sha=//p' "$SL/$LA/run.conf")" "local_merge_ff: main moved, merged=local recorded"
+assert_eq "2:cannot fast-forward" "$(lm "$LB"):$(cat "$T/lo")" "local merge of a diverged branch: cannot fast-forward"
+assert_eq "$L" "$(cd "$L" && "$DF" postmerge "$LA")" "postmerge after a local merge is the main folder"
+LC=$(lrun c); "$DF" conf-set "$SL/$LC/run.conf" base_ref origin/main
+assert_eq "0" "$(lm "$LC")" "local_merge_uses_ship_target: base_ref origin/main merges into main"
 
 finish
